@@ -15,9 +15,6 @@ pyasn1==0.5.0
 PyAutoGUI==0.9.54
 PyGetWindow==0.0.9
 PyMsgBox==1.0.9
-pyobjc-core==9.2
-pyobjc-framework-Cocoa==9.2
-pyobjc-framework-Quartz==9.2
 pyperclip==1.8.2
 PyRect==0.2.0
 Pyrogram==2.0.106
