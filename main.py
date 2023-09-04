@@ -3,27 +3,52 @@ import random
 from datetime import datetime, timedelta
 from telebot import types
 import time
+import os
+import psycopg2
 
-last_used = {}  # player_id -> datetime
+# Get the database URL from environment variables
+database_url = os.environ.get('DATABASE_URL')
+
+# Establish a database connection
+conn = psycopg2.connect(
+    database="d10jl00d7m0v3k",
+    user="swwnmrmvibkaln",
+    host="ec2-54-73-22-169.eu-west-1.compute.amazonaws.com",
+    password="9f127f6402cc566666445efbca44e4bbc8c4f48cf0ab3a1a8d27261bd874fac3",
+    sslmode='require'
+)
+
+# Create a cursor for executing SQL queries
+cursor = conn.cursor()
+
+
+# Function to load player data from the database
+def load_data():
+    cursor.execute("SELECT player_id, pisunchik_size FROM pisunchik_data")
+    data = cursor.fetchall()
+    return {str(player_id): pisunchik_size for player_id, pisunchik_size in data}
+
+
+# Function to load player data from the database
+def load_lastUsed_data():
+    cursor.execute("SELECT player_id, last_used_time FROM last_used_data")
+    data = cursor.fetchall()
+    return {str(player_id): last_used_time for player_id, last_used_time in data}
+
+
+# Initialize pisunchik data
+pisunchik = load_data()
+
+last_used = load_lastUsed_data()
 
 bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
 bot = telebot.TeleBot(bot_token)
+print("Bot started")
 
 # Player IDs
 YURA_ID = 742272644
 MAX_ID = 741542965
 BODYA_ID = 855951767
-
-# Load the pisunchik values from file
-try:
-    with open("pisunchik.txt", "r") as f:
-        pisunchik = {line.split()[0]: int(line.split()[1]) for line in f}
-except FileNotFoundError:
-    pisunchik = {
-        str(YURA_ID): 0,
-        str(MAX_ID): 0,
-        str(BODYA_ID): 0
-    }
 
 
 @bot.message_handler(commands=['start'])
@@ -32,6 +57,7 @@ def start_game(message):
     pisunchik_value = pisunchik.get(player_id, 0)
 
     bot.reply_to(message, f"Your pisunchik: {pisunchik_value} cm")
+
 
 @bot.message_handler(commands=['leaderboard'])
 def show_leaderboard(message):
@@ -43,6 +69,7 @@ def show_leaderboard(message):
         leaderboard += f"{i + 1}. {name}: {value} см\n"
 
     bot.reply_to(message, leaderboard)
+
 
 @bot.message_handler(commands=['pisunchik'])
 def update_pisunchik(message):
@@ -95,21 +122,28 @@ def otsos(message):
         max_button = types.InlineKeyboardButton(text="Макс", callback_data="otsos_max")
         bogdan_button = types.InlineKeyboardButton(text="Богдан", callback_data="otsos_bogdan")
         markup.add(max_button, bogdan_button)
-        bot.send_message(message.chat.id, f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?", reply_markup=markup, parse_mode='html')
+        bot.send_message(message.chat.id,
+                         f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?",
+                         reply_markup=markup, parse_mode='html')
 
     elif player_id == "741542965":
         markup = types.InlineKeyboardMarkup()
         yura_button = types.InlineKeyboardButton(text="Юра", callback_data="otsos_yura")
         bogdan_button = types.InlineKeyboardButton(text="Богдан", callback_data="otsos_bogdan")
         markup.add(yura_button, bogdan_button)
-        bot.send_message(message.chat.id, f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?", reply_markup=markup, parse_mode='html')
+        bot.send_message(message.chat.id,
+                         f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?",
+                         reply_markup=markup, parse_mode='html')
 
     elif player_id == "855951767":
         markup = types.InlineKeyboardMarkup()
         max_button = types.InlineKeyboardButton(text="Макс", callback_data="otsos_max")
         yura_button = types.InlineKeyboardButton(text="Юра", callback_data="otsos_yura")
         markup.add(max_button, yura_button)
-        bot.send_message(message.chat.id, f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?", reply_markup=markup, parse_mode='html')
+        bot.send_message(message.chat.id,
+                         f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?",
+                         reply_markup=markup, parse_mode='html')
+
 
 @bot.callback_query_handler(func=lambda call: True)
 def otsos_callback(call):
@@ -148,16 +182,21 @@ def otsos_callback(call):
         else:
             bot.send_message(call.message.chat.id, "Вы отсосали Богдану. У него член: Не встал :(")
 
+
+# Function to save player data to the database
 def save_data():
-    with open("pisunchik.txt", "w") as f:
-        for player_id, value in pisunchik.items():
-            f.write(f"{player_id} {value}\n")
-    # Save last_used times
-    with open("last_used.txt", "w") as f:
-        for player_id, time in last_used.items():
-            time_str = time.isoformat()
-            f.write(f"{player_id} {time_str}\n")
-# Load last_used times on startup
+    cursor.execute("DELETE FROM pisunchik_data")
+    for player_id, pisunchik_size in pisunchik.items():
+        cursor.execute("INSERT INTO pisunchik_data (player_id, pisunchik_size) VALUES (%s, %s)",
+                       (player_id, pisunchik_size))
+    cursor.execute("DELETE FROM last_used_data")
+    for player_id, last_used_time in last_used.items():
+        cursor.execute("INSERT INTO last_used_data (player_id, last_used_time) VALUES (%s, %s)",
+                       (player_id, last_used_time))
+    conn.commit()
+
+
+# Load last_used times on startup (if needed)
 try:
     with open("last_used.txt") as f:
         for line in f:
