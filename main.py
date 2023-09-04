@@ -5,7 +5,6 @@ from telebot import types
 import time
 import os
 import psycopg2
-from uuid import uuid4
 
 # Get the database URL from environment variables
 database_url = os.environ.get('DATABASE_URL')
@@ -95,7 +94,7 @@ def update_pisunchik(message):
         pisunchik[player_id]['pisunchik_size'] += number
         number = random.randint(5, 15)
         pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + number
-        bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]} см\nИзменения: {number} см\nТакже вы получили: {number} BTC")
+        bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\nИзменения: {number} см\nТакже вы получили: {number} BTC")
 
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
