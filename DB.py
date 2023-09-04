@@ -19,11 +19,10 @@ conn=psycopg2.connect(
 cursor = conn.cursor()
 
 # Read data from "last_used.txt" and insert into the database
-with open("last_used.txt", "r") as f:
+with open("coins.txt", "r") as f:
     for line in f:
-        player_id, time_str = line.strip().split()
-        last_used_time = datetime.fromisoformat(time_str)
-        cursor.execute("INSERT INTO last_used_data (player_id, last_used_time) VALUES (%s, %s)", (player_id, last_used_time))
+        user_id, coins = line.strip().split()
+        cursor.execute("INSERT INTO user_data (user_id, coins) VALUES (%s, %s)", (user_id, coins))
 
 # Commit the changes and close the connection
 conn.commit()

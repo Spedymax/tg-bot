@@ -5,6 +5,7 @@ from telebot import types
 import time
 import os
 import psycopg2
+from uuid import uuid4
 
 # Get the database URL from environment variables
 database_url = os.environ.get('DATABASE_URL')
@@ -24,9 +25,9 @@ cursor = conn.cursor()
 
 # Function to load player data from the database
 def load_data():
-    cursor.execute("SELECT player_id, pisunchik_size FROM pisunchik_data")
+    cursor.execute("SELECT player_id, pisunchik_size, coins FROM pisunchik_data")
     data = cursor.fetchall()
-    return {str(player_id): pisunchik_size for player_id, pisunchik_size in data}
+    return {str(player_id): {'pisunchik_size': pisunchik_size, 'coins': coins} for player_id, pisunchik_size, coins in data}
 
 
 # Function to load player data from the database
@@ -38,7 +39,6 @@ def load_lastUsed_data():
 
 # Initialize pisunchik data
 pisunchik = load_data()
-
 last_used = load_lastUsed_data()
 
 bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
@@ -54,21 +54,26 @@ BODYA_ID = 855951767
 @bot.message_handler(commands=['start'])
 def start_game(message):
     player_id = str(message.from_user.id)
-    pisunchik_value = pisunchik.get(player_id, 0)
+    pisunchik_size = pisunchik[player_id]['pisunchik_size']
+    coins = pisunchik[player_id]['coins']
 
-    bot.reply_to(message, f"Your pisunchik: {pisunchik_value} cm")
+    bot.reply_to(message, f"Your pisunchik: {pisunchik_size} cm\nYou have {coins} coins!")
 
 
 @bot.message_handler(commands=['leaderboard'])
 def show_leaderboard(message):
-    sorted_pisunchik = sorted(pisunchik.items(), key=lambda x: x[1], reverse=True)
+    # Sort players by pisunchik_size in descending order
+    sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
 
     leaderboard = "🏆 Большой член, большие яйца 🏆\n\n"
-    for i, (player_id, value) in enumerate(sorted_pisunchik[:5]):
+    for i, (player_id, data) in enumerate(sorted_players[:5]):
         name = bot.get_chat(int(player_id)).first_name
-        leaderboard += f"{i + 1}. {name}: {value} см\n"
+        pisunchik_size = data['pisunchik_size']
+        coins = data['coins']
+        leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
 
     bot.reply_to(message, leaderboard)
+
 
 
 @bot.message_handler(commands=['pisunchik'])
@@ -87,8 +92,11 @@ def update_pisunchik(message):
     if player_id in pisunchik:
         last_used[player_id] = datetime.now()
         number = random.randint(-10, 10)
-        pisunchik[player_id] += number
-        bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]} см\nИзменения: {number} см")
+        pisunchik[player_id]['pisunchik_size'] += number
+        number = random.randint(5, 15)
+        pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + number
+        bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]} см\nИзменения: {number} см\nТакже вы получили: {number} BTC")
+
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
 
@@ -103,12 +111,13 @@ def update_pisunchik(message):
         number = random.randint(1, 6)
         bot.reply_to(message, f"Выпало: {number}")
         if (number <= 3):
-            pisunchik[player_id] -= 5
+            pisunchik[player_id]['pisunchik_size'] -= 5
         if (number > 3):
-            pisunchik[player_id] += 5
-        bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]} см\n")
+            pisunchik[player_id]['pisunchik_size'] += 5
+        bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\n")
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
+    pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 10
 
     save_data()
 
@@ -186,9 +195,11 @@ def otsos_callback(call):
 # Function to save player data to the database
 def save_data():
     cursor.execute("DELETE FROM pisunchik_data")
-    for player_id, pisunchik_size in pisunchik.items():
-        cursor.execute("INSERT INTO pisunchik_data (player_id, pisunchik_size) VALUES (%s, %s)",
-                       (player_id, pisunchik_size))
+    for player_id, data in pisunchik.items():
+        pisunchik_size = data['pisunchik_size']
+        coins = data['coins']
+        cursor.execute("INSERT INTO pisunchik_data (player_id, pisunchik_size, coins) VALUES (%s, %s, %s)",
+                       (player_id, pisunchik_size, coins))
     cursor.execute("DELETE FROM last_used_data")
     for player_id, last_used_time in last_used.items():
         cursor.execute("INSERT INTO last_used_data (player_id, last_used_time) VALUES (%s, %s)",
