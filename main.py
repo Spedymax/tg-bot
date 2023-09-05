@@ -7,6 +7,14 @@ import os
 import psycopg2
 import requests
 from bs4 import BeautifulSoup
+import subprocess
+
+# Specify the path to the love.py script
+love_script_path = "love.py"
+
+# Use subprocess to start the love.py script
+love_process = subprocess.Popen(["python3", love_script_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
 
 # Get the database URL from environment variables
 database_url = os.environ.get('DATABASE_URL')

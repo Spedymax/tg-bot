@@ -2,6 +2,7 @@ import telebot
 from telebot import types
 import datetime
 import random
+from PIL import Image, ImageDraw, ImageFont
 
 bot = telebot.TeleBot('6608486511:AAF_Ro0BOUXhfwBME5DM5NU_n2N7ut_PZ_U')
 
@@ -14,48 +15,73 @@ trivia_questions = [
     },
     {
         "question": "Где родился Максим?",
-        "options": ["Житомир", "Ровно", "Киев", "Львов"],
+        "options": ["Житомир", "Ровно", "Киев", "Львов", "Одесса"],
         "answer": "Киев"
     },
     {
         "question": "Где Максим окончил первые 6 классов?",
-        "options": ["Житомир", "Ровно", "Киев", "Львов"],
-        "answer": "Киев"
+        "options": ["лицей №142", "лицей №144", "гимназия Академия", "Лесная сказка", "Школа 5"],
+        "answer": "Лесная сказка"
     },
     {
         "question": "Где Максим окончил 7-11 класы?",
-        "options": ["Житомир", "Ровно", "Киев", "Львов"],
-        "answer": "Киев"
+        "options": ["лицей Тараса Шевч.", "гим-ия Академия", "лицей №142", "лицей 153", "гимназия №5"],
+        "answer": "лицей №142"
     },
     {
         "question": "Где максим учится сейчас?",
-        "options": ["Житомир", "Ровно", "Киев", "Львов"],
-        "answer": "Киев"
+        "options": ["Бурса", "уник им.Тар.Шевч.", "КПИ", "Не учится(работает)"],
+        "answer": "КПИ"
     },
     {
         "question": "Название компании где работает Максим?",
-        "options": ["Житомир", "Ровно", "Киев", "Львов"],
-        "answer": "Киев"
+        "options": ["Tech Industries", "McDonalds", "Google", "Anthill Agency", "Agnitio Agency"],
+        "answer": "Anthill Agency"
     },
     {
         "question": "Как Макс называет своего кота?",
-        "options": ["Житомир", "Ровно", "Киев", "Львов"],
+        "options": ["Кекс", "Скотик", "Кот", "Котик"],
+        "answer": "Скотик"
+    },
+    {
+        "question": "Как Вика подписана у Макса в тг?",
+        "options": ["Котик", "Сладкая попка", "Вика", "Конкретная Вика"],
         "answer": "Киев"
     },
     {
-        "question": "Как Вика подписана у Макса?",
-        "options": ["Житомир", "Ровно", "Киев", "Львов"],
-        "answer": "Киев"
+        "question": "Любимая еда Макса?",
+        "options": ["Суши", "Мороженое", "Рисовые чипсы", "Пицца", "Шашлык", "Конфеты"],
+        "answer": "Пицца"
     },
     {
-        "question": "С",
-        "options": ["Житомир", "Ровно", "Киев", "Львов"],
-        "answer": "Киев"
+        "question": "Как зовут сестру Макса?",
+        "options": ["Милена", "Милина", "Милана", "Малина"],
+        "answer": "Милана"
     },
     {
-        "question": "Где родился Максим?",
-        "options": ["Житомир", "Ровно", "Киев", "Львов"],
-        "answer": "Киев"
+        "question": "Какой у Макса любимый фильм?",
+        "options": ["Геошторм", "Начало", "Волк с Уолл стрит", "Интерстеллар"],
+        "answer": "Интерстеллар"
+    },
+    {
+        "question": "Какой у Макса настоящий рост?(185)",
+        "options": ["185", "170", "173", "215"],
+        "answer": "170"
+    },
+    {
+        "question": "Когда мы начали встречаться?",
+        "options": ["2 июня", "3 июня", "в 1945 году", "Летом 2021"],
+        "answer": "2 июня"
+    },
+    {
+        "question": "Когда Макс думает мы начали встречаться?(Мяу😋)",
+        "options": ["9 января", "Зимой", "Когда признался", "2 июня"],
+        "answer": "Зимой"
+    },
+    {
+        "question": "За что Макс любит Вику больше всего?",
+        "options": ["За глаза", "За то что ты есть у него❤️", "За ум", "За ножки и попку"],
+        "answer": "За то что ты есть у него❤️"
     },
 
 ]
@@ -73,26 +99,29 @@ with open('love.txt', 'r', encoding='utf-8') as file:
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.send_message(message.chat.id,
-                     "Здравствуйте, Вика!\nМеня создал Максим чтобы рассказать вам как он вас любит!\nКаждый день вам будут открываться новые команды которые вы сможете использовать!\nНапишите /commands чтобы узнать какие команды уже доступны!")
+                     "Здравствуйте, Вика!\nМеня создал Максим чтобы рассказать вам как он вас любит!\nКаждый день вам будут открываться новые команды которые вы сможете использовать!\nЧерез 4 дня все команды будут открыты для вас, и вы даже сможете сделать небольшой подарок Максу!\nНапишите /commands чтобы узнать какие команды уже доступны!")
 
 
 @bot.message_handler(commands=['commands'])
 def get_commands(message):
     current_date = datetime.date.today()
+    startuem = False
     commands = ""
-    if current_date >= datetime.date(2023, 9, 4):
-        commands += '/count- узнать сколько дней вы вместе\n'
-    if current_date >= datetime.date(2023, 9, 5):
-        commands += '/100reasons- узнать 100 причин\n'
-    # if current_date >= datetime.date(2023, 9, 7):
-    #
-    # if current_date >= datetime.date(2023, 9, 8):
-    #
-    # if current_date >= datetime.date(2023, 9, 9):
-    #
+    if current_date >= datetime.date(2023, 9, 6):
+        commands += '/count - узнать сколько дней вы вместе\n'
+    if current_date >= datetime.date(2023, 9, 7):
+        commands += '/100reasons - узнать 100 причин\n'
+    if current_date >= datetime.date(2023, 9, 8):
+        commands += '/trivia - викторина\n'
+    if current_date >= datetime.date(2023, 9, 9):
+        commands += '/create - создайте открытку\n'
+        startuem = True
     # if current_date >= datetime.date(2023, 9, 10):
 
     bot.send_message(message.chat.id, f"Вам доступны команды:\n {commands}")
+    if startuem:
+        bot.send_message(message.chat.id,
+                         "Ого! Уже завтра вы будете отмечать 100 дней вместе!\nМои поздравления!❤️\nКак насчёт создать пригласительную открытку и отправить Максу?\nНапиши /create чтобы узнать как это сделать!")
 
 
 @bot.message_handler(commands=['count'])
@@ -105,10 +134,13 @@ def count(message):
                          "Поздравляю с 100 днями отношений! 🥳 Пора устроить романтический завтрак и создать пригласительную открытку.")
 
 
+# Handle the /invite command
 @bot.message_handler(commands=['invite'])
-def invite(message):
-    # Здесь вы можете добавить код для отправки пригласительной открытки на завтрак
-    bot.send_message(message.chat.id, "Пригласительная открытка на завтрак будет отправлена вам в ближайшее время!")
+def send_invitation(message):
+    # Send the invitation card to the known user
+    with open("invitation_card.png", "rb") as photo:
+        bot.send_photo(741542965, photo)
+    bot.send_message(message.chat.id, "Пригласительная открытка уже отправлена Максу!")
 
 
 @bot.message_handler(commands=['100reasons'])
@@ -166,7 +198,7 @@ def send_next_question(chat_id):
     if current_question_index >= len(trivia_questions):
         correct_answers = user_progress[chat_id]["correct_answers"]
         bot.send_message(chat_id,
-                         f"Викторина окончена! Ты правильно ответила на {correct_answers} из {len(trivia_questions)} вопросов верно. Молодец!❤️")
+                         f"Викторина окончена! Ты правильно ответила на {correct_answers} из {len(trivia_questions)} вопросов верно. Умничка!❤️")
         return
 
     question_data = trivia_questions[current_question_index]
@@ -202,6 +234,157 @@ def handle_trivia_answer(call):
 
     # Send the next question or end the quiz
     send_next_question(chat_id)
+
+
+card_text = 'TEST'
+text_color = 'black'
+when = 'breakfast'
+
+
+@bot.message_handler(commands=['create'])
+def create_card(message):
+    # Просим пользователя ввести текст для открытки
+    bot.send_message(message.chat.id, "Привет!\nЯ помогу тебе создать пригласительную открытку для Макса!\n")
+    bot.send_message(message.chat.id,
+                     "Структура такая:\n                       1                                   2                                      3\n'[Приглашаю тебя...][*Выбор мероприятия*][*Выбор фона*]'\n(Чем хуже открытка тем лучше, зато своими руками🥰)")
+    bot.send_message(message.chat.id, "Сначала введи текст для открытки:")
+    bot.register_next_step_handler(message, select_text_color)
+
+
+def select_text_color(msg):
+    global card_text
+
+    # Сохраняем текст открытки
+    card_text = msg.text
+    # Просим пользователя ввести текст для открытки
+    bot.send_message(msg.chat.id, "Теперь выбери цвет текста(на англ):")
+    bot.send_message(msg.chat.id, "Если в конце текст в открытке все равно черный, то такого цвета нету(")
+    bot.register_next_step_handler(msg, select_invitation)
+
+
+def select_invitation(msg2):
+    # Сохраняем текст открытки
+    global text_color
+
+    # Сохраняем текст открытки
+    text_color = msg2.text
+    # Создаем клавиатуру с выбором приглашения
+    markup = types.InlineKeyboardMarkup()
+    breakfast_button = types.InlineKeyboardButton("Завтрак в 11:00", callback_data='breakfast')
+    lunch_button = types.InlineKeyboardButton("Обед в 14:00", callback_data='lunch')
+    dinner_button = types.InlineKeyboardButton("Ужин в 20:00", callback_data='dinner')
+    markup.add(breakfast_button, lunch_button, dinner_button)
+
+    # Отправляем сообщение с клавиатурой
+    bot.send_message(msg2.chat.id, "Выберите приглашение:", reply_markup=markup)
+
+
+def select_background(call):
+    # Получаем выбранное приглашение
+    selected_invitation = call.data
+    bot.send_photo(chat_id=call.message.chat.id, photo=open('backgrounds/img1.png', 'rb'))
+    bot.send_photo(chat_id=call.message.chat.id, photo=open('backgrounds/img2.png', 'rb'))
+    bot.send_photo(chat_id=call.message.chat.id, photo=open('backgrounds/img3.png', 'rb'))
+    # Создаем клавиатуру с выбором фона
+    markup = types.InlineKeyboardMarkup()
+    background1_button = types.InlineKeyboardButton("Фон 1", callback_data='backgrounds/img1.png')
+    background2_button = types.InlineKeyboardButton("Фон 2", callback_data='backgrounds/img2.png')
+    background3_button = types.InlineKeyboardButton("Фон 3", callback_data='backgrounds/img3.png')
+    markup.add(background1_button, background2_button, background3_button)
+
+    # Сохраняем выбранное приглашение в контексте пользователя
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=call.message.text)
+    bot.send_message(call.message.chat.id, "Выберите фон для открытки:", reply_markup=markup)
+
+
+# Обработчики нажатия кнопок
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    if call.data in ['breakfast', 'lunch', 'dinner']:
+        global when
+        # Сохраняем текст открытки
+        when = call.data
+        select_background(call)
+    elif call.data in ['backgrounds/img1.png', 'backgrounds/img2.png', 'backgrounds/img3.png']:
+        create_invitation_card(call.message, call.data)
+
+
+def create_invitation_card(message, background):
+    background_img = Image.open(background)
+
+    # Измените размер фона, чтобы он соответствовал размеру открытки
+    background_img2 = background_img.resize((1280, 720))
+
+    # Load the background image
+    card = Image.new('RGB', (1280, 720), color='white')
+
+    # Create a drawing context
+    draw = ImageDraw.Draw(card)
+
+    # Define the font and size for the text
+    font = ImageFont.truetype("arial.ttf", 64)
+
+    # Calculate the text size for the user text
+    text_width, text_height = draw.textsize(card_text, font)
+    card_width, card_height = card.size
+
+    card.paste(background_img2, (0, 0))
+
+    # Calculate the position for the user text to be centered
+    text_x = (card_width - text_width) // 2
+    text_y = 20
+    try:
+        # Draw the user text in the center
+        draw.text((text_x, text_y), card_text, fill=text_color, font=font)
+    except:
+        # Draw the user text in the center
+        draw.text((text_x, text_y), card_text, fill='black', font=font)
+
+    # Define the font and size for the date and event text
+    date_font = ImageFont.truetype("arial.ttf", 52)
+    event_font = ImageFont.truetype("arial.ttf", 64)
+
+    # Define the date text
+    date_text = "10/09/2023"
+
+    # Calculate the position for the date text at the bottom left corner
+    date_x = card_width - 300
+    date_y = card_height - 100  # Adjust the position as needed
+
+    # Calculate the position for the event text in the center
+    event_x = (card_width - text_width) // 2
+    event_y = (card_height - text_height) // 2  # Adjust the position as needed
+
+    # Define the event text based on the user's choice
+    if when == "breakfast":
+        event_text = "Завтрак в 11:00"
+    elif when == "lunch":
+        event_text = "Обед в 14:00"
+    elif when == "dinner":
+        event_text = "Ужин в 20:00"
+    else:
+        event_text = "Event"
+
+    try:
+        # Draw the date text at the bottom left corner
+        draw.text((date_x, date_y), date_text, fill=text_color, font=date_font)
+        # Draw the event text in the center
+        draw.text((event_x, event_y), event_text, fill=text_color, font=event_font)
+    except:
+        # Draw the date text at the bottom left corner
+        draw.text((date_x, date_y), date_text, fill='black', font=date_font)
+        # Draw the event text in the center
+        draw.text((event_x, event_y), event_text, fill='black', font=event_font)
+
+    # Save the resulting image
+    card.save("invitation_card.png")
+
+    # Send the image to the user
+    bot.send_photo(message.chat.id, open("invitation_card.png", "rb"))
+
+    # Завершите интеракцию с пользователем
+    bot.send_message(message.chat.id,
+                     "Открытка создана!\n/create - чтобы создать снова\nНапишите /invite чтобы отправить её Максу!")
 
 
 bot.polling()
