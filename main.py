@@ -26,36 +26,36 @@ cursor = conn.cursor()
 
 # Function to load player data from the database
 def load_data():
-    cursor.execute("SELECT player_id, pisunchik_size, coins, items FROM pisunchik_data")
+    cursor.execute(
+        "SELECT player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number FROM pisunchik_data")
     data = cursor.fetchall()
     player_data = {}
 
-    for player_id, pisunchik_size, coins, items_list in data:
+    for player_id, pisunchik_size, coins, items_list, last_used, last_prezervativ, ballzzz_number in data:
         # Check if 'items_list' is None or an empty list, and provide a default value
         if items_list is None or not items_list:
             items = []  # Default to an empty list
         else:
             items = items_list  # No need for conversion, it's already a list
 
+        # Ensure 'last_used' is offset-aware with a default value
+        if last_used is None:
+            last_used = datetime.min.replace(tzinfo=timezone.utc)
+
         player_data[str(player_id)] = {
             'pisunchik_size': pisunchik_size,
             'coins': coins,
             'items': items,
+            'last_used': last_used,
+            'last_prezervativ': last_prezervativ,
+            'ballzzz_number': ballzzz_number
         }
 
     return player_data
 
 
-# Function to load player data from the database
-def load_lastUsed_data():
-    cursor.execute("SELECT player_id, last_used FROM last_used_data")
-    data = cursor.fetchall()
-    return {str(player_id): last_used for player_id, last_used in data}
-
-
 # Initialize pisunchik data
 pisunchik = load_data()
-last_used = load_lastUsed_data()
 
 bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
 bot = telebot.TeleBot(bot_token)
@@ -77,7 +77,7 @@ shop_prices = {
     'smazka': 140,
 
     'zelie_pisunchika': 45,
-    'Masturbator(Юра)': 130,
+    'masturbator': 50,
 
     'pisunchik_potion_small': 30,
     'pisunchik_potion_medium': 40,
@@ -92,14 +92,14 @@ item_desc = {
     'kubik_seksa': '{Пассивка} "При использовании /roll, стоимость броска на 50 процентов дешевле',
     'prezervativ': '{Пассивка} Если при использовании /pisunchik выпало отрицалеьное число то писюнчик не уменьшается. КД - 4 дня',
 
-    'krystalnie_ballzzz': '{Активное} Показывает сколько выпадет при использовании /pisunchik в следующий раз',
-    'smazka': '{Аксивное} Можно использовать /pisunchik еще раз, раз в неделю',
+    'krystalnie_ballzzz': '{Активное} Показывает сколько выпадет при использовании /pisunchik в следующий раз\nИспользование: /krystalnie_ballzzz',
+    'smazka': '{Аксивное} Можно использовать /pisunchik еще раз, раз в неделю\nИспользование: /smazka',
 
-    'zelie_pisunchika': '{Съедобное} Моментально увеличивает писюнчик на 20 или -20 см. Шанс 50 на 50',
-    'Masturbator(Юра)': '{Съедобное} Позволяет с честью пожертвовать размером своего писюнчика ради получения монет. Чем большим размером пожертвовано, тем больше монет выиграно. 1 см = 1 монета + 1 монета за каждые 5 см.',
-    'pisunchik_potion_small': '{Съедобное} Моментально увеличивает писюнчик на 3 см',
-    'pisunchik_potion_medium': '{Съедобное} Моментально увеличивает писюнчик на 5 см',
-    'pisunchik_potion_large': '{Съедобное} Моментально увеличивает писюнчик на 10 см'
+    'zelie_pisunchika': '{Съедобное} Моментально увеличивает писюнчик на 20 или -20 см. Шанс 50 на 50\nИспользование: /zelie_pisunchika',
+    'masturbator': '{Съедобное} Позволяет с честью пожертвовать размером своего писюнчика ради получения монет. Чем большим размером пожертвовано, тем больше монет выиграно. 1 см = 1 монета + 1 монета за каждые 5 см.\nИспользование: /masturbator',
+    'pisunchik_potion_small': '{Съедобное} Моментально увеличивает писюнчик на 3 см\nИспользование: /pisunchik_potion_small',
+    'pisunchik_potion_medium': '{Съедобное} Моментально увеличивает писюнчик на 5 см\nИспользование: /pisunchik_potion_medium',
+    'pisunchik_potion_large': '{Съедобное} Моментально увеличивает писюнчик на 10 см\nИспользование: /pisunchik_potion_large'
 
 }
 
@@ -135,7 +135,7 @@ def reset_pisunchik_cooldown(message):
         reset_timestamp = datetime(2000, 1, 1, tzinfo=timezone.utc)
 
         # Update the last_used column in the last_used_data table for the specific player
-        cursor.execute("UPDATE last_used_data SET last_used = %s WHERE player_id = %s", (reset_timestamp, player_id))
+        cursor.execute("UPDATE pisunchik_data SET last_used = %s WHERE player_id = %s", (reset_timestamp, player_id))
         conn.commit()
         conn.close()
 
@@ -144,41 +144,86 @@ def reset_pisunchik_cooldown(message):
     else:
         bot.reply_to(message, "У вас нет предмета 'smazka'(")
 
+
+@bot.message_handler(commands=['krystalnie_ballzzz'])
+def use_krystalnie_ballzzz(message):
+    player_id = str(message.from_user.id)
+
+    if player_id not in pisunchik:
+        bot.reply_to(message, "Вы не зарегистрированы как игрок.")
+        return
+
+    if 'krystalnie_ballzzz' not in pisunchik[player_id]['items']:
+        bot.reply_to(message, "У вас нету предмета 'krystalnie_ballzzz'.")
+        return
+
+    if pisunchik[player_id]['last_used'].replace(tzinfo=None) >= datetime.now() and pisunchik[player_id]['last_used'] is not None:
+        # Generate a random number to determine the next effect (for demonstration purposes)
+        next_effect = random.randint(-10, 10)
+
+        effect_message = f"Следующее изменение писюнчика будет: {next_effect} см."
+        pisunchik[player_id]['ballzzz_number'] = next_effect
+
+    elif pisunchik[player_id]['ballzzz_number'] is None:
+        next_effect = random.randint(-10, 10)
+
+        effect_message = f"Следующее изменение писюнчика будет: {next_effect} см."
+        pisunchik[player_id]['ballzzz_number'] = next_effect
+    else:
+        next_effect = pisunchik[player_id]['ballzzz_number']
+        effect_message = f"Следующее изменение писюнчика будет: {next_effect} см."
+
+    bot.reply_to(message, effect_message)
+
+
 @bot.message_handler(commands=['pisunchik'])
 def update_pisunchik(message):
     player_id = str(message.from_user.id)
 
-    if player_id not in last_used:
-        last_used[player_id] = datetime.min
+    if player_id not in pisunchik:
+        pisunchik[player_id]['last_used'] = datetime.min
 
-    if datetime.now() - last_used[player_id] < timedelta(hours=24):
-        time_diff = timedelta(hours=24) - (datetime.now() - last_used[player_id])
+    if datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None) < timedelta(hours=24):
+        time_diff = timedelta(hours=24) - (datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None))
         time_left = time_diff - timedelta(microseconds=time_diff.microseconds)
         bot.reply_to(message, f"Вы можете использовать эту команду только раз в день \nОсталось времени: {time_left}")
         return
 
     if player_id in pisunchik:
-        last_used[player_id] = datetime.now()
+        pisunchik[player_id]['last_used'] = datetime.now()
         number = random.randint(-10, 10)
         number2 = random.randint(5, 15)
+        kolzo_random = random.random()
+        bdsm_random = random.random()
+        ne_umenshilsya = False
+        cooldown = False
         # Check if the player has 'kolczo_na_chlen' in their inventory and apply its effect
-        if 'kolczo_na_chlen' in pisunchik[player_id]['inventory'] and random.random() <= 0.2:
+        if 'kolczo_na_chlen' in pisunchik[player_id]['items'] and kolzo_random <= 0.2:
+            print(number2)
             number2 *= 2  # Double the amount of BTC
-
-        # Check if the player has 'bdsm_kostumchik' in their inventory and apply its effect
-        if 'bdsm_kostumchik' in pisunchik[player_id]['inventory'] and random.random() <= 0.1:
-            number += 5  # Add +5 cm to the pisunchik size
+            print(number2)
 
         # Check if the player has 'prezervativ' in their inventory and apply its effect
-        if 'prezervativ' in pisunchik[player_id]['inventory'] and number < 0:
-            # Check if enough time has passed since the last 'prezervativ' usage
-            if datetime.now() - last_used[player_id]['last_prezervativ'] >= timedelta(days=4):
+        if 'prezervativ' in pisunchik[player_id]['items']:
+            current_time = datetime.now(
+                timezone.utc)  # Use datetime.now(timezone.utc) to create an offset-aware datetime
+            if current_time - pisunchik[player_id]['last_prezervativ'] >= timedelta(days=4):
                 number = 0
+                ne_umenshilsya = True
                 pisunchik[player_id]['pisunchik_size'] += number
-                pisunchik[player_id]['last_prezervativ'] = datetime.now()
+                pisunchik[player_id]['last_prezervativ'] = current_time  # Update to use the current time
             else:
-                bot.reply_to(message, "'prezervativ' еще на кулдауне.")
-                return
+                cooldown = True
+
+        # Check if the player has 'bdsm_kostumchik' in their inventory and apply its effect
+        if 'bdsm_kostumchik' in pisunchik[player_id]['items'] and bdsm_random <= 0.1:
+            print(number)
+            number += 5  # Add +5 cm to the pisunchik size
+            print(number)
+
+        if 'krystalnie_ballzzz' in pisunchik[player_id]['items'] and pisunchik[player_id]['ballzzz_number'] is not None:
+            number = pisunchik[player_id]['ballzzz_number']
+            pisunchik[player_id]['ballzzz_number'] = None
 
         pisunchik[player_id]['pisunchik_size'] += number
         pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + number2
@@ -186,14 +231,16 @@ def update_pisunchik(message):
         # Construct the reply message based on the effects of the items
         reply_message = f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\nИзменения: {number} см\nТакже вы получили: {number2} BTC"
 
-        if 'kolczo_na_chlen' in pisunchik[player_id]['inventory'] and random.random() <= 0.2:
-            reply_message += "\nЭффект от 'kolczo_na_chlen': количество подученного BTC УДВОЕНО!."
+        if 'kolczo_na_chlen' in pisunchik[player_id]['items'] and kolzo_random <= 0.2:
+            reply_message += "\nЭффект от 'kolczo_na_chlen': количество подученного BTC УДВОЕНО!"
 
-        if 'bdsm_kostumchik' in pisunchik[player_id]['inventory'] and random.random() <= 0.1:
+        if 'bdsm_kostumchik' in pisunchik[player_id]['items'] and bdsm_random <= 0.1:
             reply_message += "\nЭффект от 'bdsm_kostumchik': +5 см к писюнчику получено."
 
-        if 'prezervativ' in pisunchik[player_id]['inventory'] and number < 0:
+        if ne_umenshilsya:
             reply_message += "\nЭффект от 'prezervativ': писюнчик не уменьшился."
+        if cooldown:
+            reply_message += "\nprezervativ' еще на кулдауне."
 
         bot.reply_to(message, reply_message)
 
@@ -203,18 +250,25 @@ def update_pisunchik(message):
 @bot.message_handler(commands=['roll'])
 def update_pisunchik(message):
     player_id = str(message.from_user.id)
+    if 'kubik_seksa' in pisunchik[player_id]['items']:
+        pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 5
+        bot.send_message(message.chat.id,
+                         f"Вы потратили 10 BTC\nСработал kubik_seksa - Стоимость броска уменьшена на 50%")
+
+    else:
+        pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 10
+        bot.send_message(message.chat.id, f"Вы потратили 10 BTC")
 
     if player_id in pisunchik:
         number = random.randint(1, 6)
         bot.reply_to(message, f"Выпало: {number}")
-        if (number <= 3):
+        if number <= 3:
             pisunchik[player_id]['pisunchik_size'] -= 5
-        if (number > 3):
+        if number > 3:
             pisunchik[player_id]['pisunchik_size'] += 5
         bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\n")
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
-    pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 10
 
     save_data()
 
@@ -227,7 +281,7 @@ def show_items(message):
         user_items = pisunchik[player_id]['items']
 
         if not user_items:
-            bot.reply_to(message, "You don't have any items.")
+            bot.reply_to(message, "У вас нету предметов(")
             return
 
         item_descriptions = []
@@ -237,16 +291,17 @@ def show_items(message):
 
         if item_descriptions:
             items_text = "\n".join(item_descriptions)
-            bot.reply_to(message, f"Your items:\n{items_text}")
+            bot.reply_to(message, f"Ваши предметы:\n{items_text}")
         else:
-            bot.reply_to(message, "No item descriptions available.")
+            bot.reply_to(message, "Нету описания предметов (Странно)")
     else:
-        bot.reply_to(message, "You are not registered as a player.")
+        bot.reply_to(message, "Вы не зарегистрированы как игрок")
+
 
 # Function to display available items in the shop
 def display_shop_items():
     shop_items = "\n".join([f"{item}: {price} coins" for item, price in shop_prices.items()])
-    return f"Available items in the shop:\n{shop_items}"
+    return f"Предметы в магазине: \n{shop_items}"
 
 
 @bot.message_handler(commands=['shop'])
@@ -256,7 +311,8 @@ def show_shop(message):
 
     # Display available items and prices
     shop_message = display_shop_items()
-    shop_message += f"\n\nYour current balance: {user_balance} coins"
+    shop_message += f"\n\nУ вас есть: {user_balance} BTC"
+    shop_message += f"\n\nВаши предметы: /items"
 
     bot.reply_to(message, shop_message)
 
@@ -272,17 +328,17 @@ def buy_item(message):
         if user_balance >= item_price:
             # Create an inline keyboard for confirmation
             markup = types.InlineKeyboardMarkup()
-            confirm_button = types.InlineKeyboardButton("Yes", callback_data=f"buy_confirm_{item_name}")
-            cancel_button = types.InlineKeyboardButton("No", callback_data="buy_cancel")
+            confirm_button = types.InlineKeyboardButton("Да", callback_data=f"buy_confirm_{item_name}")
+            cancel_button = types.InlineKeyboardButton("Нет", callback_data="buy_cancel")
             markup.add(confirm_button, cancel_button)
 
             # Ask for confirmation
-            confirmation_message = f"Do you want to buy {item_name} for {item_price} coins?"
+            confirmation_message = f"Вы хотите купить {item_name} за {item_price} ВТС?"
             bot.send_message(message.chat.id, confirmation_message, reply_markup=markup)
         else:
-            bot.reply_to(message, "You don't have enough coins to buy this item.")
+            bot.reply_to(message, "Недостаточно денег((")
     else:
-        bot.reply_to(message, "Item not found in the shop.")
+        bot.reply_to(message, "Предмет не найден")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_confirm_"))
@@ -293,7 +349,7 @@ def confirm_purchase(call):
         reply_markup=None
     )
     player_id = str(call.from_user.id)
-    item_name = call.data.split("_")[2]  # Extract item name from the callback data
+    item_name = call.data.split("_", 2)[2]  # Extract item name from the callback data
     item_price = shop_prices.get(item_name, 0)
 
     user_balance = pisunchik[player_id]['coins']
@@ -307,9 +363,9 @@ def confirm_purchase(call):
         # Update the 'items' field in the database with the new item list
         update_items(player_id, pisunchik[player_id]['items'], pisunchik[player_id]['coins'])
 
-        bot.send_message(call.message.chat.id, f"You bought {item_name} for {item_price} coins.")
+        bot.send_message(call.message.chat.id, f"Вы купили {item_name} за {item_price} ВТС.")
     else:
-        bot.send_message(call.message.chat.id, "You don't have enough coins to buy this item.")
+        bot.send_message(call.message.chat.id, "Недостаточно денег((")
 
 
 @bot.callback_query_handler(func=lambda call: call.data == "buy_cancel")
@@ -319,7 +375,138 @@ def cancel_purchase(call):
         message_id=call.message.message_id,
         reply_markup=None
     )
-    bot.send_message(call.message.chat.id, "Purchase canceled.")
+    bot.send_message(call.message.chat.id, "Покупка отменена")
+
+
+@bot.message_handler(commands=['zelie_pisunchika'])
+def use_zelie_pisunchika(message):
+    player_id = str(message.from_user.id)
+
+    if player_id not in pisunchik:
+        bot.reply_to(message, "Вы не зарегистрированы как игрок.")
+        return
+
+    if 'zelie_pisunchika' not in pisunchik[player_id]['items']:
+        bot.reply_to(message, "У вас нету предмета 'zelie_pisunchika'.")
+        return
+
+    # Generate a random number to determine the effect (50% chance)
+    is_increase = random.choice([True, False])
+    amount = 20
+
+    if is_increase:
+        pisunchik[player_id]['pisunchik_size'] += amount
+        effect_message = f"Ваш писюнчик увеличился на {amount} см."
+    else:
+        pisunchik[player_id]['pisunchik_size'] -= amount
+        effect_message = f"Ваш писюнчик уменьшился на {amount} см."
+
+    # Remove the 'zelie_pisunchika' item from the player's inventory
+    pisunchik[player_id]['items'].remove('zelie_pisunchika')
+
+    # Save the updated player data to the database
+    save_data()
+
+    bot.reply_to(message, effect_message)
+
+
+@bot.message_handler(commands=['masturbator'])
+def use_masturbator(message):
+    player_id = str(message.from_user.id)
+
+    if player_id not in pisunchik:
+        bot.reply_to(message, "Вы не зарегистрированы как игрок")
+        return
+
+    if 'masturbator' not in pisunchik[player_id]['items']:
+        bot.reply_to(message, "Y вас нету предмета 'masturbator'")
+        return
+
+    bot.send_message(
+        message.chat.id,
+        "Вы можете пожертвовать часть своего писюнчика ради получения ВТС. Чем больше размер пожертвован, тем больше монет выиграно. 1 см = 1 ВТС + 1 ВТС за каждые 5 см.\n\n"
+    )
+
+    # Set the user's state to "waiting_for_donation" to handle the donation amount
+    bot.register_next_step_handler(message, handle_donation_amount)
+
+
+def handle_donation_amount(message):
+    player_id = str(message.from_user.id)
+    donation_amount = message.text
+
+    if not donation_amount.isdigit():
+        bot.send_message(message.chat.id, "Пожалуйста, введите корректное число.")
+        return
+
+    donation_amount = int(donation_amount)
+
+    if donation_amount <= 0:
+        bot.send_message(message.chat.id, "Пожалуйста, введите позитивное число. (Не балуйся)")
+        return
+
+    current_pisunchik_size = pisunchik[player_id]['pisunchik_size']
+
+    if donation_amount > current_pisunchik_size:
+        bot.send_message(message.chat.id, "Вы не можете пожертвовать больше, чем у вас есть. Дурак совсем?")
+        return
+
+    # Calculate the number of coins to award based on the donation
+    coins_awarded = donation_amount + (donation_amount // 5)
+
+    # Update the player's pisunchik size and coins
+    pisunchik[player_id]['pisunchik_size'] -= donation_amount
+    pisunchik[player_id]['coins'] += coins_awarded
+
+    # Remove the 'Masturbator(Юра)' item from the player's inventory
+    pisunchik[player_id]['items'].remove('masturbator')
+
+    # Save the updated player data to the database
+    save_data()
+
+    bot.reply_to(
+        message,
+        f"Вы задонатили {donation_amount} см вашего писюнчика и получили {coins_awarded} ВТС взамен"
+    )
+
+
+@bot.message_handler(commands=['pisunchik_potion_small'])
+def use_pisunchik_potion_small(message):
+    apply_pisunchik_potion_effect(message, 3, 'small')
+
+
+@bot.message_handler(commands=['pisunchik_potion_medium'])
+def use_pisunchik_potion_medium(message):
+    apply_pisunchik_potion_effect(message, 5, 'medium')
+
+
+@bot.message_handler(commands=['pisunchik_potion_large'])
+def use_pisunchik_potion_large(message):
+    apply_pisunchik_potion_effect(message, 10, 'large')
+
+
+def apply_pisunchik_potion_effect(message, increase_amount, size):
+    player_id = str(message.from_user.id)
+
+    if player_id not in pisunchik:
+        bot.reply_to(message, "Вы не зарегистрированы как игрок.")
+        return
+
+    if f'pisunchik_potion_{size}' not in pisunchik[player_id]['items']:
+        bot.reply_to(message, f"У вас нету пердмета 'pisunchik_potion_{size}'.")
+        return
+
+    pisunchik[player_id]['pisunchik_size'] += increase_amount
+    effect_message = f"Your pisunchik size increased by {increase_amount} cm."
+
+    # Remove the used potion from the player's inventory
+    potion_name = f'pisunchik_potion_{size}'
+    pisunchik[player_id]['items'].remove(potion_name)
+
+    # Save the updated player data to the database
+    save_data()
+
+    bot.reply_to(message, effect_message)
 
 
 def update_items(player_id, items, coins):
@@ -450,12 +637,13 @@ def save_data():
         pisunchik_size = data['pisunchik_size']
         coins = data['coins']
         items = data['items']
-        cursor.execute("INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items) VALUES (%s, %s, %s, %s)",
-                       (player_id, pisunchik_size, coins, items))
-    cursor.execute("DELETE FROM last_used_data")
-    for player_id, last_used_time in last_used.items():
-        cursor.execute("INSERT INTO last_used (player_id, last_used_time) VALUES (%s, %s)",
-                       (player_id, last_used))
+        last_used = data['last_used']
+        last_prezervativ = data['last_prezervativ']
+        ballzzz_number = data['ballzzz_number']
+        cursor.execute(
+            "INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number))
+
     conn.commit()
 
 
