@@ -5,6 +5,8 @@ from telebot import types
 import time
 import os
 import psycopg2
+import requests
+from bs4 import BeautifulSoup
 
 # Get the database URL from environment variables
 database_url = os.environ.get('DATABASE_URL')
@@ -26,7 +28,8 @@ cursor = conn.cursor()
 def load_data():
     cursor.execute("SELECT player_id, pisunchik_size, coins FROM pisunchik_data")
     data = cursor.fetchall()
-    return {str(player_id): {'pisunchik_size': pisunchik_size, 'coins': coins} for player_id, pisunchik_size, coins in data}
+    return {str(player_id): {'pisunchik_size': pisunchik_size, 'coins': coins} for player_id, pisunchik_size, coins in
+            data}
 
 
 # Function to load player data from the database
@@ -74,7 +77,6 @@ def show_leaderboard(message):
     bot.reply_to(message, leaderboard)
 
 
-
 @bot.message_handler(commands=['pisunchik'])
 def update_pisunchik(message):
     player_id = str(message.from_user.id)
@@ -94,7 +96,8 @@ def update_pisunchik(message):
         pisunchik[player_id]['pisunchik_size'] += number
         number2 = random.randint(5, 15)
         pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + number2
-        bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\nИзменения: {number} см\nТакже вы получили: {number2} BTC")
+        bot.reply_to(message,
+                     f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\nИзменения: {number} см\nТакже вы получили: {number2} BTC")
 
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
@@ -119,6 +122,46 @@ def update_pisunchik(message):
     pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 10
 
     save_data()
+
+
+def get_furry_images():
+    # Get the URL of the furry images website.
+    image_urls = []
+    for x in range(1, 9):
+        url = "https://imgbin.com/free-png/furry-art/" + str(x)
+        # Make a request to the website.
+        response = requests.get(url)
+
+        # Parse the response.
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        # Find all the image links.
+        for x in range(1, 46):
+            # Find the image link by id
+            image_link = soup.find(id='listimg' + str(x))
+
+            if image_link:
+                # Extract the URL from the 'src' attribute of the 'img' tag
+
+                if 'data-src' in image_link.attrs:
+                    image_url = image_link['data-src']
+                    image_urls.append(image_url)
+
+    return image_urls
+
+
+image_urls2 = get_furry_images()
+print("Loaded")
+
+
+@bot.message_handler(commands=['furrypics'])
+def send_furry_pics(message):
+    random_selection = random.sample(image_urls2, 5)
+    for url in random_selection:
+        if url.endswith(('.jpg', '.jpeg', '.png')):
+            bot.send_photo(chat_id=message.chat.id, photo=url)
+        elif url.endswith(('.gif', '.gifv')):
+            bot.send_animation(chat_id=message.chat.id, animation=url)
 
 
 @bot.message_handler(commands=['otsos'])
