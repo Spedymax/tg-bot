@@ -92,9 +92,9 @@ def update_pisunchik(message):
         last_used[player_id] = datetime.now()
         number = random.randint(-10, 10)
         pisunchik[player_id]['pisunchik_size'] += number
-        number = random.randint(5, 15)
-        pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + number
-        bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\nИзменения: {number} см\nТакже вы получили: {number} BTC")
+        number2 = random.randint(5, 15)
+        pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + number2
+        bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\nИзменения: {number} см\nТакже вы получили: {number2} BTC")
 
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
