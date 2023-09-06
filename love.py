@@ -1,8 +1,10 @@
 import telebot
 from telebot import types
-import datetime
+import datetime, time
 import random
+import os
 from PIL import Image, ImageDraw, ImageFont
+import schedule
 
 bot = telebot.TeleBot('6608486511:AAF_Ro0BOUXhfwBME5DM5NU_n2N7ut_PZ_U')
 
@@ -116,12 +118,36 @@ def get_commands(message):
     if current_date >= datetime.date(2023, 9, 9):
         commands += '/create - создайте открытку\n'
         startuem = True
-    # if current_date >= datetime.date(2023, 9, 10):
-
     bot.send_message(message.chat.id, f"Вам доступны команды:\n {commands}")
     if startuem:
         bot.send_message(message.chat.id,
                          "Ого! Уже завтра вы будете отмечать 100 дней вместе!\nМои поздравления!❤️\nКак насчёт создать пригласительную открытку и отправить Максу?\nНапиши /create чтобы узнать как это сделать!")
+
+
+def mi():
+    # Get the current time in 24-hour format
+    current_time = time.strftime('%H:%M')
+
+    # Check if the current time is between 9:00 and 24:00
+    if '09:00' <= current_time <= '24:00':
+        # Get a list of image files in the specified folder
+        image_files = [f for f in os.listdir('cats')]
+
+        if image_files:
+            # Choose and send a random image to the user
+            image_file = os.path.join('cats', random.choice(image_files))
+            with open(image_file, 'rb') as photo:
+                bot.send_photo(1561630034, photo)
+                bot.send_message(1561630034, "Мы?🥺")
+        else:
+            bot.send_message(741542965, "No images available to send.")
+
+
+# 741542965
+# 1561630034
+current_date = datetime.date.today()
+if current_date >= datetime.date(2023, 9, 10):
+    schedule.every().hour.do(mi)
 
 
 @bot.message_handler(commands=['count'])
@@ -386,5 +412,7 @@ def create_invitation_card(message, background):
     bot.send_message(message.chat.id,
                      "Открытка создана!\n/create - чтобы создать снова\nНапишите /invite чтобы отправить её Максу!")
 
-
-bot.polling()
+while True:
+    schedule.run_pending()
+    time.sleep(1)
+    bot.polling()
