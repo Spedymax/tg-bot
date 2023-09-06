@@ -15,7 +15,6 @@ love_script_path = "love.py"
 # Use subprocess to start the love.py script
 love_process = subprocess.Popen(["python3", love_script_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-
 # Get the database URL from environment variables
 database_url = os.environ.get('DATABASE_URL')
 
@@ -32,7 +31,6 @@ conn = psycopg2.connect(
 cursor = conn.cursor()
 
 
-# Function to load player data from the database
 def load_data():
     cursor.execute(
         "SELECT player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number FROM pisunchik_data")
@@ -112,6 +110,16 @@ item_desc = {
 }
 
 
+# -1294162183
+
+# def start_game2():
+#     bot.send_message(-1001294162183, "Бля, та всем поебать😘")
+#
+#
+# # # Function to load player data from the database
+# start_game2()
+
+
 @bot.message_handler(commands=['start'])
 def start_game(message):
     player_id = str(message.from_user.id)
@@ -165,7 +173,8 @@ def use_krystalnie_ballzzz(message):
         bot.reply_to(message, "У вас нету предмета 'krystalnie_ballzzz'.")
         return
 
-    if pisunchik[player_id]['last_used'].replace(tzinfo=None) >= datetime.now() and pisunchik[player_id]['last_used'] is not None:
+    if pisunchik[player_id]['last_used'].replace(tzinfo=None) >= datetime.now() and pisunchik[player_id][
+        'last_used'] is not None:
         # Generate a random number to determine the next effect (for demonstration purposes)
         next_effect = random.randint(-10, 10)
 
