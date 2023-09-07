@@ -367,7 +367,7 @@ def handle_admin_actions(message):
             except ValueError:
                 bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
 
-        elif action == "increased_btc":
+        elif action == "increase_btc":
             try:
                 value = int(message.text)
                 if player in pisunchik:
@@ -377,7 +377,7 @@ def handle_admin_actions(message):
                     bot.send_message(admin_chat_id, "Player not found.")
             except ValueError:
                 bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
-        elif action == "decreased_btc":
+        elif action == "decrease_btc":
             try:
                 value = int(message.text)
                 if player in pisunchik:
