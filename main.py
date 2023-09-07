@@ -71,6 +71,10 @@ print("Bot started")
 YURA_ID = 742272644
 MAX_ID = 741542965
 BODYA_ID = 855951767
+# List of admin user IDs
+admin_ids = [741542965]
+# Dictionary to keep track of admin actions
+admin_actions = {}
 
 shop_prices = {
     'kolczo_na_chlen': 90,
@@ -131,7 +135,7 @@ def start_game(message):
 
 @bot.message_handler(commands=['leaderboard'])
 def show_leaderboard(message):
-    # Sort players by pisunchik_size in descending order
+    # Sort pisunchik by pisunchik_size in descending order
     sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
 
     leaderboard = "🏆 Большой член, большие яйца 🏆\n\n"
@@ -191,6 +195,224 @@ def use_krystalnie_ballzzz(message):
         effect_message = f"Следующее изменение писюнчика будет: {next_effect} см."
 
     bot.reply_to(message, effect_message)
+
+
+# Command to access the admin panel
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
+    if message.from_user.id in admin_ids:
+        # Create an inline keyboard for the admin panel
+        markup = types.InlineKeyboardMarkup()
+
+        # Options for managing pisunchik' pisunchik and BTC amount
+        increase_pisunchik_button = types.InlineKeyboardButton("Increase Pisunchik",
+                                                               callback_data="admin_increase_pisunchik")
+        decrease_pisunchik_button = types.InlineKeyboardButton("Decrease Pisunchik",
+                                                               callback_data="admin_decrease_pisunchik")
+        increase_btc_button = types.InlineKeyboardButton("Increase BTC", callback_data="admin_increase_btc")
+        decrease_btc_button = types.InlineKeyboardButton("Decrease BTC", callback_data="admin_decrease_btc")
+
+        # Options for adding/removing items from pisunchik
+        add_item_button = types.InlineKeyboardButton("Add Item to Player", callback_data="admin_add_item")
+        remove_item_button = types.InlineKeyboardButton("Remove Item from Player", callback_data="admin_remove_item")
+
+        markup.add(
+            increase_pisunchik_button, decrease_pisunchik_button,
+            increase_btc_button, decrease_btc_button,
+            add_item_button, remove_item_button
+        )
+
+        # Send the admin panel
+        bot.send_message(message.chat.id, "Admin Panel:", reply_markup=markup)
+    else:
+        bot.reply_to(message, "You are not authorized to access the admin panel.")
+
+
+player_name = ""
+
+
+def get_player_name(player):
+    global player_name
+    if player == '741542965':
+        player_name = "Максим"
+    elif player == '742272644':
+        player_name = "Юра"
+    elif player == '855951767':
+        player_name = "Богдан"
+    return player_name
+
+
+# Handle admin panel callbacks
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin"))
+def handle_callback(call):
+    if call.from_user.id in admin_ids:
+        admin_chat_id = call.message.chat.id
+        call = call.data.split("_", 1)  # Split the callback data into action and player
+        call = call[1]
+        if call == "increase_pisunchik":
+            # Prompt the admin to select a player
+            markup = types.InlineKeyboardMarkup()
+            for player in pisunchik:
+                player_name = get_player_name(player)
+                markup.add(
+                    types.InlineKeyboardButton(player_name, callback_data=f"select_player_increase_pisunchik_{player}"))
+            bot.send_message(admin_chat_id, "Select a player to increase Pisunchik:", reply_markup=markup)
+
+        elif call == "decrease_pisunchik":
+            # Prompt the admin to select a player
+            markup = types.InlineKeyboardMarkup()
+            for player in pisunchik:
+                player_name = get_player_name(player)
+                markup.add(
+                    types.InlineKeyboardButton(player_name, callback_data=f"select_player_decrease_pisunchik_{player}"))
+            bot.send_message(admin_chat_id, "Select a player to decrease Pisunchik:", reply_markup=markup)
+
+        elif call == "increase_btc":
+            # Prompt the admin to select a player
+            markup = types.InlineKeyboardMarkup()
+            for player in pisunchik:
+                player_name = get_player_name(player)
+                markup.add(
+                    types.InlineKeyboardButton(player_name, callback_data=f"select_player_increase_btc_{player}"))
+            bot.send_message(admin_chat_id, "Select a player to increase BTC:", reply_markup=markup)
+
+        elif call == "decrease_btc":
+            # Prompt the admin to select a player
+            markup = types.InlineKeyboardMarkup()
+            for player in pisunchik:
+                player_name = get_player_name(player)
+                markup.add(
+                    types.InlineKeyboardButton(player_name, callback_data=f"select_player_decrease_btc_{player}"))
+            bot.send_message(admin_chat_id, "Select a player to decrease BTC:", reply_markup=markup)
+
+        elif call == "add_item":
+            # Prompt the admin to select a player
+            markup = types.InlineKeyboardMarkup()
+            for player in pisunchik:
+                player_name = get_player_name(player)
+                markup.add(types.InlineKeyboardButton(player_name, callback_data=f"select_player_add_item_{player}"))
+            bot.send_message(admin_chat_id, "Select a player to add an item:", reply_markup=markup)
+
+        elif call == "remove_item":
+            # Prompt the admin to select a player
+            markup = types.InlineKeyboardMarkup()
+            for player in pisunchik:
+                player_name = get_player_name(player)
+                markup.add(types.InlineKeyboardButton(player_name, callback_data=f"select_player_remove_item_{player}"))
+            bot.send_message(admin_chat_id, "Select a player to remove an item:", reply_markup=markup)
+
+    else:
+        bot.answer_callback_query(call.id, "You are not authorized to perform this action.")
+
+
+# Handle player selection callbacks
+@bot.callback_query_handler(func=lambda call: call.data.startswith("select_player"))
+def handle_select_player(call):
+    admin_chat_id = call.message.chat.id
+    action_data = call.data.split("_")
+    if len(action_data) == 5:
+        action = action_data[2] + "_" + action_data[3]  # pisunchik or btc or item
+        player = action_data[4]
+
+        player_name2 = get_player_name(player)
+
+        # Store the selected player in the admin actions
+        admin_actions[admin_chat_id] = {"action": action, "player": player}
+
+        # Prompt the admin to enter the value or item name
+        if action == "increase_pisunchik":
+            bot.send_message(admin_chat_id, f"Enter the value to increase Pisunchik for Player {player_name2}:")
+        elif action == "decrease_pisunchik":
+            bot.send_message(admin_chat_id, f"Enter the value to decrease Pisunchik for Player {player_name2}:")
+        elif action == "increase_btc":
+            bot.send_message(admin_chat_id, f"Enter the value to increase BTC for Player {player_name2}:")
+        elif action == "decrease_btc":
+            bot.send_message(admin_chat_id, f"Enter the value to increase BTC for Player {player_name2}:")
+        elif action == "add_item":
+            bot.send_message(admin_chat_id, f"Enter the name of the item to add for Player {player_name2}:")
+        elif action == "remove_item":
+            bot.send_message(admin_chat_id, f"Enter the name of the item to remove for Player {player_name2}:")
+
+
+# Handle user messages for admin actions
+@bot.message_handler(func=lambda message: message.chat.id in admin_actions)
+def handle_admin_actions(message):
+    admin_chat_id = message.chat.id
+    admin_action_data = admin_actions.get(admin_chat_id)
+
+    if admin_action_data:
+        action = admin_action_data.get("action")
+        player = admin_action_data.get("player")
+        player_name = get_player_name(player)
+
+        if action == "increase_pisunchik":
+            try:
+                value = int(message.text)
+                if player in pisunchik:
+                    pisunchik[player]["pisunchik_size"] += value
+                    bot.send_message(admin_chat_id, f"Pisunchik increased for Player {player_name}.")
+                else:
+                    bot.send_message(admin_chat_id, "Player not found.")
+            except ValueError:
+                bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
+
+        elif action == "decrease_pisunchik":
+            try:
+                value = int(message.text)
+                if player in pisunchik:
+                    pisunchik[player]["pisunchik_size"] -= value
+                    bot.send_message(admin_chat_id, f"Pisunchik decreased for Player {player_name}.")
+                else:
+                    bot.send_message(admin_chat_id, "Player not found.")
+            except ValueError:
+                bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
+
+        elif action == "increased_btc":
+            try:
+                value = int(message.text)
+                if player in pisunchik:
+                    pisunchik[player]["coins"] += value
+                    bot.send_message(admin_chat_id, f"BTC increased for Player {player_name}.")
+                else:
+                    bot.send_message(admin_chat_id, "Player not found.")
+            except ValueError:
+                bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
+        elif action == "decreased_btc":
+            try:
+                value = int(message.text)
+                if player in pisunchik:
+                    pisunchik[player]["coins"] -= value
+                    bot.send_message(admin_chat_id, f"BTC decreased for Player {player_name}.")
+                else:
+                    bot.send_message(admin_chat_id, "Player not found.")
+            except ValueError:
+                bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
+
+        elif action == "add_item":
+            item_name = message.text
+            if player in pisunchik:
+                if item_name in item_desc:
+                    pisunchik[player]["items"].append(item_name)
+                    bot.send_message(admin_chat_id, f"Item '{item_name}' added to Player {player_name}.")
+                else:
+                    bot.send_message(admin_chat_id, "Item not found.")
+            else:
+                bot.send_message(admin_chat_id, "Player not found.")
+        elif action == "remove_item":
+            item_name = message.text
+            if player in pisunchik:
+                if item_name in pisunchik[player]["items"]:
+                    pisunchik[player]["items"].remove(item_name)
+                    bot.send_message(admin_chat_id, f"Item '{item_name}' removed from Player {player_name}.")
+                else:
+                    bot.send_message(admin_chat_id, f"Item '{item_name}' not found in Player {player_name}'s inventory.")
+            else:
+                bot.send_message(admin_chat_id, "Player not found.")
+
+        del admin_actions[admin_chat_id]
+    else:
+        bot.send_message(admin_chat_id, "Invalid admin action.")
+    save_data()
 
 
 @bot.message_handler(commands=['pisunchik'])
