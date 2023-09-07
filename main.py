@@ -72,7 +72,7 @@ YURA_ID = 742272644
 MAX_ID = 741542965
 BODYA_ID = 855951767
 # List of admin user IDs
-admin_ids = [741542965]
+admin_ids = [741542965, 1469789335]
 # Dictionary to keep track of admin actions
 admin_actions = {}
 
@@ -112,17 +112,14 @@ item_desc = {
     'pisunchik_potion_large': '{Съедобное} Моментально увеличивает писюнчик на 10 см\nИспользование: /pisunchik_potion_large'
 
 }
-
-
-# -1294162183
-
-# def start_game2():
-#     bot.send_message(-1001294162183, "Бля, та всем поебать😘")
-#
-#
-# # # Function to load player data from the database
-# start_game2()
-
+# Command to initiate sending a message to the group
+@bot.message_handler(commands=['misha'])
+def misha(message):
+    bot.send_message(message.chat.id, 'Миша!')
+    time.sleep(2)
+    bot.send_message(message.chat.id, 'Миша привет!')
+    time.sleep(2)
+    bot.send_message(message.chat.id, 'Мммииишааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааа')
 
 @bot.message_handler(commands=['start'])
 def start_game(message):
@@ -405,7 +402,8 @@ def handle_admin_actions(message):
                     pisunchik[player]["items"].remove(item_name)
                     bot.send_message(admin_chat_id, f"Item '{item_name}' removed from Player {player_name}.")
                 else:
-                    bot.send_message(admin_chat_id, f"Item '{item_name}' not found in Player {player_name}'s inventory.")
+                    bot.send_message(admin_chat_id,
+                                     f"Item '{item_name}' not found in Player {player_name}'s inventory.")
             else:
                 bot.send_message(admin_chat_id, "Player not found.")
 
@@ -884,6 +882,21 @@ def save_data():
             (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number))
 
     conn.commit()
+
+@bot.message_handler(commands=['sendtogroup'])
+def send_to_group_command(message):
+    # Ask the user to send the message they want to forward
+    bot.send_message(message.chat.id, "Please send the message you want to forward to the group chat.")
+
+# Handle user messages for sending a message to the group
+@bot.message_handler(func=lambda message: True, content_types=['text'])
+def handle_send_to_group_message(message):
+    # Check if the user's message is a reply to the "sendtogroup" command
+    if message.reply_to_message and message.reply_to_message.text == "Please send the message you want to forward to the group chat.":
+        # Forward the user's message to the group chat
+        bot.send_message(-1001294162183, message.text)
+        bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
+
 
 
 bot.polling()
