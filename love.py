@@ -48,7 +48,7 @@ trivia_questions = [
     {
         "question": "Как Вика подписана у Макса в тг?",
         "options": ["Котик", "Сладкая попка", "Вика", "Конкретная Вика"],
-        "answer": "Киев"
+        "answer": "Котик"
     },
     {
         "question": "Любимая еда Макса?",
@@ -78,7 +78,7 @@ trivia_questions = [
     {
         "question": "Когда Макс думает мы начали встречаться?(Мяу😋)",
         "options": ["9 января", "Зимой", "Когда признался", "2 июня"],
-        "answer": "Зимой"
+        "answer": "2 июня"
     },
     {
         "question": "За что Макс любит Вику больше всего?",
@@ -114,7 +114,7 @@ def get_commands(message):
     if current_date >= datetime.date(2023, 9, 7):
         commands += '/100reasons - узнать 100 причин\n'
     if current_date >= datetime.date(2023, 9, 8):
-        commands += '/trivia - викторина\n'
+        commands += '/trivia - викторина\n/answers - ответы на викторину\n'
     if current_date >= datetime.date(2023, 9, 9):
         commands += '/create - создайте открытку\n'
         startuem = True
@@ -260,6 +260,19 @@ def handle_trivia_answer(call):
 
     # Send the next question or end the quiz
     send_next_question(chat_id)
+
+
+# Helper function to end the trivia game and show results
+@bot.message_handler(commands=['answers'])
+def answers(message):
+    user_id = message.from_user.id
+
+    # Send a message with the user's score and correct answers
+    response = f"Правильные ответы:"
+    for x in range(0, 15):
+        response += f"\n{trivia_questions[x]['question']}: {trivia_questions[x]['answer']}"
+
+    bot.send_message(user_id, response)
 
 
 card_text = 'TEST'
@@ -411,6 +424,7 @@ def create_invitation_card(message, background):
     # Завершите интеракцию с пользователем
     bot.send_message(message.chat.id,
                      "Открытка создана!\n/create - чтобы создать снова\nНапишите /invite чтобы отправить её Максу!")
+
 
 while True:
     schedule.run_pending()
