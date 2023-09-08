@@ -112,6 +112,8 @@ item_desc = {
     'pisunchik_potion_large': '{Съедобное} Моментально увеличивает писюнчик на 10 см\nИспользование: /pisunchik_potion_large'
 
 }
+
+
 # Command to initiate sending a message to the group
 @bot.message_handler(commands=['misha'])
 def misha(message):
@@ -119,7 +121,9 @@ def misha(message):
     time.sleep(2)
     bot.send_message(message.chat.id, 'Миша привет!')
     time.sleep(2)
-    bot.send_message(message.chat.id, 'Мммииишааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааа')
+    bot.send_message(message.chat.id,
+                     'Мммииишааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааа')
+
 
 @bot.message_handler(commands=['start'])
 def start_game(message):
@@ -883,10 +887,12 @@ def save_data():
 
     conn.commit()
 
+
 @bot.message_handler(commands=['sendtogroup'])
 def send_to_group_command(message):
     # Ask the user to send the message they want to forward
     bot.send_message(message.chat.id, "Please send the message you want to forward to the group chat.")
+
 
 # Handle user messages for sending a message to the group
 @bot.message_handler(func=lambda message: True, content_types=['text'])
@@ -896,7 +902,6 @@ def handle_send_to_group_message(message):
         # Forward the user's message to the group chat
         bot.send_message(-1001294162183, message.text)
         bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
-
 
 
 bot.polling()
