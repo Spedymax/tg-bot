@@ -140,7 +140,6 @@ def mi():
             image_file = os.path.join('cats', random.choice(image_files))
             with open(image_file, 'rb') as photo:
                 bot.send_photo(1561630034, photo)
-                bot.send_photo(741542965, photo)
                 bot.send_message(1561630034, "Мы?🥺")
         else:
             bot.send_message(741542965, "No images available to send.")
