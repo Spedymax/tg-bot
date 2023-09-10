@@ -117,6 +117,7 @@ def get_commands(message):
         commands += '/trivia - викторина\n/answers - ответы на викторину\n'
     if current_date >= datetime.date(2023, 9, 9):
         commands += '/create - создайте открытку\n'
+    if current_date == datetime.date(2023, 9, 9):
         startuem = True
     bot.send_message(message.chat.id, f"Вам доступны команды:\n {commands}")
     if startuem:
@@ -127,9 +128,10 @@ def get_commands(message):
 def mi():
     # Get the current time in 24-hour format
     current_time = time.strftime('%H:%M')
+    current_date = datetime.date.today()
 
     # Check if the current time is between 9:00 and 24:00
-    if '09:00' <= current_time <= '24:00':
+    while '09:00' <= current_time <= '24:00' and current_date == datetime.date(2023, 9, 10):
         # Get a list of image files in the specified folder
         image_files = [f for f in os.listdir('cats')]
 
@@ -138,16 +140,16 @@ def mi():
             image_file = os.path.join('cats', random.choice(image_files))
             with open(image_file, 'rb') as photo:
                 bot.send_photo(1561630034, photo)
+                bot.send_photo(741542965, photo)
                 bot.send_message(1561630034, "Мы?🥺")
         else:
             bot.send_message(741542965, "No images available to send.")
+        time.sleep(60 * 30)
 
 
 # 741542965
 # 1561630034
-current_date = datetime.date.today()
-if current_date >= datetime.date(2023, 9, 10):
-    schedule.every().hour.do(mi)
+mi()
 
 
 @bot.message_handler(commands=['count'])
