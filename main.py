@@ -791,6 +791,119 @@ image_urls2 = get_furry_images()
 print("Loaded")
 
 
+# Function to get the time remaining for the prezervativ cooldown
+def get_prezervativ_cooldown_remaining(player_id):
+    cursor.execute("SELECT last_prezervativ FROM pisunchik_data WHERE player_id = %s", (player_id,))
+    last_used_time = cursor.fetchone()[0]
+
+    if last_used_time is None:
+        return 0  # If the command was never used, it's available immediately
+
+    # Calculate the time remaining until the command becomes available
+    current_time = datetime.now(timezone.utc)
+    cooldown_end_time = last_used_time + timedelta(days=1)
+    time_remaining = cooldown_end_time - current_time
+
+    # Calculate hours, minutes, and seconds remaining
+    hours, remainder = divmod(time_remaining.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    return hours, minutes, seconds
+
+
+# Function to get the time remaining for the cooldown
+def get_cooldown_remaining(player_id):
+    cursor.execute("SELECT last_used FROM pisunchik_data WHERE player_id = %s", (player_id,))
+    last_used_time = cursor.fetchone()[0]
+
+    if last_used_time is None:
+        return 0  # If the command was never used, it's available immediately
+
+    # Calculate the time remaining until the command becomes available
+    current_time = datetime.now(timezone.utc)
+    cooldown_end_time = last_used_time + timedelta(hours=24)
+    time_remaining = cooldown_end_time - current_time
+
+    # Calculate hours, minutes, and seconds remaining
+    hours, remainder = divmod(time_remaining.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    return hours, minutes, seconds
+
+
+# Command to check the cooldown and display the countdown
+@bot.message_handler(commands=['timer'])
+def check_cooldown(message):
+    player_id = str(message.from_user.id)
+    response = "The /pisunchik command will be available in "
+
+    hours, minutes, seconds = get_cooldown_remaining(player_id)
+    prez_hours, prez_minutes, prez_seconds = get_prezervativ_cooldown_remaining(player_id)
+
+    text_response = response
+
+    if hours == 0 and minutes == 0 and seconds == 0:
+        text_response = "The /pisunchik command is available now!"
+    else:
+        if hours > 0:
+            text_response += f"{hours} hours "
+        if minutes > 0:
+            text_response += f"{minutes} minutes "
+        if seconds > 0:
+            text_response += f"{seconds} seconds "
+
+    if 'prezervativ' in pisunchik[player_id]['items']:
+        prez_response = "The prezervativ item will be available in "
+        if prez_hours == 0 and prez_minutes == 0 and prez_seconds == 0:
+            prez_response = "The prezervativ item is available now!"
+        else:
+            if prez_hours > 0:
+                prez_response += f"{prez_hours} hours "
+            if prez_minutes > 0:
+                prez_response += f"{prez_minutes} minutes "
+            if prez_seconds > 0:
+                prez_response += f"{prez_seconds} seconds "
+
+        text_response += f"\n{prez_response}"
+
+    # Send the initial message and save its message ID
+    initial_message = bot.send_message(chat_id=message.chat.id, text=text_response)
+
+    # Update the message every second by editing it
+    while hours > 0 or minutes > 0 or seconds > 0 or prez_hours > 0 or prez_minutes > 0 or prez_seconds > 0:
+        time.sleep(1)  # Wait for 5 second before updating the message
+        hours, minutes, seconds = get_cooldown_remaining(player_id)
+        prez_hours, prez_minutes, prez_seconds = get_prezervativ_cooldown_remaining(player_id)
+        text_response = response
+
+        if hours == 0 and minutes == 0 and seconds == 0:
+            text_response = "The /pisunchik command is available now!"
+        else:
+            if hours > 0:
+                text_response += f"{hours} hours "
+            if minutes > 0:
+                text_response += f"{minutes} minutes "
+            if seconds > 0:
+                text_response += f"{seconds} seconds "
+
+        if 'prezervativ' in pisunchik[player_id]['items']:
+            prez_response = "The prezervativ item will be available in "
+            if prez_hours == 0 and prez_minutes == 0 and prez_seconds == 0:
+                prez_response = "The prezervativ item is available now!"
+            else:
+                if prez_hours > 0:
+                    prez_response += f"{prez_hours} hours "
+                if prez_minutes > 0:
+                    prez_response += f"{prez_minutes} minutes "
+                if prez_seconds > 0:
+                    prez_response += f"{prez_seconds} seconds "
+
+            text_response += f"\n{prez_response}"
+        # Edit the initial message with updated cooldown information
+        bot.edit_message_text(chat_id=message.chat.id, message_id=initial_message.message_id, text=text_response)
+
+
+
 @bot.message_handler(commands=['furrypics'])
 def send_furry_pics(message):
     random_selection = random.sample(image_urls2, 5)
