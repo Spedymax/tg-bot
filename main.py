@@ -835,7 +835,8 @@ def get_cooldown_remaining(player_id):
 @bot.message_handler(commands=['timer'])
 def check_cooldown(message):
     player_id = str(message.from_user.id)
-    response = "The /pisunchik command will be available in "
+    player_name = get_player_name(player_id)
+    response = f"Таймер для игрока {player_name}\n/pisunchik будет доступен через "
 
     hours, minutes, seconds = get_cooldown_remaining(player_id)
     prez_hours, prez_minutes, prez_seconds = get_prezervativ_cooldown_remaining(player_id)
@@ -843,26 +844,26 @@ def check_cooldown(message):
     text_response = response
 
     if hours == 0 and minutes == 0 and seconds == 0:
-        text_response = "The /pisunchik command is available now!"
+        text_response = f"Таймер для игрока {player_name}\n/pisunchik Уже доступен!"
     else:
         if hours > 0:
-            text_response += f"{hours} hours "
+            text_response += f"{hours} часов "
         if minutes > 0:
-            text_response += f"{minutes} minutes "
+            text_response += f"{minutes} минут "
         if seconds > 0:
-            text_response += f"{seconds} seconds "
+            text_response += f"{seconds} секунд "
 
     if 'prezervativ' in pisunchik[player_id]['items']:
-        prez_response = "The prezervativ item will be available in "
+        prez_response = "prezervativ будет доступен через "
         if prez_hours == 0 and prez_minutes == 0 and prez_seconds == 0:
-            prez_response = "The prezervativ item is available now!"
+            prez_response = "prezervativ уже доступен!"
         else:
             if prez_hours > 0:
-                prez_response += f"{prez_hours} hours "
+                prez_response += f"{prez_hours} часов "
             if prez_minutes > 0:
-                prez_response += f"{prez_minutes} minutes "
+                prez_response += f"{prez_minutes} минут "
             if prez_seconds > 0:
-                prez_response += f"{prez_seconds} seconds "
+                prez_response += f"{prez_seconds} секунд "
 
         text_response += f"\n{prez_response}"
 
@@ -877,26 +878,26 @@ def check_cooldown(message):
         text_response = response
 
         if hours == 0 and minutes == 0 and seconds == 0:
-            text_response = "The /pisunchik command is available now!"
+            text_response = f"Таймер для игрока {player_name}\n/pisunchik Уже доступен!"
         else:
             if hours > 0:
-                text_response += f"{hours} hours "
+                text_response += f"{hours} часов "
             if minutes > 0:
-                text_response += f"{minutes} minutes "
+                text_response += f"{minutes} минут "
             if seconds > 0:
-                text_response += f"{seconds} seconds "
+                text_response += f"{seconds} секунд "
 
         if 'prezervativ' in pisunchik[player_id]['items']:
-            prez_response = "The prezervativ item will be available in "
+            prez_response = "prezervativ будет доступен через "
             if prez_hours == 0 and prez_minutes == 0 and prez_seconds == 0:
-                prez_response = "The prezervativ item is available now!"
+                prez_response = "prezervativ уже доступен!"
             else:
                 if prez_hours > 0:
-                    prez_response += f"{prez_hours} hours "
+                    prez_response += f"{prez_hours} часов "
                 if prez_minutes > 0:
-                    prez_response += f"{prez_minutes} minutes "
+                    prez_response += f"{prez_minutes} минут "
                 if prez_seconds > 0:
-                    prez_response += f"{prez_seconds} seconds "
+                    prez_response += f"{prez_seconds} секунд "
 
             text_response += f"\n{prez_response}"
         # Edit the initial message with updated cooldown information
