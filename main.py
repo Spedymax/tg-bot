@@ -872,7 +872,7 @@ def check_cooldown(message):
 
     # Update the message every second by editing it
     while hours > 0 or minutes > 0 or seconds > 0 or prez_hours > 0 or prez_minutes > 0 or prez_seconds > 0:
-        time.sleep(1)  # Wait for 5 second before updating the message
+        time.sleep(30)  # Wait for 5 second before updating the message
         hours, minutes, seconds = get_cooldown_remaining(player_id)
         prez_hours, prez_minutes, prez_seconds = get_prezervativ_cooldown_remaining(player_id)
         text_response = response
