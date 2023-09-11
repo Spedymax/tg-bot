@@ -20,10 +20,10 @@ database_url = os.environ.get('DATABASE_URL')
 
 # Establish a database connection
 conn = psycopg2.connect(
-    database="d10jl00d7m0v3k",
-    user="swwnmrmvibkaln",
-    host="ec2-54-73-22-169.eu-west-1.compute.amazonaws.com",
-    password="9f127f6402cc566666445efbca44e4bbc8c4f48cf0ab3a1a8d27261bd874fac3",
+    database="daldggbina66u2",
+    user="swtikwxiettvzu",
+    host="ec2-54-220-163-63.eu-west-1.compute.amazonaws.com",
+    password="e0f2d51e0741c14ae6d68a96a3664a7730d1bcc579a6fcea15390643def6a0a4",
     sslmode='require'
 )
 
