@@ -309,111 +309,116 @@ def handle_callback(call):
 # Handle player selection callbacks
 @bot.callback_query_handler(func=lambda call: call.data.startswith("select_player"))
 def handle_select_player(call):
-    admin_chat_id = call.message.chat.id
-    action_data = call.data.split("_")
-    if len(action_data) == 5:
-        action = action_data[2] + "_" + action_data[3]  # pisunchik or btc or item
-        player = action_data[4]
+    if call.from_user.id in admin_ids:
+        admin_chat_id = call.message.chat.id
+        action_data = call.data.split("_")
+        if len(action_data) == 5:
+            action = action_data[2] + "_" + action_data[3]  # pisunchik or btc or item
+            player = action_data[4]
 
-        player_name2 = get_player_name(player)
+            player_name2 = get_player_name(player)
 
-        # Store the selected player in the admin actions
-        admin_actions[admin_chat_id] = {"action": action, "player": player}
+            # Store the selected player in the admin actions
+            admin_actions[admin_chat_id] = {"action": action, "player": player}
 
-        # Prompt the admin to enter the value or item name
-        if action == "increase_pisunchik":
-            bot.send_message(admin_chat_id, f"Enter the value to increase Pisunchik for Player {player_name2}:")
-        elif action == "decrease_pisunchik":
-            bot.send_message(admin_chat_id, f"Enter the value to decrease Pisunchik for Player {player_name2}:")
-        elif action == "increase_btc":
-            bot.send_message(admin_chat_id, f"Enter the value to increase BTC for Player {player_name2}:")
-        elif action == "decrease_btc":
-            bot.send_message(admin_chat_id, f"Enter the value to increase BTC for Player {player_name2}:")
-        elif action == "add_item":
-            bot.send_message(admin_chat_id, f"Enter the name of the item to add for Player {player_name2}:")
-        elif action == "remove_item":
-            bot.send_message(admin_chat_id, f"Enter the name of the item to remove for Player {player_name2}:")
-
+            # Prompt the admin to enter the value or item name
+            if action == "increase_pisunchik":
+                bot.send_message(admin_chat_id, f"Enter the value to increase Pisunchik for Player {player_name2}:")
+            elif action == "decrease_pisunchik":
+                bot.send_message(admin_chat_id, f"Enter the value to decrease Pisunchik for Player {player_name2}:")
+            elif action == "increase_btc":
+                bot.send_message(admin_chat_id, f"Enter the value to increase BTC for Player {player_name2}:")
+            elif action == "decrease_btc":
+                bot.send_message(admin_chat_id, f"Enter the value to increase BTC for Player {player_name2}:")
+            elif action == "add_item":
+                bot.send_message(admin_chat_id, f"Enter the name of the item to add for Player {player_name2}:")
+            elif action == "remove_item":
+                bot.send_message(admin_chat_id, f"Enter the name of the item to remove for Player {player_name2}:")
+    else:
+        bot.answer_callback_query(call.id, "You are not authorized to perform this action.")
 
 # Handle user messages for admin actions
 @bot.message_handler(func=lambda message: message.chat.id in admin_actions)
 def handle_admin_actions(message):
-    admin_chat_id = message.chat.id
-    admin_action_data = admin_actions.get(admin_chat_id)
+    if message.from_user.id in admin_ids:
+        admin_chat_id = message.chat.id
+        admin_action_data = admin_actions.get(admin_chat_id)
 
-    if admin_action_data:
-        action = admin_action_data.get("action")
-        player = admin_action_data.get("player")
-        player_name = get_player_name(player)
+        if admin_action_data:
+            action = admin_action_data.get("action")
+            player = admin_action_data.get("player")
+            player_name = get_player_name(player)
 
-        if action == "increase_pisunchik":
-            try:
-                value = int(message.text)
+            if action == "increase_pisunchik":
+                try:
+                    value = int(message.text)
+                    if player in pisunchik:
+                        pisunchik[player]["pisunchik_size"] += value
+                        bot.send_message(admin_chat_id, f"Pisunchik increased for Player {player_name}.")
+                    else:
+                        bot.send_message(admin_chat_id, "Player not found.")
+                except ValueError:
+                    bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
+
+            elif action == "decrease_pisunchik":
+                try:
+                    value = int(message.text)
+                    if player in pisunchik:
+                        pisunchik[player]["pisunchik_size"] -= value
+                        bot.send_message(admin_chat_id, f"Pisunchik decreased for Player {player_name}.")
+                    else:
+                        bot.send_message(admin_chat_id, "Player not found.")
+                except ValueError:
+                    bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
+
+            elif action == "increase_btc":
+                try:
+                    value = int(message.text)
+                    if player in pisunchik:
+                        pisunchik[player]["coins"] += value
+                        bot.send_message(admin_chat_id, f"BTC increased for Player {player_name}.")
+                    else:
+                        bot.send_message(admin_chat_id, "Player not found.")
+                except ValueError:
+                    bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
+            elif action == "decrease_btc":
+                try:
+                    value = int(message.text)
+                    if player in pisunchik:
+                        pisunchik[player]["coins"] -= value
+                        bot.send_message(admin_chat_id, f"BTC decreased for Player {player_name}.")
+                    else:
+                        bot.send_message(admin_chat_id, "Player not found.")
+                except ValueError:
+                    bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
+
+            elif action == "add_item":
+                item_name = message.text
                 if player in pisunchik:
-                    pisunchik[player]["pisunchik_size"] += value
-                    bot.send_message(admin_chat_id, f"Pisunchik increased for Player {player_name}.")
+                    if item_name in item_desc:
+                        pisunchik[player]["items"].append(item_name)
+                        bot.send_message(admin_chat_id, f"Item '{item_name}' added to Player {player_name}.")
+                    else:
+                        bot.send_message(admin_chat_id, "Item not found.")
                 else:
                     bot.send_message(admin_chat_id, "Player not found.")
-            except ValueError:
-                bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
-
-        elif action == "decrease_pisunchik":
-            try:
-                value = int(message.text)
+            elif action == "remove_item":
+                item_name = message.text
                 if player in pisunchik:
-                    pisunchik[player]["pisunchik_size"] -= value
-                    bot.send_message(admin_chat_id, f"Pisunchik decreased for Player {player_name}.")
+                    if item_name in pisunchik[player]["items"]:
+                        pisunchik[player]["items"].remove(item_name)
+                        bot.send_message(admin_chat_id, f"Item '{item_name}' removed from Player {player_name}.")
+                    else:
+                        bot.send_message(admin_chat_id,
+                                         f"Item '{item_name}' not found in Player {player_name}'s inventory.")
                 else:
                     bot.send_message(admin_chat_id, "Player not found.")
-            except ValueError:
-                bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
 
-        elif action == "increase_btc":
-            try:
-                value = int(message.text)
-                if player in pisunchik:
-                    pisunchik[player]["coins"] += value
-                    bot.send_message(admin_chat_id, f"BTC increased for Player {player_name}.")
-                else:
-                    bot.send_message(admin_chat_id, "Player not found.")
-            except ValueError:
-                bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
-        elif action == "decrease_btc":
-            try:
-                value = int(message.text)
-                if player in pisunchik:
-                    pisunchik[player]["coins"] -= value
-                    bot.send_message(admin_chat_id, f"BTC decreased for Player {player_name}.")
-                else:
-                    bot.send_message(admin_chat_id, "Player not found.")
-            except ValueError:
-                bot.send_message(admin_chat_id, "Please enter a valid numeric value.")
-
-        elif action == "add_item":
-            item_name = message.text
-            if player in pisunchik:
-                if item_name in item_desc:
-                    pisunchik[player]["items"].append(item_name)
-                    bot.send_message(admin_chat_id, f"Item '{item_name}' added to Player {player_name}.")
-                else:
-                    bot.send_message(admin_chat_id, "Item not found.")
-            else:
-                bot.send_message(admin_chat_id, "Player not found.")
-        elif action == "remove_item":
-            item_name = message.text
-            if player in pisunchik:
-                if item_name in pisunchik[player]["items"]:
-                    pisunchik[player]["items"].remove(item_name)
-                    bot.send_message(admin_chat_id, f"Item '{item_name}' removed from Player {player_name}.")
-                else:
-                    bot.send_message(admin_chat_id,
-                                     f"Item '{item_name}' not found in Player {player_name}'s inventory.")
-            else:
-                bot.send_message(admin_chat_id, "Player not found.")
-
-        del admin_actions[admin_chat_id]
+            del admin_actions[admin_chat_id]
+        else:
+            bot.send_message(admin_chat_id, "Invalid admin action.")
     else:
-        bot.send_message(admin_chat_id, "Invalid admin action.")
+        bot.answer_callback_query(message.id, "You are not authorized to perform this action.")
     save_data()
 
 
