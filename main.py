@@ -598,13 +598,19 @@ def update_pisunchik(message):
 def update_pisunchik(message):
     player_id = str(message.from_user.id)
     if 'kubik_seksa' in pisunchik[player_id]['items']:
-        pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 3
-        bot.send_message(message.chat.id,
-                         f"Вы потратили 3 BTC\nСработал kubik_seksa - Стоимость броска уменьшена на 50%")
+        if pisunchik[player_id]['coins'] >= 3:
+            pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 3
+            bot.send_message(message.chat.id,
+                             f"Вы потратили 3 BTC\nСработал kubik_seksa - Стоимость броска уменьшена на 50%")
+        else:
+            bot.send_message(message.chat.id, f"У вас недостаточно BTC")
 
     else:
-        pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 6
-        bot.send_message(message.chat.id, f"Вы потратили 6 BTC")
+        if pisunchik[player_id]['coins'] >= 6:
+            pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 6
+            bot.send_message(message.chat.id, f"Вы потратили 6 BTC")
+        else:
+        bot.send_message(message.chat.id, f"У вас недостаточно BTC")
 
     if player_id in pisunchik:
         number = random.randint(1, 6)
