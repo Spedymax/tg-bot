@@ -279,15 +279,7 @@ def use_krystalnie_ballzzz(message):
         bot.reply_to(message, "У вас нету предмета 'krystalnie_ballzzz'.")
         return
 
-    if pisunchik[player_id]['last_used'].replace(tzinfo=None) >= datetime.now() and pisunchik[player_id][
-        'last_used'] is not None:
-        # Generate a random number to determine the next effect (for demonstration purposes)
-        next_effect = random.randint(-10, 10)
-
-        effect_message = f"Следующее изменение писюнчика будет: {next_effect} см."
-        pisunchik[player_id]['ballzzz_number'] = next_effect
-
-    elif pisunchik[player_id]['ballzzz_number'] is None:
+    if pisunchik[player_id]['ballzzz_number'] is None:
         next_effect = random.randint(-10, 10)
 
         effect_message = f"Следующее изменение писюнчика будет: {next_effect} см."
@@ -588,7 +580,9 @@ def update_pisunchik(message):
             reply_message += "\nЭффект от 'prezervativ': писюнчик не уменьшился."
         if cooldown:
             reply_message += "\nprezervativ' еще на кулдауне."
-
+        # Generate a random number to determine the next effect (for demonstration purposes)
+        next_effect = random.randint(-10, 10)
+        pisunchik[player_id]['ballzzz_number'] = next_effect
         bot.reply_to(message, reply_message)
 
     save_data()
