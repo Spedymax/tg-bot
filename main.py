@@ -597,33 +597,32 @@ def update_pisunchik(message):
 @bot.message_handler(commands=['roll'])
 def update_pisunchik(message):
     player_id = str(message.from_user.id)
+    neededCoins = 6
     if 'kubik_seksa' in pisunchik[player_id]['items']:
-        if pisunchik[player_id]['coins'] >= 3:
-            pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 3
-            bot.send_message(message.chat.id,
-                             f"Вы потратили 3 BTC\nСработал kubik_seksa - Стоимость броска уменьшена на 50%")
-        else:
-            bot.send_message(message.chat.id, f"У вас недостаточно BTC")
-
-    else:
-        if pisunchik[player_id]['coins'] >= 6:
-            pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 6
-            bot.send_message(message.chat.id, f"Вы потратили 6 BTC")
-        else:
-            bot.send_message(message.chat.id, f"У вас недостаточно BTC")
-
+        neededCoins = 3
     if player_id in pisunchik:
-        number = random.randint(1, 6)
-        bot.reply_to(message, f"Выпало: {number}")
-        if number <= 3:
-            pisunchik[player_id]['pisunchik_size'] -= 5
-        if number > 3:
-            pisunchik[player_id]['pisunchik_size'] += 5
-        bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\n")
-        number2 = random.randint(1, 40)
-        if number2 == 14:
-            bot.send_message(message, f"🆘🤑БОГ ТЫ МОЙ! ТЫ ВЫИГРАЛ ДЖЕКПОТ! 300 BTC ТЕБЕ НА СЧЕТ!🤑🆘")
-            pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + 300
+        if pisunchik[player_id]['coins'] >= neededCoins:
+            if 'kubik_seksa' in pisunchik[player_id]['items']:
+                pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 3
+                bot.send_message(message.chat.id,
+                                 f"Вы потратили 3 BTC\nСработал kubik_seksa - Стоимость броска уменьшена на 50%")
+
+            else:
+                pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 6
+                bot.send_message(message.chat.id, f"Вы потратили 6 BTC")
+            number = random.randint(1, 6)
+            bot.reply_to(message, f"Выпало: {number}")
+            if number <= 3:
+                pisunchik[player_id]['pisunchik_size'] -= 5
+            if number > 3:
+                pisunchik[player_id]['pisunchik_size'] += 5
+            bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\n")
+            number2 = random.randint(1, 40)
+            if number2 == 14:
+                bot.send_message(message, f"🆘🤑БОГ ТЫ МОЙ! ТЫ ВЫИГРАЛ ДЖЕКПОТ! 300 BTC ТЕБЕ НА СЧЕТ!🤑🆘")
+                pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + 300
+        else:
+            bot.reply_to(message, f"Недостаточно BTC. Нужно {neededCoins} BTC")
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
 
