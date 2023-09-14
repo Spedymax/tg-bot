@@ -610,7 +610,7 @@ def update_pisunchik(message):
             pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 6
             bot.send_message(message.chat.id, f"Вы потратили 6 BTC")
         else:
-        bot.send_message(message.chat.id, f"У вас недостаточно BTC")
+            bot.send_message(message.chat.id, f"У вас недостаточно BTC")
 
     if player_id in pisunchik:
         number = random.randint(1, 6)
