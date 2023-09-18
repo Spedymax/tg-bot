@@ -91,7 +91,12 @@ shop_prices = {
 
     'pisunchik_potion_small': 10,
     'pisunchik_potion_medium': 15,
-    'pisunchik_potion_large': 20
+    'pisunchik_potion_large': 20,
+    'Statuetki':" ",
+    'Pudginio': 100,
+    'Ryadovoi Rudgers': 200,
+    'Polkovnik Buchantos': 250,
+    'General Chin-Choppa': 450
 
 }
 
@@ -588,37 +593,89 @@ def update_pisunchik(message):
     save_data()
 
 
+# Create an inline keyboard with options
+def create_roll_keyboard():
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.row(
+        types.InlineKeyboardButton(text='1', callback_data='roll_1'),
+        types.InlineKeyboardButton(text='3', callback_data='roll_3')
+    )
+    keyboard.row(
+        types.InlineKeyboardButton(text='5', callback_data='roll_5'),
+        types.InlineKeyboardButton(text='10', callback_data='roll_10')
+    )
+    keyboard.row(
+        types.InlineKeyboardButton(text='20', callback_data='roll_20'),
+        types.InlineKeyboardButton(text='50', callback_data='roll_50')
+    )
+    keyboard.row(
+        types.InlineKeyboardButton(text='100', callback_data='roll_100')
+    )
+    return keyboard
+
 @bot.message_handler(commands=['roll'])
 def update_pisunchik(message):
-    player_id = str(message.from_user.id)
-    neededCoins = 6
-    if 'kubik_seksa' in pisunchik[player_id]['items']:
-        neededCoins = 3
-    if player_id in pisunchik:
-        if pisunchik[player_id]['coins'] >= neededCoins:
-            if 'kubik_seksa' in pisunchik[player_id]['items']:
-                pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 3
-                bot.send_message(message.chat.id,
-                                 f"Вы потратили 3 BTC\nСработал kubik_seksa - Стоимость броска уменьшена на 50%")
+    # Create and send the inline keyboard
+    keyboard = create_roll_keyboard()
+    bot.send_message(message.chat.id, "Выберите, сколько раз вы хотите бросить кубик:", reply_markup=keyboard)
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith('roll_'))
+def handle_roll_option(call):
+    option = int(call.data.split('_')[1])
+    user_id = str(call.from_user.id)
+
+    jackpot_message = f"🆘🤑БОГ ТЫ МОЙ! ТЫ ВЫИГРАЛ ДЖЕКПОТ! 300 BTC ТЕБЕ НА СЧЕТ!🤑🆘\n"
+
+    if user_id in pisunchik:
+        neededCoins = option * 6
+        if 'kubik_seksa' in pisunchik[user_id]['items']:
+            neededCoins = option * 3
+
+        if pisunchik[user_id]['coins'] >= neededCoins:
+            if 'kubik_seksa' in pisunchik[user_id]['items']:
+                pisunchik[user_id]['coins'] -= neededCoins
             else:
-                pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] - 6
-                bot.send_message(message.chat.id, f"Вы потратили 6 BTC")
-            number = random.randint(1, 6)
-            bot.reply_to(message, f"Выпало: {number}")
-            if number <= 3:
-                pisunchik[player_id]['pisunchik_size'] -= 5
-            if number > 3:
-                pisunchik[player_id]['pisunchik_size'] += 5
-            bot.reply_to(message, f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\n")
-            number2 = random.randint(1, 40)
-            if number2 == 14:
-                bot.send_message(message, f"🆘🤑БОГ ТЫ МОЙ! ТЫ ВЫИГРАЛ ДЖЕКПОТ! 300 BTC ТЕБЕ НА СЧЕТ!🤑🆘")
-                pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + 300
+                pisunchik[user_id]['coins'] -= neededCoins
+
+            roll_results = []
+            jackpot = 0
+            for _ in range(option):
+                number = random.randint(1, 6)
+                roll_results.append(number)
+                for number in roll_results:
+                    if number <= 3:
+                        pisunchik[user_id]['pisunchik_size'] -= 5
+                    if number > 3:
+                        pisunchik[user_id]['pisunchik_size'] += 5
+                number2 = random.randint(1, 40)
+                if number2 == 14:
+                    jackpot += 1
+
+            # Display the roll results in one message
+            roll_message = f"Результаты бросков: {' '.join(map(str, roll_results))}\n"
+            bot.send_message(call.message.chat.id, roll_message)
+
+            # Display the updated pizunchik size
+            bot.send_message(call.message.chat.id, f"Ваш писюнчик: {pisunchik[user_id]['pisunchik_size']} см")
+
+            if jackpot != 0:
+                time.sleep(2)
+                bot.send_message(call.message.chat.id, "Cтоп что?")
+                time.sleep(2)
+                bot.send_message(call.message.chat.id, "...")
+                time.sleep(2)
+                bot.send_message(call.message.chat.id, "Да ладно...")
+                for i in range(jackpot):
+                    time.sleep(2)
+                    if i >= 1:
+                        bot.send_message(call.message.chat.id, "ЧТО? ЕЩЕ ОДИН?")
+                        time.sleep(2)
+                    pisunchik[user_id]['coins'] += 300
+                    bot.send_message(call.message.chat.id, jackpot_message)
         else:
-            bot.reply_to(message, f"Недостаточно BTC. Нужно {neededCoins} BTC")
+            bot.send_message(call.message.chat.id, f"Недостаточно BTC. Нужно {neededCoins} BTC")
     else:
-        bot.reply_to(message, "Вы не зарегистрированы как игрок")
+        bot.send_message(call.message.chat.id, "Вы не зарегистрированы как игрок")
 
     save_data()
 
