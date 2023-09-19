@@ -33,11 +33,11 @@ cursor = conn.cursor()
 
 def load_data():
     cursor.execute(
-        "SELECT player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number FROM pisunchik_data")
+        "SELECT player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count FROM pisunchik_data")
     data = cursor.fetchall()
     player_data = {}
 
-    for player_id, pisunchik_size, coins, items_list, last_used, last_prezervativ, ballzzz_number in data:
+    for player_id, pisunchik_size, coins, items_list, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count in data:
         # Check if 'items_list' is None or an empty list, and provide a default value
         if items_list is None or not items_list:
             items = []  # Default to an empty list
@@ -54,7 +54,9 @@ def load_data():
             'items': items,
             'last_used': last_used,
             'last_prezervativ': last_prezervativ,
-            'ballzzz_number': ballzzz_number
+            'ballzzz_number': ballzzz_number,
+            'casino_last_used': casino_last_used,
+            'casino_usage_count': casino_usage_count
         }
 
     return player_data
@@ -92,7 +94,7 @@ shop_prices = {
     'pisunchik_potion_small': 10,
     'pisunchik_potion_medium': 15,
     'pisunchik_potion_large': 20,
-    'Statuetki':" ",
+    'Statuetki': " ",
     'Pudginio': 100,
     'Ryadovoi Rudgers': 200,
     'Polkovnik Buchantos': 250,
@@ -119,7 +121,6 @@ item_desc = {
 
 }
 
-
 # Define game states
 START, IN_DUNGEON, FOUND_EXIT = range(3)
 
@@ -145,6 +146,8 @@ dungeon_rooms = [
     "Вы забираетесь на остров который находится в центре озера. Он окружен высокими скалами. На острове есть деревья, цветы и другие растения. Но тут очень холодно. Уходите.",
 ]
 dungeon_room = 0
+
+
 # Keyboard markup for game options
 def get_keyboard():
     keyboard = types.InlineKeyboardMarkup(row_width=2)
@@ -152,6 +155,7 @@ def get_keyboard():
         keyboard.add(types.InlineKeyboardButton("Налево", callback_data='turn_left'),
                      types.InlineKeyboardButton("Направо", callback_data='turn_right'))
     return keyboard
+
 
 # Start the game
 @bot.message_handler(commands=['poroshochek'])
@@ -166,11 +170,13 @@ def start_game(message):
         time.sleep(3)
         bot.send_message(message.chat.id, f"Он что-то бормочет себе под нос и вдруг исчезает.")
         time.sleep(3)
-        bot.send_message(message.chat.id, f"Вы чувствуете как ваши яйца увеличиваются в размере.\nСейчас что-то произойдет!")
+        bot.send_message(message.chat.id,
+                         f"Вы чувствуете как ваши яйца увеличиваются в размере.\nСейчас что-то произойдет!")
         time.sleep(3)
         bot.send_message(message.chat.id, f"Внезапно в глазах темнеет, и вы падаете на пол....")
         time.sleep(3)
         bot.send_message(message.chat.id, dungeon_rooms[0], reply_markup=get_keyboard())
+
 
 # Handle button callbacks
 @bot.callback_query_handler(func=lambda call: call.data.startswith("turn"))
@@ -191,33 +197,32 @@ def handle_callback(call):
         if dungeon_room == 12 or dungeon_room == 13 or dungeon_room == 14:
             current_state = FOUND_EXIT
             dungeon_room = 11
-            bot.edit_message_text(f"Вы достигли выхода из подземелья! Поздравляю!", call.message.chat.id, call.message.message_id,
+            bot.edit_message_text(f"Вы достигли выхода из подземелья! Поздравляю!", call.message.chat.id,
+                                  call.message.message_id,
                                   reply_markup=None)
         else:
             bot.edit_message_text(dungeon_rooms[dungeon_room], call.message.chat.id, call.message.message_id,
                                   reply_markup=get_keyboard())
 
-
-
         if current_state == FOUND_EXIT:
             bot.send_message(call.message.chat.id, f"Вы достигли выхода из подземелья! Поздравляем!\n")
             time.sleep(3)
-            bot.send_message(call.message.chat.id, f"Вы осматриваетесь по сторонам и видите колдуна которого вы встретили ранее\n")
+            bot.send_message(call.message.chat.id,
+                             f"Вы осматриваетесь по сторонам и видите колдуна которого вы встретили ранее\n")
             time.sleep(3)
             bot.send_message(call.message.chat.id, f"Он опять что-то бормочет себе под нос и изчезает!\n")
             time.sleep(3)
             bot.send_message(call.message.chat.id, f"Вы понимаете что у вас пропал мешочек с порошком :(\n")
             pisunchik[player_id]['items'].remove('poroshochek')
             time.sleep(3)
-            bot.send_message(call.message.chat.id, f"Вы снимаете с себя трусы и понимаете что ваш писюнчик увеличился на 20 см!\n")
+            bot.send_message(call.message.chat.id,
+                             f"Вы снимаете с себя трусы и понимаете что ваш писюнчик увеличился на 20 см!\n")
             time.sleep(3)
             bot.send_message(call.message.chat.id, f"А еще вы получили 100 BTC\n")
             pisunchik[player_id]['pisunchik_size'] += 20
             pisunchik[player_id]['coins'] += 100
             bot.send_message(call.message.chat.id, "Спасибо за игру!")
             save_data()
-
-
 
 
 # Command to initiate sending a message to the group
@@ -435,6 +440,7 @@ def handle_select_player(call):
     else:
         bot.answer_callback_query(call.id, "You are not authorized to perform this action.")
 
+
 # Handle user messages for admin actions
 @bot.message_handler(func=lambda message: message.chat.id in admin_actions)
 def handle_admin_actions(message):
@@ -613,11 +619,13 @@ def create_roll_keyboard():
     )
     return keyboard
 
+
 @bot.message_handler(commands=['roll'])
 def update_pisunchik(message):
     # Create and send the inline keyboard
     keyboard = create_roll_keyboard()
     bot.send_message(message.chat.id, "Выберите, сколько раз вы хотите бросить кубик:", reply_markup=keyboard)
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('roll_'))
 def handle_roll_option(call):
@@ -859,7 +867,7 @@ def handle_donation_amount(message):
         return
 
     # Calculate the number of coins to award based on the donation
-    coins_awarded = donation_amount*4 + (donation_amount // 5)*5
+    coins_awarded = donation_amount * 4 + (donation_amount // 5) * 5
 
     # Update the player's pisunchik size and coins
     pisunchik[player_id]['pisunchik_size'] -= donation_amount
@@ -1070,7 +1078,6 @@ def check_cooldown(message):
         bot.edit_message_text(chat_id=message.chat.id, message_id=initial_message.message_id, text=text_response)
 
 
-
 @bot.message_handler(commands=['furrypics'])
 def send_furry_pics(message):
     random_selection = random.sample(image_urls2, 5)
@@ -1079,6 +1086,42 @@ def send_furry_pics(message):
             bot.send_photo(chat_id=message.chat.id, photo=url)
         elif url.endswith(('.gif', '.gifv')):
             bot.send_animation(chat_id=message.chat.id, animation=url)
+
+
+max_usage_per_day = 3
+
+
+@bot.message_handler(commands=['kazik'])
+def kazik(message):
+    player_id = str(message.from_user.id)
+    # Check if the user has exceeded the usage limit for today
+    if player_id in pisunchik:
+        last_usage_time = pisunchik[player_id]['casino_last_used']
+        current_time = datetime.now(timezone.utc)
+
+        # Calculate the time elapsed since the last usage
+        time_elapsed = current_time - last_usage_time
+
+        # If less than 24 hours have passed, and the usage limit is reached, deny access
+        if time_elapsed < timedelta(days=1) and pisunchik[player_id]['casino_usage_count'] >= max_usage_per_day:
+            bot.send_message(message.chat.id,
+                             f"Вы достигли лимита использования команды на сегодня.\n Времени осталось: {timedelta(days=1) - time_elapsed}")
+            return
+
+    # Update the last usage time and count for the user
+    if player_id not in pisunchik:
+        bot.send_message(message.chat.id, 'Вы не зарегистрированы как игрок')
+        return
+    else:
+        pisunchik[player_id]['casino_last_used'] = datetime.now(timezone.utc)
+        pisunchik[player_id]['casino_usage_count'] += 1
+
+    result = bot.send_dice(message.chat.id, emoji='🎰')
+    if result.dice.value in {64, 1, 22, 43}:
+        time.sleep(4)
+        bot.send_message(message.chat.id, "ДЕКПОТ! Вы получаете 300 BTC!")
+        pisunchik[player_id]['coins'] += 300
+    save_data()
 
 
 @bot.message_handler(commands=['otsos'])
@@ -1161,9 +1204,11 @@ def save_data():
         last_used = data['last_used']
         last_prezervativ = data['last_prezervativ']
         ballzzz_number = data['ballzzz_number']
+        casino_last_used = data['casino_last_used'],
+        casino_usage_count = data['casino_usage_count']
         cursor.execute(
-            "INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number))
+            "INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count))
 
     conn.commit()
 
@@ -1182,6 +1227,32 @@ def handle_send_to_group_message(message):
         # Forward the user's message to the group chat
         bot.send_message(-1001294162183, message.text)
         bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
+    if message.user.id == 742272644:
+        if message.text == '🤓':
+            bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 10 минут)")
+            bot.send_message(message.chat.id, "Пока-пока 🤓")
+            time.sleep(2)
+            bot.restrict_chat_member(message.chat.id, message.from_user.id,
+                                     until_date=datetime.now() + timedelta(minutes=10), permissions=None)
+
+
+# Define the GIF or emoji you want to detect
+specified_gifs = ['AgAD0wIAAsz-DFM', 'AgADGAMAAlMkDVM', 'AgAD9QIAAnD8DVM', 'AgADQQMAAlJEBFM', 'AgAD9iUAAkE6yEo',
+                  'AgADLwMAAkik1FI']
+
+
+@bot.message_handler(content_types=['animation'])
+def handle_message(message):
+    if message.user.id == 742272644:
+        if message.content_type == 'animation':
+            # Check if the message is an animation (GIF)
+            if message.animation.file_unique_id in specified_gifs:
+                # User sent the specified GIF, take some action
+                bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 10 минут)")
+                bot.send_message(message.chat.id, "Пока-пока 🤓")
+                time.sleep(2)
+                bot.restrict_chat_member(message.chat.id, message.from_user.id,
+                                         until_date=datetime.now() + timedelta(minutes=10), permissions=None)
 
 
 bot.polling()
