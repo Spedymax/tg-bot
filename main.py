@@ -18,6 +18,7 @@ love_process = subprocess.Popen(["python3", love_script_path], stdout=subprocess
 # Get the database URL from environment variables
 database_url = os.environ.get('DATABASE_URL')
 
+
 # Establish a database connection
 conn = psycopg2.connect(
     database="d8otdn21efhdgi",
@@ -73,6 +74,7 @@ print("Bot started")
 YURA_ID = 742272644
 MAX_ID = 741542965
 BODYA_ID = 855951767
+VIKA_ID = 1561630034
 # List of admin user IDs
 admin_ids = [741542965]
 # Dictionary to keep track of admin actions
@@ -247,17 +249,61 @@ def start_game(message):
 
 @bot.message_handler(commands=['leaderboard'])
 def show_leaderboard(message):
-    # Sort pisunchik by pisunchik_size in descending order
-    sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
+    if message.chat.id == -1001294162183:
+        # Sort pisunchik by pisunchik_size in descending order
+        sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
 
-    leaderboard = "🏆 Большой член, большие яйца 🏆\n\n"
-    for i, (player_id, data) in enumerate(sorted_players[:5]):
-        name = bot.get_chat(int(player_id)).first_name
-        pisunchik_size = data['pisunchik_size']
-        coins = data['coins']
-        leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
+        # Suppose you want to remove the player with a specific player_id
+        player_id_to_remove = '1561630034'
 
-    bot.reply_to(message, leaderboard)
+        # Use a list comprehension to filter out the player with the specified player_id
+        sorted_players = [player for player in sorted_players if player[0] != player_id_to_remove]
+
+        leaderboard = "🏆 Большой член, большие яйца 🏆\n\n"
+        for i, (player_id, data) in enumerate(sorted_players[:5]):
+            name = bot.get_chat(int(player_id)).first_name
+            pisunchik_size = data['pisunchik_size']
+            coins = data['coins']
+            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
+
+        bot.reply_to(message, leaderboard)
+    if message.chat.id == -1004017800619:
+        # Sort pisunchik by pisunchik_size in descending order
+        sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
+
+        # Suppose you want to remove the player with a specific player_id
+        player_id_to_remove = '742272644'
+
+        # Use a list comprehension to filter out the player with the specified player_id
+        sorted_players = [player for player in sorted_players if player[0] != player_id_to_remove]
+
+        # Suppose you want to remove the player with a specific player_id
+        player_id_to_remove = '855951767'
+
+        # Use a list comprehension to filter out the player with the specified player_id
+        sorted_players = [player for player in sorted_players if player[0] != player_id_to_remove]
+
+        leaderboard = "🏆 Большой член, большие яйца 🏆\n\n"
+        for i, (player_id, data) in enumerate(sorted_players[:5]):
+            name = bot.get_chat(int(player_id)).first_name
+            pisunchik_size = data['pisunchik_size']
+            coins = data['coins']
+            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
+
+        bot.reply_to(message, leaderboard)
+
+    else:
+        # Sort pisunchik by pisunchik_size in descending order
+        sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
+
+        leaderboard = "🏆 Большой член, большие яйца 🏆\n\n"
+        for i, (player_id, data) in enumerate(sorted_players[:5]):
+            name = bot.get_chat(int(player_id)).first_name
+            pisunchik_size = data['pisunchik_size']
+            coins = data['coins']
+            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
+
+        bot.reply_to(message, leaderboard)
 
 
 @bot.message_handler(commands=['smazka'])
@@ -1151,6 +1197,14 @@ def otsos(message):
         max_button = types.InlineKeyboardButton(text="Макс", callback_data="otsos_max")
         yura_button = types.InlineKeyboardButton(text="Юра", callback_data="otsos_yura")
         markup.add(max_button, yura_button)
+        bot.send_message(message.chat.id,
+                         f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?",
+                         reply_markup=markup, parse_mode='html')
+
+    elif player_id == "1561630034":
+        markup = types.InlineKeyboardMarkup()
+        max_button = types.InlineKeyboardButton(text="Макс", callback_data="otsos_max")
+        markup.add(max_button)
         bot.send_message(message.chat.id,
                          f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?",
                          reply_markup=markup, parse_mode='html')
