@@ -1227,7 +1227,7 @@ def handle_send_to_group_message(message):
         # Forward the user's message to the group chat
         bot.send_message(-1001294162183, message.text)
         bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
-    if message.user.id == 742272644:
+    if message.from_user.id == 742272644:
         if message.text == '🤓':
             bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 10 минут)")
             bot.send_message(message.chat.id, "Пока-пока 🤓")
