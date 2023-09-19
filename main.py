@@ -1243,7 +1243,7 @@ specified_gifs = ['AgAD0wIAAsz-DFM', 'AgADGAMAAlMkDVM', 'AgAD9QIAAnD8DVM', 'AgAD
 
 @bot.message_handler(content_types=['animation'])
 def handle_message(message):
-    if message.user.id == 742272644:
+    if message.from_user.id == 742272644:
         if message.content_type == 'animation':
             # Check if the message is an animation (GIF)
             if message.animation.file_unique_id in specified_gifs:
