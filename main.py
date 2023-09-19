@@ -95,12 +95,12 @@ shop_prices = {
 
     'pisunchik_potion_small': 10,
     'pisunchik_potion_medium': 15,
-    'pisunchik_potion_large': 20,
-    'Statuetki': " ",
-    'Pudginio': 100,
-    'Ryadovoi Rudgers': 200,
-    'Polkovnik Buchantos': 250,
-    'General Chin-Choppa': 450
+    'pisunchik_potion_large': 20
+    # 'Statuetki': " ",
+    # 'Pudginio': 100,
+    # 'Ryadovoi Rudgers': 200,
+    # 'Polkovnik Buchantos': 250,
+    # 'General Chin-Choppa': 450
 
 }
 
