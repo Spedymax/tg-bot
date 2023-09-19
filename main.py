@@ -267,7 +267,7 @@ def show_leaderboard(message):
             leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
 
         bot.reply_to(message, leaderboard)
-    if message.chat.id == -1004017800619:
+    elif message.chat.id == -1001932619845:
         # Sort pisunchik by pisunchik_size in descending order
         sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
 
@@ -291,7 +291,6 @@ def show_leaderboard(message):
             leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
 
         bot.reply_to(message, leaderboard)
-
     else:
         # Sort pisunchik by pisunchik_size in descending order
         sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
