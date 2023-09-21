@@ -18,7 +18,6 @@ love_process = subprocess.Popen(["python3", love_script_path], stdout=subprocess
 # Get the database URL from environment variables
 database_url = os.environ.get('DATABASE_URL')
 
-
 # Establish a database connection
 conn = psycopg2.connect(
     database="d8otdn21efhdgi",
@@ -116,7 +115,6 @@ item_desc = {
     'smazka': '{Аксивное} Можно использовать /pisunchik еще раз, раз в неделю\nИспользование: /smazka',
     'poroshochek': '/poroshochek ???',
     'shaurma': 'Ну молодец купил шаурму и чё дальше? Схавать /shaurma',
-    
 
     'zelie_pisunchika': '{Съедобное} Моментально увеличивает писюнчик на 20 или -20 см. Шанс 50 на 50\nИспользование: /zelie_pisunchika',
     'masturbator': '{Съедобное} Позволяет с честью пожертвовать размером своего писюнчика ради получения BTC. Чем большим размером пожертвовано, тем больше монет выиграно. 1 см = 4 BTC + 5 BTC за каждые 5 см.\nИспользование: /masturbator',
@@ -934,6 +932,23 @@ def handle_donation_amount(message):
     )
 
 
+@bot.message_handler(commands=['piratik'])
+def pirate_song(message):
+    songs_folder = '/piratSongs'
+    song_files = [f for f in os.listdir(songs_folder) if f.endswith('.mp3')]
+
+    if not song_files:
+        bot.send_message(message.chat.id, "No MP3 songs found in the folder.")
+        return
+
+    # Select a random song from the list
+    random_song = random.choice(song_files)
+
+    # Send the selected song to the user
+    with open(os.path.join(songs_folder, random_song), 'rb') as audio_file:
+        bot.send_audio(message.chat.id, audio_file)
+
+
 @bot.message_handler(commands=['shaurma'])
 def use_pisunchik_potion_small(message):
     player_id = str(message.from_user.id)
@@ -1280,7 +1295,8 @@ def save_data():
         casino_usage_count = data['casino_usage_count']
         cursor.execute(
             "INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count))
+            (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used,
+             casino_usage_count))
 
     conn.commit()
 
