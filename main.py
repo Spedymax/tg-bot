@@ -934,7 +934,7 @@ def handle_donation_amount(message):
 
 @bot.message_handler(commands=['piratik'])
 def pirate_song(message):
-    songs_folder = '/piratSongs'
+    songs_folder = 'piratSongs'
     song_files = [f for f in os.listdir(songs_folder) if f.endswith('.mp3')]
 
     if not song_files:
