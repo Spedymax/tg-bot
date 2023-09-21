@@ -95,7 +95,8 @@ shop_prices = {
 
     'pisunchik_potion_small': 10,
     'pisunchik_potion_medium': 15,
-    'pisunchik_potion_large': 20
+    'pisunchik_potion_large': 20,
+    'shaurma': 150
     # 'Statuetki': " ",
     # 'Pudginio': 100,
     # 'Ryadovoi Rudgers': 200,
@@ -114,6 +115,8 @@ item_desc = {
     'krystalnie_ballzzz': '{Активное} Показывает сколько выпадет при использовании /pisunchik в следующий раз\nИспользование: /krystalnie_ballzzz',
     'smazka': '{Аксивное} Можно использовать /pisunchik еще раз, раз в неделю\nИспользование: /smazka',
     'poroshochek': '/poroshochek ???',
+    'shaurma': 'Ну молодец купил шаурму и чё дальше? Схавать /shaurma',
+    
 
     'zelie_pisunchika': '{Съедобное} Моментально увеличивает писюнчик на 20 или -20 см. Шанс 50 на 50\nИспользование: /zelie_pisunchika',
     'masturbator': '{Съедобное} Позволяет с честью пожертвовать размером своего писюнчика ради получения BTC. Чем большим размером пожертвовано, тем больше монет выиграно. 1 см = 4 BTC + 5 BTC за каждые 5 см.\nИспользование: /masturbator',
@@ -335,7 +338,7 @@ def use_krystalnie_ballzzz(message):
         return
 
     if pisunchik[player_id]['ballzzz_number'] is None:
-        next_effect = random.randint(-10, 10)
+        next_effect = random.randint(-10, 17)
 
         effect_message = f"Следующее изменение писюнчика будет: {next_effect} см."
         pisunchik[player_id]['ballzzz_number'] = next_effect
@@ -586,12 +589,17 @@ def update_pisunchik(message):
 
     if player_id in pisunchik:
         pisunchik[player_id]['last_used'] = datetime.now()
-        number = random.randint(-10, 10)
+        number = random.randint(-10, 17)
         number2 = random.randint(5, 15)
         kolzo_random = random.random()
         bdsm_random = random.random()
         ne_umenshilsya = False
         cooldown = False
+
+        if 'krystalnie_ballzzz' in pisunchik[player_id]['items'] and pisunchik[player_id]['ballzzz_number'] is not None:
+            number = pisunchik[player_id]['ballzzz_number']
+            pisunchik[player_id]['ballzzz_number'] = None
+
         # Check if the player has 'kolczo_na_chlen' in their inventory and apply its effect
         if 'kolczo_na_chlen' in pisunchik[player_id]['items'] and kolzo_random <= 0.2:
             print(number2)
@@ -599,7 +607,7 @@ def update_pisunchik(message):
             print(number2)
 
         # Check if the player has 'prezervativ' in their inventory and apply its effect
-        if 'prezervativ' in pisunchik[player_id]['items']:
+        if 'prezervativ' in pisunchik[player_id]['items'] and number < 0:
             current_time = datetime.now(
                 timezone.utc)  # Use datetime.now(timezone.utc) to create an offset-aware datetime
             if current_time - pisunchik[player_id]['last_prezervativ'] >= timedelta(days=4):
@@ -615,10 +623,6 @@ def update_pisunchik(message):
             print(number)
             number += 5  # Add +5 cm to the pisunchik size
             print(number)
-
-        if 'krystalnie_ballzzz' in pisunchik[player_id]['items'] and pisunchik[player_id]['ballzzz_number'] is not None:
-            number = pisunchik[player_id]['ballzzz_number']
-            pisunchik[player_id]['ballzzz_number'] = None
 
         pisunchik[player_id]['pisunchik_size'] += number
         pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + number2
@@ -637,7 +641,7 @@ def update_pisunchik(message):
         if cooldown:
             reply_message += "\nprezervativ' еще на кулдауне."
         # Generate a random number to determine the next effect (for demonstration purposes)
-        next_effect = random.randint(-10, 10)
+        next_effect = random.randint(-10, 17)
         pisunchik[player_id]['ballzzz_number'] = next_effect
         bot.reply_to(message, reply_message)
 
@@ -928,6 +932,21 @@ def handle_donation_amount(message):
         message,
         f"Вы задонатили {donation_amount} см вашего писюнчика и получили {coins_awarded} ВТС взамен"
     )
+
+
+@bot.message_handler(commands=['shaurma'])
+def use_pisunchik_potion_small(message):
+    player_id = str(message.from_user.id)
+    bot.send_message(message.chat.id, 'Ну допустим схавал ты шаурмую. И? Оно того стоило?')
+    time.sleep(2)
+    bot.send_message(message.chat.id, '*Нихуя не произошло*')
+    time.sleep(2)
+    bot.send_message(message.chat.id, 'А, не, что-то происходит...')
+    time.sleep(2)
+    bot.send_message(message.chat.id, 'А, показалось(')
+    time.sleep(2)
+    bot.send_message(message.chat.id, '*Опять нихуя не произошло🤓*')
+    pisunchik[player_id]['items'].remove('shaurma')
 
 
 @bot.message_handler(commands=['pisunchik_potion_small'])
