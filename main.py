@@ -1186,6 +1186,9 @@ def kazik(message):
             bot.send_message(message.chat.id,
                              f"Вы достигли лимита использования команды на сегодня.\n Времени осталось: {timedelta(days=1) - time_elapsed}")
             return
+        else:
+            # Update the last usage time and count for the user
+            pisunchik[player_id]['casino_usage_count'] = 0
 
     # Update the last usage time and count for the user
     if player_id not in pisunchik:
@@ -1200,6 +1203,7 @@ def kazik(message):
         time.sleep(4)
         bot.send_message(message.chat.id, "ДЕКПОТ! Вы получаете 300 BTC!")
         pisunchik[player_id]['coins'] += 300
+
     save_data()
 
 
