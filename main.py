@@ -115,6 +115,7 @@ item_desc = {
     'smazka': '{Аксивное} Можно использовать /pisunchik еще раз, раз в неделю\nИспользование: /smazka',
     'poroshochek': '/poroshochek ???',
     'shaurma': 'Ну молодец купил шаурму и чё дальше? Схавать /shaurma',
+    'diarea': 'Теперь вы не можете кидать гифки смайлика в очках :)))))',
 
     'zelie_pisunchika': '{Съедобное} Моментально увеличивает писюнчик на 20 или -20 см. Шанс 50 на 50\nИспользование: /zelie_pisunchika',
     'masturbator': '{Съедобное} Позволяет с честью пожертвовать размером своего писюнчика ради получения BTC. Чем большим размером пожертвовано, тем больше монет выиграно. 1 см = 4 BTC + 5 BTC за каждые 5 см.\nИспользование: /masturbator',
@@ -949,6 +950,8 @@ def pirate_song(message):
         bot.send_audio(message.chat.id, audio_file)
 
 
+
+
 @bot.message_handler(commands=['shaurma'])
 def use_pisunchik_potion_small(message):
     player_id = str(message.from_user.id)
@@ -958,9 +961,12 @@ def use_pisunchik_potion_small(message):
     time.sleep(2)
     bot.send_message(message.chat.id, 'А, не, что-то происходит...')
     time.sleep(2)
-    bot.send_message(message.chat.id, 'А, показалось(')
+    bot.send_message(message.chat.id, 'Бляяя, у тебя порвало днище')
     time.sleep(2)
-    bot.send_message(message.chat.id, '*Опять нихуя не произошло🤓*')
+    bot.send_message(message.chat.id, 'Ты просто всё вокруг обосрал, это пиздец')
+    time.sleep(2)
+    bot.send_message(message.chat.id, '*Получен дебафф диарея /items*')
+    pisunchik[player_id]['items'].add('diarea')
     pisunchik[player_id]['items'].remove('shaurma')
 
 
