@@ -1169,10 +1169,10 @@ def send_furry_pics(message):
 
 max_usage_per_day = 3
 
-
 @bot.message_handler(commands=['kazik'])
 def kazik(message):
     player_id = str(message.from_user.id)
+
     # Check if the user has exceeded the usage limit for today
     if player_id in pisunchik:
         last_usage_time = pisunchik[player_id]['casino_last_used']
@@ -1186,8 +1186,8 @@ def kazik(message):
             bot.send_message(message.chat.id,
                              f"Вы достигли лимита использования команды на сегодня.\n Времени осталось: {timedelta(days=1) - time_elapsed}")
             return
-        else:
-            # Update the last usage time and count for the user
+        elif time_elapsed >= timedelta(days=1):
+            # If 24 hours have passed since the last usage, reset the usage count
             pisunchik[player_id]['casino_usage_count'] = 0
 
     # Update the last usage time and count for the user
