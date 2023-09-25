@@ -949,8 +949,6 @@ def pirate_song(message):
         bot.send_audio(message.chat.id, audio_file)
 
 
-
-
 @bot.message_handler(commands=['shaurma'])
 def shaurma(message):
     player_id = str(message.from_user.id)
@@ -1174,6 +1172,7 @@ def send_furry_pics(message):
 
 max_usage_per_day = 3
 
+
 @bot.message_handler(commands=['kazik'])
 def kazik(message):
     player_id = str(message.from_user.id)
@@ -1333,23 +1332,17 @@ def handle_send_to_group_message(message):
                                      until_date=datetime.now() + timedelta(minutes=10), permissions=None)
 
 
-# Define the GIF or emoji you want to detect
-specified_gifs = ['AgAD0wIAAsz-DFM', 'AgADGAMAAlMkDVM', 'AgAD9QIAAnD8DVM', 'AgADQQMAAlJEBFM', 'AgAD9iUAAkE6yEo',
-                  'AgADLwMAAkik1FI']
-
-
 @bot.message_handler(content_types=['animation'])
 def handle_message(message):
     if message.from_user.id == 742272644:
         if message.content_type == 'animation':
-            # Check if the message is an animation (GIF)
-            if message.animation.file_unique_id in specified_gifs:
-                # User sent the specified GIF, take some action
-                bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 10 минут)")
-                bot.send_message(message.chat.id, "Пока-пока 🤓")
-                time.sleep(2)
-                bot.restrict_chat_member(message.chat.id, message.from_user.id,
-                                         until_date=datetime.now() + timedelta(minutes=10), permissions=None)
+            time.sleep(2)
+            bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 5 минут)")
+            time.sleep(2)
+            bot.send_message(message.chat.id, "Пока-пока 🤓")
+            time.sleep(2)
+            bot.restrict_chat_member(message.chat.id, message.from_user.id,
+                                     until_date=datetime.now() + timedelta(minutes=5), permissions=None)
 
 
 bot.polling()
