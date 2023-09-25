@@ -822,7 +822,6 @@ def confirm_purchase(call):
         pisunchik[player_id]['coins'] -= item_price
         # Add the item to the user's inventory
         pisunchik[player_id]['items'].append(item_name)
-
         # Update the 'items' field in the database with the new item list
         update_items(player_id, pisunchik[player_id]['items'], pisunchik[player_id]['coins'])
 
