@@ -10,10 +10,10 @@ from bs4 import BeautifulSoup
 import subprocess
 
 # Specify the path to the love.py script
-love_script_path = "love.py"
+# love_script_path = "love.py"
 
 # Use subprocess to start the love.py script
-love_process = subprocess.Popen(["python3", love_script_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+# love_process = subprocess.Popen(["python3", love_script_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 # Get the database URL from environment variables
 database_url = os.environ.get('DATABASE_URL')
@@ -953,7 +953,7 @@ def pirate_song(message):
 
 
 @bot.message_handler(commands=['shaurma'])
-def use_pisunchik_potion_small(message):
+def shaurma(message):
     player_id = str(message.from_user.id)
     bot.send_message(message.chat.id, 'Ну допустим схавал ты шаурмую. И? Оно того стоило?')
     time.sleep(3)
@@ -966,7 +966,7 @@ def use_pisunchik_potion_small(message):
     bot.send_message(message.chat.id, 'Ты просто всё вокруг обосрал, это пиздец')
     time.sleep(3)
     bot.send_message(message.chat.id, '*Получен дебафф диарея /items*')
-    pisunchik[player_id]['items'].add('diarea')
+    pisunchik[player_id]['items'].append('diarea')
     pisunchik[player_id]['items'].remove('shaurma')
 
 
