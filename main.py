@@ -33,11 +33,11 @@ cursor = conn.cursor()
 
 def load_data():
     cursor.execute(
-        "SELECT player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified FROM pisunchik_data")
+        "SELECT player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified, statuetki FROM pisunchik_data")
     data = cursor.fetchall()
     player_data = {}
 
-    for player_id, pisunchik_size, coins, items_list, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified in data:
+    for player_id, pisunchik_size, coins, items_list, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified, statuetki in data:
         # Check if 'items_list' is None or an empty list, and provide a default value
         if items_list is None or not items_list:
             items = []  # Default to an empty list
@@ -57,7 +57,8 @@ def load_data():
             'ballzzz_number': ballzzz_number,
             'casino_last_used': casino_last_used,
             'casino_usage_count': casino_usage_count,
-            'notified': notified
+            'notified': notified,
+            'statuetki': statuetki
 
         }
 
@@ -82,10 +83,17 @@ admin_ids = [741542965]
 admin_actions = {}
 
 statuetki_prices = {
-    'Pudginio': 100,
-    'Ryadovoi Rudgers': 200,
-    'Polkovnik Buchantos': 250,
-    'General Chin-Choppa': 450
+    'Pudginio': 50,
+    'Ryadovoi Rudgers': 100,
+    'Polkovnik Buchantos': 150,
+    'General Chin-Choppa': 200
+}
+
+statuetki_desc = {
+    'Pudginio': 'Вы чувстуете огромную силу, которая переполняет ваше тело',
+    'Ryadovoi Rudgers': 'Вы чувстуете невероятную ловкость, в ваших руках',
+    'Polkovnik Buchantos': 'Вы чувстуете потрясающий интелект в вашей голове',
+    'General Chin-Choppa': 'Самая обычная статуэтка :)'
 }
 
 shop_prices = {
@@ -125,120 +133,134 @@ item_desc = {
     'masturbator': '{Съедобное} Позволяет с честью пожертвовать размером своего писюнчика ради получения BTC. Чем большим размером пожертвовано, тем больше монет выиграно. 1 см = 4 BTC + 5 BTC за каждые 5 см.\nИспользование: /masturbator',
     'pisunchik_potion_small': '{Съедобное} Моментально увеличивает писюнчик на 3 см\nИспользование: /pisunchik_potion_small',
     'pisunchik_potion_medium': '{Съедобное} Моментально увеличивает писюнчик на 5 см\nИспользование: /pisunchik_potion_medium',
-    'pisunchik_potion_large': '{Съедобное} Моментально увеличивает писюнчик на 10 см\nИспользование: /pisunchik_potion_large',
-
-    'Pudginio': '',
-    'Ryadovoi Rudgers': 200,
-    'Polkovnik Buchantos': 250,
-    'General Chin-Choppa': 450
+    'pisunchik_potion_large': '{Съедобное} Моментально увеличивает писюнчик на 10 см\nИспользование: /pisunchik_potion_large'
 
 }
 
-# Define game states
-START, IN_DUNGEON, FOUND_EXIT = range(3)
 
-player_gold = 0
-mob_hp = 10
-
-# Initialize the game state
-current_state = START
-
-# Define dungeon rooms
-dungeon_rooms = [
-    "Вы просыпаетесь в темной подземной камере. Тут мокро и сыро, не очень хочеться тут оставаться. Ничего не видно но вы нащупываете две двери перед вами. Выберите одну, чтобы продолжить",
-    "Вы попадаете в загадочную комнату с магическим алтарем. Жертвенный камень манит вас но вы сопротивляетесь изо всех сил. Куда вы пойдете дальше?",
-    "Справа вы встречаете мост через бездонную пропасть. Решите, перейти ли вам на другую сторону или пойти налево?",
-    "Вы попадаете в мрачное и опасное место. Оно заполнено пауками всех размеров, от крошечных паучков до огромных пауков-людоедов. Они могут быстро перемещаться и стрелять паутиной. Игрок должен быть осторожным, чтобы не попасть в паутину.",
-    "Вы доходите до тупика. Вам придется вернуться назад. Вы разворачиваетесь, куда же вы пойдете?",
-    "Вы видите сундук неподалёку. Вы открываете сундук и находите 40 BTC! Продолжайте путешевствие.",
-    "Вы входите в забытый город который был построен в древние времена, но теперь он заброшен и забыт. Город состоит из огромных каменных зданий, украшенных резьбой и скульптурами. В центре города находится огромный храм, в котором вы видите огромный алтарь. Вы опять видите две двери. Куда вы пойдете?",
-    "Вы попадаете в заброшенную шахту которая находится глубоко под землей. Она была построена много лет назад, но теперь она заброшена. Шахта состоит из узких проходов, глубоких колодцев и опасных ловушек. В шахте можно найти полезные ресурсы, такие как руда, золото и драгоценные камни. Вы прячите один из драгоценных камней себе в карман. Куда отправимся дальше?",
-    "Перед вами огромный ледник который находится в глубине гор. Он состоит из огромного слоя льда, который образовался много лет назад. Ледник покрыт ледяными статуями, замерзшими водопадами и другими удивительными природными явлениями. Однако ледник также опасен. В нем может быть скользко, а холодный воздух может привести к обморожению. Вы видите две двери. Куда вы пойдете?",
-    "Вы видите сундук неподалёку. Вы открываете сундук и находите 60 BTC! Юху!",
-    "Вы рядом с подземным озером которое находится в глубине горы. Оно питается подземными источниками. Озеро окружено высокими скалами и зарослями деревьев. В озере можно найти рыбу, водоросли и другие обитателей подводного мира. Но в нем могут быть водовороты, ямы и другие опасности, лучше уйти отсюда поскорее.",
-    "Вы забираетесь на остров который находится в центре озера. Он окружен высокими скалами. На острове есть деревья, цветы и другие растения. Но тут очень холодно. Уходите.",
-]
-dungeon_room = 0
-
-
-# Keyboard markup for game options
-def get_keyboard():
-    keyboard = types.InlineKeyboardMarkup(row_width=2)
-    if current_state == IN_DUNGEON:
-        keyboard.add(types.InlineKeyboardButton("Налево", callback_data='turn_left'),
-                     types.InlineKeyboardButton("Направо", callback_data='turn_right'))
-    return keyboard
-
-
-# Start the game
-@bot.message_handler(commands=['poroshochek'])
-def start_game(message):
-    player_id = str(message.from_user.id)
-    if 'poroshochek' in pisunchik[player_id]['items']:
-        global current_state
-        current_state = IN_DUNGEON
-        bot.send_message(message.chat.id, f"Вы достаете из кармана мешочек с порошком и вдыхаете его.")
-        time.sleep(3)
-        bot.send_message(message.chat.id, f"\nПеред вами появляется маленький человечек, возможно колдун!")
-        time.sleep(3)
-        bot.send_message(message.chat.id, f"Он что-то бормочет себе под нос и вдруг исчезает.")
-        time.sleep(3)
-        bot.send_message(message.chat.id,
-                         f"Вы чувствуете как ваши яйца увеличиваются в размере.\nСейчас что-то произойдет!")
-        time.sleep(3)
-        bot.send_message(message.chat.id, f"Внезапно в глазах темнеет, и вы падаете на пол....")
-        time.sleep(3)
-        bot.send_message(message.chat.id, dungeon_rooms[0], reply_markup=get_keyboard())
-
-
-# Handle button callbacks
-@bot.callback_query_handler(func=lambda call: call.data.startswith("turn"))
-def handle_callback(call):
-    global current_state, player_gold, dungeon_room
-    player_id = str(call.from_user.id)
-    if current_state == IN_DUNGEON:
-        if call.data == 'turn_left':
-            dungeon_room += 1
-        elif call.data == 'turn_right':
-            dungeon_room += 1
-
-        elif dungeon_room == 5:
-            player_gold += 50
-        elif dungeon_room == 9:
-            player_gold += 50
-
-        if dungeon_room == 12 or dungeon_room == 13 or dungeon_room == 14:
-            current_state = FOUND_EXIT
-            dungeon_room = 11
-            bot.edit_message_text(f"Вы достигли выхода из подземелья! Поздравляю!", call.message.chat.id,
-                                  call.message.message_id,
-                                  reply_markup=None)
-        else:
-            bot.edit_message_text(dungeon_rooms[dungeon_room], call.message.chat.id, call.message.message_id,
-                                  reply_markup=get_keyboard())
-
-        if current_state == FOUND_EXIT:
-            bot.send_message(call.message.chat.id, f"Вы достигли выхода из подземелья! Поздравляем!\n")
-            time.sleep(3)
-            bot.send_message(call.message.chat.id,
-                             f"Вы осматриваетесь по сторонам и видите колдуна которого вы встретили ранее\n")
-            time.sleep(3)
-            bot.send_message(call.message.chat.id, f"Он опять что-то бормочет себе под нос и изчезает!\n")
-            time.sleep(3)
-            bot.send_message(call.message.chat.id, f"Вы понимаете что у вас пропал мешочек с порошком :(\n")
-            pisunchik[player_id]['items'].remove('poroshochek')
-            time.sleep(3)
-            bot.send_message(call.message.chat.id,
-                             f"Вы снимаете с себя трусы и понимаете что ваш писюнчик увеличился на 20 см!\n")
-            time.sleep(3)
-            bot.send_message(call.message.chat.id, f"А еще вы получили 100 BTC\n")
-            pisunchik[player_id]['pisunchik_size'] += 20
-            pisunchik[player_id]['coins'] += 100
-            bot.send_message(call.message.chat.id, "Спасибо за игру!")
-            save_data()
+# poroshochek
+#
+# # Define game states
+# START, IN_DUNGEON, FOUND_EXIT = range(3)
+#
+# player_gold = 0
+# mob_hp = 10
+#
+# # Initialize the game state
+# current_state = START
+#
+# # Define dungeon rooms
+# dungeon_rooms = [
+#     "Вы просыпаетесь в темной подземной камере. Тут мокро и сыро, не очень хочеться тут оставаться. Ничего не видно но вы нащупываете две двери перед вами. Выберите одну, чтобы продолжить",
+#     "Вы попадаете в загадочную комнату с магическим алтарем. Жертвенный камень манит вас но вы сопротивляетесь изо всех сил. Куда вы пойдете дальше?",
+#     "Справа вы встречаете мост через бездонную пропасть. Решите, перейти ли вам на другую сторону или пойти налево?",
+#     "Вы попадаете в мрачное и опасное место. Оно заполнено пауками всех размеров, от крошечных паучков до огромных пауков-людоедов. Они могут быстро перемещаться и стрелять паутиной. Игрок должен быть осторожным, чтобы не попасть в паутину.",
+#     "Вы доходите до тупика. Вам придется вернуться назад. Вы разворачиваетесь, куда же вы пойдете?",
+#     "Вы видите сундук неподалёку. Вы открываете сундук и находите 40 BTC! Продолжайте путешевствие.",
+#     "Вы входите в забытый город который был построен в древние времена, но теперь он заброшен и забыт. Город состоит из огромных каменных зданий, украшенных резьбой и скульптурами. В центре города находится огромный храм, в котором вы видите огромный алтарь. Вы опять видите две двери. Куда вы пойдете?",
+#     "Вы попадаете в заброшенную шахту которая находится глубоко под землей. Она была построена много лет назад, но теперь она заброшена. Шахта состоит из узких проходов, глубоких колодцев и опасных ловушек. В шахте можно найти полезные ресурсы, такие как руда, золото и драгоценные камни. Вы прячите один из драгоценных камней себе в карман. Куда отправимся дальше?",
+#     "Перед вами огромный ледник который находится в глубине гор. Он состоит из огромного слоя льда, который образовался много лет назад. Ледник покрыт ледяными статуями, замерзшими водопадами и другими удивительными природными явлениями. Однако ледник также опасен. В нем может быть скользко, а холодный воздух может привести к обморожению. Вы видите две двери. Куда вы пойдете?",
+#     "Вы видите сундук неподалёку. Вы открываете сундук и находите 60 BTC! Юху!",
+#     "Вы рядом с подземным озером которое находится в глубине горы. Оно питается подземными источниками. Озеро окружено высокими скалами и зарослями деревьев. В озере можно найти рыбу, водоросли и другие обитателей подводного мира. Но в нем могут быть водовороты, ямы и другие опасности, лучше уйти отсюда поскорее.",
+#     "Вы забираетесь на остров который находится в центре озера. Он окружен высокими скалами. На острове есть деревья, цветы и другие растения. Но тут очень холодно. Уходите.",
+# ]
+# dungeon_room = 0
+#
+#
+# # Keyboard markup for game options
+# def get_keyboard():
+#     keyboard = types.InlineKeyboardMarkup(row_width=2)
+#     if current_state == IN_DUNGEON:
+#         keyboard.add(types.InlineKeyboardButton("Налево", callback_data='turn_left'),
+#                      types.InlineKeyboardButton("Направо", callback_data='turn_right'))
+#     return keyboard
+#
+#
+# # Start the game
+# @bot.message_handler(commands=['poroshochek'])
+# def start_game(message):
+#     player_id = str(message.from_user.id)
+#     if 'poroshochek' in pisunchik[player_id]['items']:
+#         global current_state
+#         current_state = IN_DUNGEON
+#         bot.send_message(message.chat.id, f"Вы достаете из кармана мешочек с порошком и вдыхаете его.")
+#         time.sleep(3)
+#         bot.send_message(message.chat.id, f"\nПеред вами появляется маленький человечек, возможно колдун!")
+#         time.sleep(3)
+#         bot.send_message(message.chat.id, f"Он что-то бормочет себе под нос и вдруг исчезает.")
+#         time.sleep(3)
+#         bot.send_message(message.chat.id,
+#                          f"Вы чувствуете как ваши яйца увеличиваются в размере.\nСейчас что-то произойдет!")
+#         time.sleep(3)
+#         bot.send_message(message.chat.id, f"Внезапно в глазах темнеет, и вы падаете на пол....")
+#         time.sleep(3)
+#         bot.send_message(message.chat.id, dungeon_rooms[0], reply_markup=get_keyboard())
+#
+#
+# # Handle button callbacks
+# @bot.callback_query_handler(func=lambda call: call.data.startswith("turn"))
+# def handle_callback(call):
+#     global current_state, player_gold, dungeon_room
+#     player_id = str(call.from_user.id)
+#     if current_state == IN_DUNGEON:
+#         if call.data == 'turn_left':
+#             dungeon_room += 1
+#         elif call.data == 'turn_right':
+#             dungeon_room += 1
+#
+#         elif dungeon_room == 5:
+#             player_gold += 50
+#         elif dungeon_room == 9:
+#             player_gold += 50
+#
+#         if dungeon_room == 12 or dungeon_room == 13 or dungeon_room == 14:
+#             current_state = FOUND_EXIT
+#             dungeon_room = 11
+#             bot.edit_message_text(f"Вы достигли выхода из подземелья! Поздравляю!", call.message.chat.id,
+#                                   call.message.message_id,
+#                                   reply_markup=None)
+#         else:
+#             bot.edit_message_text(dungeon_rooms[dungeon_room], call.message.chat.id, call.message.message_id,
+#                                   reply_markup=get_keyboard())
+#
+#         if current_state == FOUND_EXIT:
+#             bot.send_message(call.message.chat.id, f"Вы достигли выхода из подземелья! Поздравляем!\n")
+#             time.sleep(3)
+#             bot.send_message(call.message.chat.id,
+#                              f"Вы осматриваетесь по сторонам и видите колдуна которого вы встретили ранее\n")
+#             time.sleep(3)
+#             bot.send_message(call.message.chat.id, f"Он опять что-то бормочет себе под нос и изчезает!\n")
+#             time.sleep(3)
+#             bot.send_message(call.message.chat.id, f"Вы понимаете что у вас пропал мешочек с порошком :(\n")
+#             pisunchik[player_id]['items'].remove('poroshochek')
+#             time.sleep(3)
+#             bot.send_message(call.message.chat.id,
+#                              f"Вы снимаете с себя трусы и понимаете что ваш писюнчик увеличился на 20 см!\n")
+#             time.sleep(3)
+#             bot.send_message(call.message.chat.id, f"А еще вы получили 100 BTC\n")
+#             pisunchik[player_id]['pisunchik_size'] += 20
+#             pisunchik[player_id]['coins'] += 100
+#             bot.send_message(call.message.chat.id, "Спасибо за игру!")
+#             save_data()
 
 
 # Command to initiate sending a message to the group
+
+strochki = [
+    'Вы видите вдалеке Торговца с караваном',
+    'Подходя ближе вы замечаете что это статный мужчина в белом пальто с черными как бездна очками',
+    'Он подносит руку к голове, снимая огромную шляпу, и делает маленький поклон в вашу сторону.',
+    '"Здравствуйте, путники, приятно видеть живых людей на этом безкрайнем клочке земли"',
+    '"Я побуду тут некоторое время, переведу дух, а вы пока можете посмотреть мой товар" *подмигивает*',
+    '"Прошу, не стейсняйтесь" /statuetkiShop',
+]
+@bot.message_handler(commands=['torgovec'])
+def torgovec(message):
+    for line in strochki:
+        bot.send_message(message.chat.id, line)
+        time.sleep(5)
+
+
 @bot.message_handler(commands=['misha'])
 def misha(message):
     bot.send_message(message.chat.id, 'Миша!')
@@ -616,8 +638,7 @@ def update_pisunchik(message):
 
         # Check if the player has 'prezervativ' in their inventory and apply its effect
         if 'prezervativ' in pisunchik[player_id]['items'] and number < 0:
-            current_time = datetime.now(
-                timezone.utc)  # Use datetime.now(timezone.utc) to create an offset-aware datetime
+            current_time = datetime.now(timezone.utc) + timedelta(hours=2)  # Use datetime.now(timezone.utc) + timedelta(hours=2) to create an offset-aware datetime
             if current_time - pisunchik[player_id]['last_prezervativ'] >= timedelta(days=4):
                 number = 0
                 ne_umenshilsya = True
@@ -769,6 +790,133 @@ def show_items(message):
             bot.reply_to(message, "Нету описания предметов (Странно)")
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
+@bot.message_handler(commands=['statuetki'])
+def show_items(message):
+    player_id = str(message.from_user.id)
+    item_images = {
+        'Pudginio': 'statuetkiImages/pudginio.jpg',
+        'Ryadovoi Rudgers': 'statuetkiImages/ryadovoi_rudgers.jpg',
+        'General Chin-Choppa': 'statuetkiImages/general_chin_choppa.jpg'
+    }
+
+    if player_id in pisunchik:
+        user_statuetki = pisunchik[player_id]['statuetki']
+
+        if not user_statuetki:
+            bot.reply_to(message, "У вас нету статуэток:(")
+            return
+
+        statuetki_descriptions = []
+        for statuetka in user_statuetki:
+            if statuetka in statuetki_desc:
+                description = f"{statuetka}: {statuetki_desc[statuetka]}"
+                statuetki_descriptions.append(description)
+
+        if statuetki_descriptions:
+            bot.reply_to(message, f"Ваши предметы:\n")
+            time.sleep(1)  # Sleep for 1 second before sending images
+
+            for statuetka in user_statuetki:
+                description = statuetki_desc.get(statuetka, 'No description available')
+                item_image_filename = item_images.get(statuetka, 'statuetkiImages/pudginio.jpg')
+                with open(item_image_filename, 'rb') as photo:
+                    time.sleep(1)
+                    bot.send_photo(message.chat.id, photo, caption=f"{statuetka} - {description} BTC")
+
+        else:
+            bot.reply_to(message, "Нету описания предметов (Странно)")
+    else:
+        bot.reply_to(message, "Вы не зарегистрированы как игрок")
+
+
+@bot.message_handler(commands=['statuetkiShop'])
+def show_statuetki_shop(message):
+    chat_id = message.chat.id
+
+    # Create a dictionary to map item names to image file names
+    item_images = {
+        'Pudginio': 'statuetkiImages/pudginio.jpg',
+        'Ryadovoi Rudgers': 'statuetkiImages/ryadovoi_rudgers.jpg',
+        # 'Polkovnik Buchantos': 'statuetkiImages/polkovnik_buchantos.jpg',
+        'General Chin-Choppa': 'statuetkiImages/general_chin_choppa.jpg'
+    }
+
+    # Generate the shop message with images and prices
+    shop_message = "🏛️ Добро пожаловать в мой магазин! 🏛️\n\n"
+    bot.send_message(chat_id, shop_message)
+
+    for item_name, item_price in statuetki_prices.items():
+        # Get the image file name for the item
+        item_image_filename = item_images.get(item_name, 'statuetkiImages/pudginio.jpg')
+
+        # Send the image along with the item name and price
+        with open(item_image_filename, 'rb') as photo:
+            time.sleep(2)
+            bot.send_photo(chat_id, photo, caption=f"{item_name} - {item_price} BTC")
+
+    bot.send_message(chat_id, f'Посмотреть свои статуэтки можно использовав /statuetki')
+
+
+@bot.message_handler(func=lambda message: message.text in statuetki_prices.keys())
+def buy_item(message):
+    player_id = str(message.from_user.id)
+    statuetka_name = message.text
+    statuetka_price = statuetki_prices.get(statuetka_name, 0)
+
+    if statuetka_price > 0:
+        user_balance = pisunchik[player_id]['coins']
+        if user_balance >= statuetka_price:
+            # Create an inline keyboard for confirmation
+            markup = types.InlineKeyboardMarkup()
+            confirm_button = types.InlineKeyboardButton("Да", callback_data=f"statuetka_confirm_{statuetka_name}")
+            cancel_button = types.InlineKeyboardButton("Нет", callback_data="statuetka_cancel")
+            markup.add(confirm_button, cancel_button)
+
+            # Ask for confirmation
+            confirmation_message = f"Вы хотите купить {statuetka_name} за {statuetka_price} ВТС?"
+            bot.send_message(message.chat.id, confirmation_message, reply_markup=markup)
+        else:
+            bot.reply_to(message, "Недостаточно денег((")
+    else:
+        bot.reply_to(message, "Предмет не найден")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("statuetka_confirm_"))
+def confirm_purchase(call):
+    bot.edit_message_reply_markup(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        reply_markup=None
+    )
+    player_id = str(call.from_user.id)
+    item_name = call.data.split("_", 2)[2]  # Extract item name from the callback data
+    item_price = statuetki_prices.get(item_name, 0)
+
+    user_balance = pisunchik[player_id]['coins']
+
+    if user_balance >= item_price:
+        # Deduct the item price from the user's balance
+        pisunchik[player_id]['coins'] -= item_price
+        # Add the item to the user's inventory
+        pisunchik[player_id]['statuetki'].append(item_name)
+
+        bot.send_message(call.message.chat.id, f"Вы купили {item_name} за {item_price} ВТС.")
+    else:
+        bot.send_message(call.message.chat.id, "Недостаточно денег((")
+
+    save_data()
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "statuetka_cancel")
+def cancel_purchase(call):
+    bot.edit_message_reply_markup(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        reply_markup=None
+    )
+    bot.send_message(call.message.chat.id, "Покупка отменена")
+
+
 
 
 # Function to display available items in the shop
@@ -1056,120 +1204,6 @@ def get_furry_images():
 image_urls2 = get_furry_images()
 print("Loaded")
 
-
-# Function to get the time remaining for the prezervativ cooldown
-def get_prezervativ_cooldown_remaining(player_id):
-    cursor.execute("SELECT last_prezervativ FROM pisunchik_data WHERE player_id = %s", (player_id,))
-    last_used_time = cursor.fetchone()[0]
-
-    if last_used_time is None:
-        return 0  # If the command was never used, it's available immediately
-
-    # Calculate the time remaining until the command becomes available
-    current_time = datetime.now(timezone.utc)
-    cooldown_end_time = last_used_time + timedelta(days=1)
-    time_remaining = cooldown_end_time - current_time
-
-    # Calculate hours, minutes, and seconds remaining
-    hours, remainder = divmod(time_remaining.seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-
-    return hours, minutes, seconds
-
-
-# Function to get the time remaining for the cooldown
-def get_cooldown_remaining(player_id):
-    cursor.execute("SELECT last_used FROM pisunchik_data WHERE player_id = %s", (player_id,))
-    last_used_time = cursor.fetchone()[0]
-
-    if last_used_time is None:
-        return 0  # If the command was never used, it's available immediately
-
-    # Calculate the time remaining until the command becomes available
-    current_time = datetime.now(timezone.utc)
-    cooldown_end_time = last_used_time + timedelta(hours=24)
-    time_remaining = cooldown_end_time - current_time
-
-    # Calculate hours, minutes, and seconds remaining
-    hours, remainder = divmod(time_remaining.seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-
-    return hours, minutes, seconds
-
-
-# Command to check the cooldown and display the countdown
-@bot.message_handler(commands=['timer'])
-def check_cooldown(message):
-    player_id = str(message.from_user.id)
-    player_name = get_player_name(player_id)
-    response = f"Таймер для игрока {player_name}\n/pisunchik будет доступен через "
-
-    hours, minutes, seconds = get_cooldown_remaining(player_id)
-    prez_hours, prez_minutes, prez_seconds = get_prezervativ_cooldown_remaining(player_id)
-
-    text_response = response
-
-    if hours == 0 and minutes == 0 and seconds == 0:
-        text_response = f"Таймер для игрока {player_name}\n/pisunchik Уже доступен!"
-    else:
-        if hours > 0:
-            text_response += f"{hours} часов "
-        if minutes > 0:
-            text_response += f"{minutes} минут "
-        if seconds > 0:
-            text_response += f"{seconds} секунд "
-
-    if 'prezervativ' in pisunchik[player_id]['items']:
-        prez_response = "prezervativ будет доступен через "
-        if prez_hours == 0 and prez_minutes == 0 and prez_seconds == 0:
-            prez_response = "prezervativ уже доступен!"
-        else:
-            if prez_hours > 0:
-                prez_response += f"{prez_hours} часов "
-            if prez_minutes > 0:
-                prez_response += f"{prez_minutes} минут "
-            if prez_seconds > 0:
-                prez_response += f"{prez_seconds} секунд "
-
-        text_response += f"\n{prez_response}"
-
-    # Send the initial message and save its message ID
-    initial_message = bot.send_message(chat_id=message.chat.id, text=text_response)
-
-    # Update the message every second by editing it
-    while hours > 0 or minutes > 0 or seconds > 0 or prez_hours > 0 or prez_minutes > 0 or prez_seconds > 0:
-        time.sleep(30)  # Wait for 5 second before updating the message
-        hours, minutes, seconds = get_cooldown_remaining(player_id)
-        prez_hours, prez_minutes, prez_seconds = get_prezervativ_cooldown_remaining(player_id)
-        text_response = response
-
-        if hours == 0 and minutes == 0 and seconds == 0:
-            text_response = f"Таймер для игрока {player_name}\n/pisunchik Уже доступен!"
-        else:
-            if hours > 0:
-                text_response += f"{hours} часов "
-            if minutes > 0:
-                text_response += f"{minutes} минут "
-            if seconds > 0:
-                text_response += f"{seconds} секунд "
-
-        if 'prezervativ' in pisunchik[player_id]['items']:
-            prez_response = "prezervativ будет доступен через "
-            if prez_hours == 0 and prez_minutes == 0 and prez_seconds == 0:
-                prez_response = "prezervativ уже доступен!"
-            else:
-                if prez_hours > 0:
-                    prez_response += f"{prez_hours} часов "
-                if prez_minutes > 0:
-                    prez_response += f"{prez_minutes} минут "
-                if prez_seconds > 0:
-                    prez_response += f"{prez_seconds} секунд "
-
-            text_response += f"\n{prez_response}"
-        # Edit the initial message with updated cooldown information
-        bot.edit_message_text(chat_id=message.chat.id, message_id=initial_message.message_id, text=text_response)
-
-
 @bot.message_handler(commands=['furrypics'])
 def send_furry_pics(message):
     random_selection = random.sample(image_urls2, 5)
@@ -1190,7 +1224,7 @@ def kazik(message):
     # Check if the user has exceeded the usage limit for today
     if player_id in pisunchik:
         last_usage_time = pisunchik[player_id]['casino_last_used']
-        current_time = datetime.now(timezone.utc)
+        current_time = datetime.now(timezone.utc) + timedelta(hours=2)
 
         # Calculate the time elapsed since the last usage
         time_elapsed = current_time - last_usage_time
@@ -1209,7 +1243,7 @@ def kazik(message):
         bot.send_message(message.chat.id, 'Вы не зарегистрированы как игрок')
         return
     else:
-        pisunchik[player_id]['casino_last_used'] = datetime.now(timezone.utc)
+        pisunchik[player_id]['casino_last_used'] = datetime.now(timezone.utc) + timedelta(hours=2)
         pisunchik[player_id]['casino_usage_count'] += 1
 
     result = bot.send_dice(message.chat.id, emoji='🎰')
@@ -1312,10 +1346,11 @@ def save_data():
         casino_last_used = data['casino_last_used'],
         casino_usage_count = data['casino_usage_count']
         notified = data['notified']
+        statuetki = data['statuetki']
         cursor.execute(
-            "INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            "INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified, statuetki) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used,
-             casino_usage_count, notified))
+             casino_usage_count, notified, statuetki))
 
     conn.commit()
 
@@ -1324,7 +1359,7 @@ def save_data():
 def can_use_pisunchik():
     while True:
         for player in pisunchik:
-            current_time = datetime.now(timezone.utc)
+            current_time = datetime.now(timezone.utc) + timedelta(hours=2)
             last_used_time = pisunchik[player]['last_used']
 
             # Calculate the time difference
