@@ -7,7 +7,7 @@ import os
 import psycopg2
 import requests
 from bs4 import BeautifulSoup
-import subprocess
+import threading
 
 # Specify the path to the love.py script
 # love_script_path = "love.py"
@@ -33,11 +33,11 @@ cursor = conn.cursor()
 
 def load_data():
     cursor.execute(
-        "SELECT player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count FROM pisunchik_data")
+        "SELECT player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified FROM pisunchik_data")
     data = cursor.fetchall()
     player_data = {}
 
-    for player_id, pisunchik_size, coins, items_list, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count in data:
+    for player_id, pisunchik_size, coins, items_list, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified in data:
         # Check if 'items_list' is None or an empty list, and provide a default value
         if items_list is None or not items_list:
             items = []  # Default to an empty list
@@ -56,7 +56,9 @@ def load_data():
             'last_prezervativ': last_prezervativ,
             'ballzzz_number': ballzzz_number,
             'casino_last_used': casino_last_used,
-            'casino_usage_count': casino_usage_count
+            'casino_usage_count': casino_usage_count,
+            'notified': notified
+
         }
 
     return player_data
@@ -79,6 +81,13 @@ admin_ids = [741542965]
 # Dictionary to keep track of admin actions
 admin_actions = {}
 
+statuetki_prices = {
+    'Pudginio': 100,
+    'Ryadovoi Rudgers': 200,
+    'Polkovnik Buchantos': 250,
+    'General Chin-Choppa': 450
+}
+
 shop_prices = {
     'kolczo_na_chlen': 75,
     'bdsm_kostumchik': 85,
@@ -95,12 +104,7 @@ shop_prices = {
     'pisunchik_potion_small': 10,
     'pisunchik_potion_medium': 15,
     'pisunchik_potion_large': 20,
-    'shaurma': 150
-    # 'Statuetki': " ",
-    # 'Pudginio': 100,
-    # 'Ryadovoi Rudgers': 200,
-    # 'Polkovnik Buchantos': 250,
-    # 'General Chin-Choppa': 450
+    'shaurma': 150,
 
 }
 
@@ -121,7 +125,12 @@ item_desc = {
     'masturbator': '{Съедобное} Позволяет с честью пожертвовать размером своего писюнчика ради получения BTC. Чем большим размером пожертвовано, тем больше монет выиграно. 1 см = 4 BTC + 5 BTC за каждые 5 см.\nИспользование: /masturbator',
     'pisunchik_potion_small': '{Съедобное} Моментально увеличивает писюнчик на 3 см\nИспользование: /pisunchik_potion_small',
     'pisunchik_potion_medium': '{Съедобное} Моментально увеличивает писюнчик на 5 см\nИспользование: /pisunchik_potion_medium',
-    'pisunchik_potion_large': '{Съедобное} Моментально увеличивает писюнчик на 10 см\nИспользование: /pisunchik_potion_large'
+    'pisunchik_potion_large': '{Съедобное} Моментально увеличивает писюнчик на 10 см\nИспользование: /pisunchik_potion_large',
+
+    'Pudginio': '',
+    'Ryadovoi Rudgers': 200,
+    'Polkovnik Buchantos': 250,
+    'General Chin-Choppa': 450
 
 }
 
@@ -643,6 +652,7 @@ def update_pisunchik(message):
         next_effect = random.randint(-10, 17)
         pisunchik[player_id]['ballzzz_number'] = next_effect
         bot.reply_to(message, reply_message)
+        pisunchik[player_id]['notified'] = False
 
     save_data()
 
@@ -1301,12 +1311,46 @@ def save_data():
         ballzzz_number = data['ballzzz_number']
         casino_last_used = data['casino_last_used'],
         casino_usage_count = data['casino_usage_count']
+        notified = data['notified']
         cursor.execute(
-            "INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            "INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used,
-             casino_usage_count))
+             casino_usage_count, notified))
 
     conn.commit()
+
+
+# Function to check if a user can use the /pisunchik command
+def can_use_pisunchik():
+    while True:
+        for player in pisunchik:
+            current_time = datetime.now(timezone.utc)
+            last_used_time = pisunchik[player]['last_used']
+
+            # Calculate the time difference
+            time_difference = current_time - last_used_time
+
+            # Check if the cooldown period (24 hours) has passed
+            if time_difference >= timedelta(hours=24):
+                # Update the last_used timestamp in the database
+                if not pisunchik[player]['notified']:
+                    if player != '1561630034':
+                        player_name2 = get_player_name(player)
+                        bot.send_message(-1001294162183, f"{player_name2} теперь может использовать /pisunchik")
+                        pisunchik[player]['notified'] = True
+
+        save_data()
+        time.sleep(60)  # Sleep for 1 minute (adjust as needed)
+
+
+# Define a function to start the cooldown checking thread
+def start_cooldown_check_thread():
+    cooldown_check_thread = threading.Thread(target=can_use_pisunchik)
+    cooldown_check_thread.daemon = True
+    cooldown_check_thread.start()
+
+
+start_cooldown_check_thread()
 
 
 @bot.message_handler(commands=['sendtogroup'])
