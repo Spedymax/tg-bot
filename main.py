@@ -643,7 +643,7 @@ def update_pisunchik(message):
                 number = 0
                 ne_umenshilsya = True
                 pisunchik[player_id]['pisunchik_size'] += number
-                pisunchik[player_id]['last_prezervativ'] = current_time  # Update to use the current time
+                pisunchik[player_id]['last_prezervativ'] = current_time - timedelta(hours=2)  # Update to use the current time
             else:
                 cooldown = True
 
@@ -1243,7 +1243,7 @@ def kazik(message):
         bot.send_message(message.chat.id, 'Вы не зарегистрированы как игрок')
         return
     else:
-        pisunchik[player_id]['casino_last_used'] = datetime.now(timezone.utc) + timedelta(hours=2)
+        pisunchik[player_id]['casino_last_used'] = datetime.now(timezone.utc)
         pisunchik[player_id]['casino_usage_count'] += 1
 
     result = bot.send_dice(message.chat.id, emoji='🎰')
