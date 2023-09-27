@@ -822,7 +822,10 @@ def show_items(message):
                 item_image_filename = item_images.get(statuetka, 'statuetkiImages/pudginio.jpg')
                 with open(item_image_filename, 'rb') as photo:
                     time.sleep(1)
-                    bot.send_photo(message.chat.id, photo, caption=f"{statuetka} - {description} BTC")
+                    bot.send_photo(message.chat.id, photo, caption=f"{statuetka} - {description}")
+            n = len(user_statuetki)
+            bot.send_message(message.chat.id, f"Количество статуэток у вас: {n} из 4")
+
 
         else:
             bot.reply_to(message, "Нету описания предметов (Странно)")
