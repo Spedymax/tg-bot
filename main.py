@@ -796,7 +796,8 @@ def show_items(message):
     item_images = {
         'Pudginio': 'statuetkiImages/pudginio.jpg',
         'Ryadovoi Rudgers': 'statuetkiImages/ryadovoi_rudgers.jpg',
-        'General Chin-Choppa': 'statuetkiImages/general_chin_choppa.jpg'
+        'Polkovnik Buchantos': 'statuetkiImages/polkovnik_buchantos.jpg',
+        'General Chin-Choppa': 'statuetkiImages/general_chin_choppa.png'
     }
 
     if player_id in pisunchik:
@@ -837,8 +838,8 @@ def show_statuetki_shop(message):
     item_images = {
         'Pudginio': 'statuetkiImages/pudginio.jpg',
         'Ryadovoi Rudgers': 'statuetkiImages/ryadovoi_rudgers.jpg',
-        # 'Polkovnik Buchantos': 'statuetkiImages/polkovnik_buchantos.jpg',
-        'General Chin-Choppa': 'statuetkiImages/general_chin_choppa.jpg'
+        'Polkovnik Buchantos': 'statuetkiImages/polkovnik_buchantos.jpg',
+        'General Chin-Choppa': 'statuetkiImages/general_chin_choppa.png'
     }
 
     # Generate the shop message with images and prices
