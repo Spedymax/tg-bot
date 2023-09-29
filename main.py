@@ -729,15 +729,14 @@ def handle_roll_option(call):
             for _ in range(option):
                 number = random.randint(1, 6)
                 roll_results.append(number)
-                for number in roll_results:
-                    if number <= 3:
-                        pisunchik[user_id]['pisunchik_size'] -= 5
-                    if number > 3:
-                        pisunchik[user_id]['pisunchik_size'] += 5
                 number2 = random.randint(1, 40)
                 if number2 == 14:
                     jackpot += 1
-
+            for number in roll_results:
+                if number <= 3:
+                    pisunchik[user_id]['pisunchik_size'] -= 5
+                elif number > 3:
+                    pisunchik[user_id]['pisunchik_size'] += 5
             # Display the roll results in one message
             roll_message = f"Результаты бросков: {' '.join(map(str, roll_results))}\n"
             bot.send_message(call.message.chat.id, roll_message)
