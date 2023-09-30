@@ -8,15 +8,8 @@ import psycopg2
 import requests
 from bs4 import BeautifulSoup
 import threading
+import json
 
-# Specify the path to the love.py script
-# love_script_path = "love.py"
-
-# Use subprocess to start the love.py script
-# love_process = subprocess.Popen(["python3", love_script_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-# Get the database URL from environment variables
-database_url = os.environ.get('DATABASE_URL')
 
 # Establish a database connection
 conn = psycopg2.connect(
@@ -32,35 +25,39 @@ cursor = conn.cursor()
 
 
 def load_data():
-    cursor.execute(
-        "SELECT player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified, statuetki FROM pisunchik_data")
+    cursor.execute("SELECT * FROM pisunchik_data")  # Select all columns
     data = cursor.fetchall()
     player_data = {}
 
-    for player_id, pisunchik_size, coins, items_list, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified, statuetki in data:
-        # Check if 'items_list' is None or an empty list, and provide a default value
-        if items_list is None or not items_list:
-            items = []  # Default to an empty list
-        else:
-            items = items_list  # No need for conversion, it's already a list
+    column_names = [desc[0] for desc in cursor.description]
 
-        # Ensure 'last_used' is offset-aware with a default value
-        if last_used is None:
-            last_used = datetime.min.replace(tzinfo=timezone.utc)
+    for row in data:
+        player_dict = {}
+        for i, column_value in enumerate(row):
+            column_name = column_names[i]
 
-        player_data[str(player_id)] = {
-            'pisunchik_size': pisunchik_size,
-            'coins': coins,
-            'items': items,
-            'last_used': last_used,
-            'last_prezervativ': last_prezervativ,
-            'ballzzz_number': ballzzz_number,
-            'casino_last_used': casino_last_used,
-            'casino_usage_count': casino_usage_count,
-            'notified': notified,
-            'statuetki': statuetki
+            if column_name == 'items':
+                if column_value is None or not column_value:
+                    items = []  # Default to an empty list
+                else:
+                    items = column_value  # No need for conversion, it's already a list
+                player_dict['items'] = items
+            elif column_name == 'last_used':
+                if column_value is None:
+                    last_used = datetime.min.replace(tzinfo=timezone.utc)
+                else:
+                    last_used = column_value
+                player_dict['last_used'] = last_used
+            elif column_name == 'characteristics':
+                # Convert the characteristics dictionary to a JSON string.
+                characteristics = json.dumps(column_value)
 
-        }
+                # Load the characteristics JSON string into a Python dictionary.
+                player_dict['characteristics'] = json.loads(characteristics) if characteristics is not None else {}
+            else:
+                player_dict[column_name] = column_value
+
+        player_data[str(row[0])] = player_dict
 
     return player_data
 
@@ -81,6 +78,8 @@ VIKA_ID = 1561630034
 admin_ids = [741542965]
 # Dictionary to keep track of admin actions
 admin_actions = {}
+
+xarakteristiks = ['Gold', 'Glowing', 'Titan', 'Invisible', 'Big Black', 'Hot']
 
 statuetki_prices = {
     'Pudginio': 50,
@@ -246,6 +245,44 @@ item_desc = {
 
 # Command to initiate sending a message to the group
 
+def get_player_traits(player_id):
+    cursor.execute("SELECT characteristics FROM pisunchik_data WHERE player_id = %s", (player_id,))
+    row = cursor.fetchone()
+
+    if row is None:
+        return {}
+
+    traits = row[0]
+    return traits
+@bot.message_handler(commands=['admGiveCharacteristics'])
+def set_trait(message):
+    player_id = str(message.from_user.id)
+
+    trait = random.choice(list(xarakteristiks))
+    level = 0
+    if pisunchik[player_id]['characteristics'] is None:
+        pisunchik[player_id]['characteristics'] = {}
+
+    traits = get_player_traits(player_id)
+    pisunchik[player_id]['characteristics'][trait] = level
+
+    bot.reply_to(message, f"Set {trait} to level {level}")
+    save_data()
+
+
+
+@bot.message_handler(commands=['characteristics'])
+def show_characteristics(message):
+    player_id = str(message.from_user.id)
+    if player_id in pisunchik:
+        characteristics_text = "Ваши характеристики:\n"
+        for characteristic in pisunchik[player_id]['xarakteristiki']:
+            characteristics_text += f"{characteristic}\n"
+        bot.reply_to(message, characteristics_text)
+    else:
+        bot.reply_to(message, "You are not registered as a player.")
+
+
 strochki = [
     'Вы видите вдалеке Торговца с караваном.',
     'Подходя ближе, вы замечаете, что это статный мужчина в белом пальто с черными, как бездна очками.',
@@ -254,6 +291,8 @@ strochki = [
     '"Я побуду здесь некоторое время, переведу дух, а вы пока можете изучить мой товар" *подмигивает*',
     '"Прошу, не стейсняйтесь" /statuetkiShop',
 ]
+
+
 @bot.message_handler(commands=['torgovec'])
 def torgovec(message):
     for line in strochki:
@@ -410,18 +449,18 @@ def admin_panel(message):
         bot.reply_to(message, "You are not authorized to access the admin panel.")
 
 
-player_name = ""
+player_name2 = ""
 
 
 def get_player_name(player):
-    global player_name
+    global player_name2
     if player == '741542965':
-        player_name = "Максим"
+        player_name2 = "Максим"
     elif player == '742272644':
-        player_name = "Юра"
+        player_name2 = "Юра"
     elif player == '855951767':
-        player_name = "Богдан"
-    return player_name
+        player_name2 = "Богдан"
+    return player_name2
 
 
 # Handle admin panel callbacks
@@ -435,52 +474,55 @@ def handle_callback(call):
             # Prompt the admin to select a player
             markup = types.InlineKeyboardMarkup()
             for player in pisunchik:
-                player_name = get_player_name(player)
+                player_name2 = get_player_name(player)
                 markup.add(
-                    types.InlineKeyboardButton(player_name, callback_data=f"select_player_increase_pisunchik_{player}"))
+                    types.InlineKeyboardButton(player_name2,
+                                               callback_data=f"select_player_increase_pisunchik_{player}"))
             bot.send_message(admin_chat_id, "Select a player to increase Pisunchik:", reply_markup=markup)
 
         elif call == "decrease_pisunchik":
             # Prompt the admin to select a player
             markup = types.InlineKeyboardMarkup()
             for player in pisunchik:
-                player_name = get_player_name(player)
+                player_name2 = get_player_name(player)
                 markup.add(
-                    types.InlineKeyboardButton(player_name, callback_data=f"select_player_decrease_pisunchik_{player}"))
+                    types.InlineKeyboardButton(player_name2,
+                                               callback_data=f"select_player_decrease_pisunchik_{player}"))
             bot.send_message(admin_chat_id, "Select a player to decrease Pisunchik:", reply_markup=markup)
 
         elif call == "increase_btc":
             # Prompt the admin to select a player
             markup = types.InlineKeyboardMarkup()
             for player in pisunchik:
-                player_name = get_player_name(player)
+                player_name2 = get_player_name(player)
                 markup.add(
-                    types.InlineKeyboardButton(player_name, callback_data=f"select_player_increase_btc_{player}"))
+                    types.InlineKeyboardButton(player_name2, callback_data=f"select_player_increase_btc_{player}"))
             bot.send_message(admin_chat_id, "Select a player to increase BTC:", reply_markup=markup)
 
         elif call == "decrease_btc":
             # Prompt the admin to select a player
             markup = types.InlineKeyboardMarkup()
             for player in pisunchik:
-                player_name = get_player_name(player)
+                player_name2 = get_player_name(player)
                 markup.add(
-                    types.InlineKeyboardButton(player_name, callback_data=f"select_player_decrease_btc_{player}"))
+                    types.InlineKeyboardButton(player_name2, callback_data=f"select_player_decrease_btc_{player}"))
             bot.send_message(admin_chat_id, "Select a player to decrease BTC:", reply_markup=markup)
 
         elif call == "add_item":
             # Prompt the admin to select a player
             markup = types.InlineKeyboardMarkup()
             for player in pisunchik:
-                player_name = get_player_name(player)
-                markup.add(types.InlineKeyboardButton(player_name, callback_data=f"select_player_add_item_{player}"))
+                player_name2 = get_player_name(player)
+                markup.add(types.InlineKeyboardButton(player_name2, callback_data=f"select_player_add_item_{player}"))
             bot.send_message(admin_chat_id, "Select a player to add an item:", reply_markup=markup)
 
         elif call == "remove_item":
             # Prompt the admin to select a player
             markup = types.InlineKeyboardMarkup()
             for player in pisunchik:
-                player_name = get_player_name(player)
-                markup.add(types.InlineKeyboardButton(player_name, callback_data=f"select_player_remove_item_{player}"))
+                player_name2 = get_player_name(player)
+                markup.add(
+                    types.InlineKeyboardButton(player_name2, callback_data=f"select_player_remove_item_{player}"))
             bot.send_message(admin_chat_id, "Select a player to remove an item:", reply_markup=markup)
 
     else:
@@ -529,14 +571,14 @@ def handle_admin_actions(message):
         if admin_action_data:
             action = admin_action_data.get("action")
             player = admin_action_data.get("player")
-            player_name = get_player_name(player)
+            player_name2 = get_player_name(player)
 
             if action == "increase_pisunchik":
                 try:
                     value = int(message.text)
                     if player in pisunchik:
                         pisunchik[player]["pisunchik_size"] += value
-                        bot.send_message(admin_chat_id, f"Pisunchik increased for Player {player_name}.")
+                        bot.send_message(admin_chat_id, f"Pisunchik increased for Player {player_name2}.")
                     else:
                         bot.send_message(admin_chat_id, "Player not found.")
                 except ValueError:
@@ -547,7 +589,7 @@ def handle_admin_actions(message):
                     value = int(message.text)
                     if player in pisunchik:
                         pisunchik[player]["pisunchik_size"] -= value
-                        bot.send_message(admin_chat_id, f"Pisunchik decreased for Player {player_name}.")
+                        bot.send_message(admin_chat_id, f"Pisunchik decreased for Player {player_name2}.")
                     else:
                         bot.send_message(admin_chat_id, "Player not found.")
                 except ValueError:
@@ -558,7 +600,7 @@ def handle_admin_actions(message):
                     value = int(message.text)
                     if player in pisunchik:
                         pisunchik[player]["coins"] += value
-                        bot.send_message(admin_chat_id, f"BTC increased for Player {player_name}.")
+                        bot.send_message(admin_chat_id, f"BTC increased for Player {player_name2}.")
                     else:
                         bot.send_message(admin_chat_id, "Player not found.")
                 except ValueError:
@@ -568,7 +610,7 @@ def handle_admin_actions(message):
                     value = int(message.text)
                     if player in pisunchik:
                         pisunchik[player]["coins"] -= value
-                        bot.send_message(admin_chat_id, f"BTC decreased for Player {player_name}.")
+                        bot.send_message(admin_chat_id, f"BTC decreased for Player {player_name2}.")
                     else:
                         bot.send_message(admin_chat_id, "Player not found.")
                 except ValueError:
@@ -579,7 +621,7 @@ def handle_admin_actions(message):
                 if player in pisunchik:
                     if item_name in item_desc:
                         pisunchik[player]["items"].append(item_name)
-                        bot.send_message(admin_chat_id, f"Item '{item_name}' added to Player {player_name}.")
+                        bot.send_message(admin_chat_id, f"Item '{item_name}' added to Player {player_name2}.")
                     else:
                         bot.send_message(admin_chat_id, "Item not found.")
                 else:
@@ -589,10 +631,10 @@ def handle_admin_actions(message):
                 if player in pisunchik:
                     if item_name in pisunchik[player]["items"]:
                         pisunchik[player]["items"].remove(item_name)
-                        bot.send_message(admin_chat_id, f"Item '{item_name}' removed from Player {player_name}.")
+                        bot.send_message(admin_chat_id, f"Item '{item_name}' removed from Player {player_name2}.")
                     else:
                         bot.send_message(admin_chat_id,
-                                         f"Item '{item_name}' not found in Player {player_name}'s inventory.")
+                                         f"Item '{item_name}' not found in Player {player_name2}'s inventory.")
                 else:
                     bot.send_message(admin_chat_id, "Player not found.")
 
@@ -638,12 +680,13 @@ def update_pisunchik(message):
 
         # Check if the player has 'prezervativ' in their inventory and apply its effect
         if 'prezervativ' in pisunchik[player_id]['items'] and number < 0:
-            current_time = datetime.now(timezone.utc) + timedelta(hours=2)  # Use datetime.now(timezone.utc) + timedelta(hours=2) to create an offset-aware datetime
+            current_time = datetime.now(timezone.utc)  # Use datetime.now(timezone.utc) + timedelta(hours=2) to create an offset-aware datetime
             if current_time - pisunchik[player_id]['last_prezervativ'] >= timedelta(days=4):
                 number = 0
                 ne_umenshilsya = True
                 pisunchik[player_id]['pisunchik_size'] += number
-                pisunchik[player_id]['last_prezervativ'] = current_time - timedelta(hours=2)  # Update to use the current time
+                pisunchik[player_id]['last_prezervativ'] = current_time + timedelta(
+                    hours=2)  # Update to use the current time
             else:
                 cooldown = True
 
@@ -789,6 +832,8 @@ def show_items(message):
             bot.reply_to(message, "Нету описания предметов (Странно)")
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
+
+
 @bot.message_handler(commands=['statuetki'])
 def show_items(message):
     player_id = str(message.from_user.id)
@@ -918,8 +963,6 @@ def cancel_purchase(call):
         reply_markup=None
     )
     bot.send_message(call.message.chat.id, "Покупка отменена")
-
-
 
 
 # Function to display available items in the shop
@@ -1207,6 +1250,7 @@ def get_furry_images():
 image_urls2 = get_furry_images()
 print("Loaded")
 
+
 @bot.message_handler(commands=['furrypics'])
 def send_furry_pics(message):
     random_selection = random.sample(image_urls2, 5)
@@ -1336,33 +1380,32 @@ def otsos_callback(call):
             bot.send_message(call.message.chat.id, "Вы отсосали Богдану. У него член: Не встал :(")
 
 
-# Function to save player data to the database
 def save_data():
     cursor.execute("DELETE FROM pisunchik_data")
+
     for player_id, data in pisunchik.items():
-        pisunchik_size = data['pisunchik_size']
-        coins = data['coins']
-        items = data['items']
-        last_used = data['last_used']
-        last_prezervativ = data['last_prezervativ']
-        ballzzz_number = data['ballzzz_number']
-        casino_last_used = data['casino_last_used'],
-        casino_usage_count = data['casino_usage_count']
-        notified = data['notified']
-        statuetki = data['statuetki']
-        cursor.execute(
-            "INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used, casino_usage_count, notified, statuetki) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (player_id, pisunchik_size, coins, items, last_used, last_prezervativ, ballzzz_number, casino_last_used,
-             casino_usage_count, notified, statuetki))
+
+
+        columns = ', '.join(data.keys())
+        placeholders = ', '.join(['%s'] * len(data))
+        values = tuple(data.values())
+
+        if 'characteristics' in data:
+            characteristics = json.dumps(data['characteristics'])
+            values += (characteristics,)
+
+        # Build the INSERT query dynamically.
+        query = f"INSERT INTO pisunchik_data ({columns}) VALUES ({placeholders})"
+
+        cursor.execute(query, values)
 
     conn.commit()
-
 
 # Function to check if a user can use the /pisunchik command
 def can_use_pisunchik():
     while True:
         for player in pisunchik:
-            current_time = datetime.now(timezone.utc) + timedelta(hours=2)
+            current_time = datetime.now(timezone.utc)
             last_used_time = pisunchik[player]['last_used']
 
             # Calculate the time difference
@@ -1376,8 +1419,9 @@ def can_use_pisunchik():
                         player_name2 = get_player_name(player)
                         bot.send_message(-1001294162183, f"{player_name2} теперь может использовать /pisunchik")
                         pisunchik[player]['notified'] = True
+                        save_data()
 
-        save_data()
+
         time.sleep(60)  # Sleep for 1 minute (adjust as needed)
 
 
