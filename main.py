@@ -10,7 +10,6 @@ from bs4 import BeautifulSoup
 import threading
 import json
 
-
 # Establish a database connection
 conn = psycopg2.connect(
     database="d8otdn21efhdgi",
@@ -81,6 +80,15 @@ admin_actions = {}
 
 xarakteristiks = ['Gold', 'Glowing', 'Titan', 'Invisible', 'Big Black', 'Hot']
 
+xarakteristiks_desc = {
+    'Gold': 'Ахуеть, у вас теперь золотой член! Ежедневно приносит по 1 BTC. Можно улучшить чтобы увеличить количество ежедневной прибыли на 3 BTC',
+    'Glowing': 'У вас член излучает свет!! Пока другие участники ослеплены вы можете каждую неделю незаметно красть у другого участника 2 см и прибавлять их себе. Можно улучшить чтобы красть на 2 см больше.',
+    'Titan': 'Теперь ваш член титановый, и пиздец тяжёлый :( Вы угрожаете админу, благодаря этому кулдаун /pisunchik уменьшен только для вас на 3%. Можно улучшить чтобы добавить уменьшение кулдауна на 3%',
+    'Invisible': 'Ваш член пропал!!! Вернее он теперь просто невидимый. Балгодаря этой уловке вы можете использовать комманду /roll абсолютно бесплатно с 3% шансом. Никто и не заметит :). Можно улучшить чтобы повысить шанс бесплатного прокрута на 3%',
+    'Big Black': 'Теперь ваш член просто огроменный чёрный хуй. Ваш член не может стать меньше чем 0 см. Можно улучшить чтобы увеличить порог минимального размера писюнчика на 3 см',
+    'Hot': 'У вас просто расскалённая лава между ног. Вы перегреваете магазинный апарат когда подходите к нему, так что теперь всё для вас на 5% дешевле. Можно улучшить чтобы получть дополнительные 3% скидки.'
+}
+
 statuetki_prices = {
     'Pudginio': 50,
     'Ryadovoi Rudgers': 100,
@@ -148,22 +156,29 @@ item_desc = {
 # # Initialize the game state
 # current_state = START
 #
-# # Define dungeon rooms
-# dungeon_rooms = [
-#     "Вы просыпаетесь в темной подземной камере. Тут мокро и сыро, не очень хочеться тут оставаться. Ничего не видно но вы нащупываете две двери перед вами. Выберите одну, чтобы продолжить",
-#     "Вы попадаете в загадочную комнату с магическим алтарем. Жертвенный камень манит вас но вы сопротивляетесь изо всех сил. Куда вы пойдете дальше?",
-#     "Справа вы встречаете мост через бездонную пропасть. Решите, перейти ли вам на другую сторону или пойти налево?",
-#     "Вы попадаете в мрачное и опасное место. Оно заполнено пауками всех размеров, от крошечных паучков до огромных пауков-людоедов. Они могут быстро перемещаться и стрелять паутиной. Игрок должен быть осторожным, чтобы не попасть в паутину.",
-#     "Вы доходите до тупика. Вам придется вернуться назад. Вы разворачиваетесь, куда же вы пойдете?",
-#     "Вы видите сундук неподалёку. Вы открываете сундук и находите 40 BTC! Продолжайте путешевствие.",
-#     "Вы входите в забытый город который был построен в древние времена, но теперь он заброшен и забыт. Город состоит из огромных каменных зданий, украшенных резьбой и скульптурами. В центре города находится огромный храм, в котором вы видите огромный алтарь. Вы опять видите две двери. Куда вы пойдете?",
-#     "Вы попадаете в заброшенную шахту которая находится глубоко под землей. Она была построена много лет назад, но теперь она заброшена. Шахта состоит из узких проходов, глубоких колодцев и опасных ловушек. В шахте можно найти полезные ресурсы, такие как руда, золото и драгоценные камни. Вы прячите один из драгоценных камней себе в карман. Куда отправимся дальше?",
-#     "Перед вами огромный ледник который находится в глубине гор. Он состоит из огромного слоя льда, который образовался много лет назад. Ледник покрыт ледяными статуями, замерзшими водопадами и другими удивительными природными явлениями. Однако ледник также опасен. В нем может быть скользко, а холодный воздух может привести к обморожению. Вы видите две двери. Куда вы пойдете?",
-#     "Вы видите сундук неподалёку. Вы открываете сундук и находите 60 BTC! Юху!",
-#     "Вы рядом с подземным озером которое находится в глубине горы. Оно питается подземными источниками. Озеро окружено высокими скалами и зарослями деревьев. В озере можно найти рыбу, водоросли и другие обитателей подводного мира. Но в нем могут быть водовороты, ямы и другие опасности, лучше уйти отсюда поскорее.",
-#     "Вы забираетесь на остров который находится в центре озера. Он окружен высокими скалами. На острове есть деревья, цветы и другие растения. Но тут очень холодно. Уходите.",
-# ]
-# dungeon_room = 0
+# # Define dungeon rooms dungeon_rooms = [ "Вы просыпаетесь в темной подземной камере. Тут мокро и сыро,
+# не очень хочеться тут оставаться. Ничего не видно но вы нащупываете две двери перед вами. Выберите одну,
+# чтобы продолжить", "Вы попадаете в загадочную комнату с магическим алтарем. Жертвенный камень манит вас но вы
+# сопротивляетесь изо всех сил. Куда вы пойдете дальше?", "Справа вы встречаете мост через бездонную пропасть.
+# Решите, перейти ли вам на другую сторону или пойти налево?", "Вы попадаете в мрачное и опасное место. Оно заполнено
+# пауками всех размеров, от крошечных паучков до огромных пауков-людоедов. Они могут быстро перемещаться и стрелять
+# паутиной. Игрок должен быть осторожным, чтобы не попасть в паутину.", "Вы доходите до тупика. Вам придется
+# вернуться назад. Вы разворачиваетесь, куда же вы пойдете?", "Вы видите сундук неподалёку. Вы открываете сундук и
+# находите 40 BTC! Продолжайте путешевствие.", "Вы входите в забытый город который был построен в древние времена,
+# но теперь он заброшен и забыт. Город состоит из огромных каменных зданий, украшенных резьбой и скульптурами. В
+# центре города находится огромный храм, в котором вы видите огромный алтарь. Вы опять видите две двери. Куда вы
+# пойдете?", "Вы попадаете в заброшенную шахту которая находится глубоко под землей. Она была построена много лет
+# назад, но теперь она заброшена. Шахта состоит из узких проходов, глубоких колодцев и опасных ловушек. В шахте можно
+# найти полезные ресурсы, такие как руда, золото и драгоценные камни. Вы прячите один из драгоценных камней себе в
+# карман. Куда отправимся дальше?", "Перед вами огромный ледник который находится в глубине гор. Он состоит из
+# огромного слоя льда, который образовался много лет назад. Ледник покрыт ледяными статуями, замерзшими водопадами и
+# другими удивительными природными явлениями. Однако ледник также опасен. В нем может быть скользко, а холодный
+# воздух может привести к обморожению. Вы видите две двери. Куда вы пойдете?", "Вы видите сундук неподалёку. Вы
+# открываете сундук и находите 60 BTC! Юху!", "Вы рядом с подземным озером которое находится в глубине горы. Оно
+# питается подземными источниками. Озеро окружено высокими скалами и зарослями деревьев. В озере можно найти рыбу,
+# водоросли и другие обитателей подводного мира. Но в нем могут быть водовороты, ямы и другие опасности, лучше уйти
+# отсюда поскорее.", "Вы забираетесь на остров который находится в центре озера. Он окружен высокими скалами. На
+# острове есть деревья, цветы и другие растения. Но тут очень холодно. Уходите.", ] dungeon_room = 0
 #
 #
 # # Keyboard markup for game options
@@ -245,30 +260,39 @@ item_desc = {
 
 # Command to initiate sending a message to the group
 
-def get_player_traits(player_id):
-    cursor.execute("SELECT characteristics FROM pisunchik_data WHERE player_id = %s", (player_id,))
-    row = cursor.fetchone()
-
-    if row is None:
-        return {}
-
-    traits = row[0]
-    return traits
-@bot.message_handler(commands=['admGiveCharacteristics'])
-def set_trait(message):
+@bot.message_handler(commands=['giveChar'])
+def add_characteristic(message):
     player_id = str(message.from_user.id)
+    characteristic = random.choice(list(xarakteristiks))
 
-    trait = random.choice(list(xarakteristiks))
-    level = 0
-    if pisunchik[player_id]['characteristics'] is None:
-        pisunchik[player_id]['characteristics'] = {}
+    if player_id in pisunchik:
+        existing_characteristic = pisunchik[player_id]['characteristics']
+        n = 0
+        if existing_characteristic is not None:
+            while True:
+                # Check if the characteristic is already in the player's characteristics
+                characteristic_name = characteristic.split(":")[0]
+                if any(char.startswith(characteristic_name + ":") for char in existing_characteristic):
+                    characteristic = random.choice(list(xarakteristiks))
+                    n += 1
+                else:
+                    # Append the characteristic to the player's characteristics with a random level
+                    level = 1
+                    characteristic = f"{characteristic_name}:{level}"
+                    existing_characteristic.append(characteristic)
+                    save_data()
+                    break
 
-    traits = get_player_traits(player_id)
-    pisunchik[player_id]['characteristics'][trait] = level
-
-    bot.reply_to(message, f"Set {trait} to level {level}")
-    save_data()
-
+                if n > 6:
+                    break
+        else:
+            # If the player doesn't have any characteristics, add the new one with a random level
+            level = 1  # You can adjust the range of levels as needed
+            characteristic = f"{characteristic}:{level}"
+            pisunchik[player_id]['characteristics'] = [characteristic]
+            save_data()
+    else:
+        print(f"Player with ID {player_id} not found")
 
 
 @bot.message_handler(commands=['characteristics'])
@@ -276,11 +300,85 @@ def show_characteristics(message):
     player_id = str(message.from_user.id)
     if player_id in pisunchik:
         characteristics_text = "Ваши характеристики:\n"
-        for characteristic in pisunchik[player_id]['xarakteristiki']:
-            characteristics_text += f"{characteristic}\n"
-        bot.reply_to(message, characteristics_text)
+        existing_characteristic = pisunchik[player_id]['characteristics']
+        for characteristic in existing_characteristic:
+            characteristic_name, current_level = characteristic.split(":")
+            if characteristic_name in xarakteristiks_desc:
+                current_level = int(current_level)
+                characteristics_text += f"{characteristic_name}(Level {current_level}): {xarakteristiks_desc[characteristic_name]}"
+            bot.reply_to(message, characteristics_text)
     else:
         bot.reply_to(message, "You are not registered as a player.")
+
+
+@bot.message_handler(commands=['upgradeChar'])
+def upgrade_characteristic(message):
+    player_id = str(message.from_user.id)
+    if player_id in pisunchik:
+        existing_characteristic = pisunchik[player_id]['characteristics']
+
+        # Check if the player has any characteristics to upgrade
+        if existing_characteristic is not None:
+            # Send a message asking the user to select a characteristic to upgrade
+            bot.send_message(message.chat.id, "Select a characteristic to upgrade:")
+
+            # Create a list of inline keyboard buttons for each characteristic
+            characteristic_buttons = []
+            for characteristic in existing_characteristic:
+                characteristic_name, current_level = characteristic.split(":")
+                button_text = f"{characteristic_name} (Level {current_level})"
+                characteristic_buttons.append(
+                    types.InlineKeyboardButton(text=button_text, callback_data=f"upgrade_{characteristic}"))
+
+            # Create an inline keyboard with the characteristic buttons
+            keyboard = types.InlineKeyboardMarkup()
+            keyboard.add(*characteristic_buttons)
+
+            # Send the keyboard to the user
+            bot.send_message(message.chat.id, "Choose a characteristic to upgrade:", reply_markup=keyboard)
+        else:
+            bot.send_message(message.chat.id, "You don't have any characteristics to upgrade.")
+    else:
+        bot.send_message(message.chat.id, "You are not registered as a player.")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("upgrade"))
+def handle_characteristic_upgrade(call):
+    chat_id = call.message.chat.id
+    player_id = str(call.from_user.id)
+    call = call.data.split("_", 1)  # Split the callback data into action and player
+    selected_characteristic = call[1]
+
+    # Get the player's ID
+
+    # Check if the player has enough coins to perform the upgrade (assuming a cost of 10 coins per upgrade)
+
+    if pisunchik[player_id]['coins'] >= 100:
+        # Deduct 100 coins from the player's balance
+        pisunchik[player_id]['coins'] - 100
+
+        # Extract the characteristic name and current level
+        characteristic_name, current_level = selected_characteristic.split(":")
+        current_level = int(current_level)
+
+        # Increase the level of the characteristic by 1
+        new_level = current_level + 1
+        updated_characteristic = f"{characteristic_name}:{new_level}"
+        n = 0
+        for characteristic in pisunchik[player_id]['characteristics']:
+            if selected_characteristic == characteristic:
+                pisunchik[player_id]['characteristics'][n] = updated_characteristic
+                save_data()
+            n += 1
+
+        # Commit the database changes
+        conn.commit()
+
+        # Send a message to confirm the upgrade
+        bot.send_message(chat_id, f"You have upgraded {characteristic_name} to level {new_level}!")
+    else:
+        # Send a message if the player doesn't have enough coins
+        bot.send_message(chat_id, "You don't have enough coins to upgrade this characteristic.")
 
 
 strochki = [
@@ -383,11 +481,9 @@ def reset_pisunchik_cooldown(message):
     if 'smazka' in pisunchik[player_id]['items']:
         reset_timestamp = datetime(2000, 1, 1, tzinfo=timezone.utc)
 
-        # Update the last_used column in the last_used_data table for the specific player
-        cursor.execute("UPDATE pisunchik_data SET last_used = %s WHERE player_id = %s", (reset_timestamp, player_id))
-        conn.commit()
-        conn.close()
-
+        pisunchik[player_id]['last_used'] = reset_timestamp
+        pisunchik[player_id]['items'].remove('smazka')
+        save_data()
         # Provide a response to the user
         bot.reply_to(message, "Кулдаун для команды /pisunchik сброшен. Теперь вы можете использовать её снова.")
     else:
@@ -652,12 +748,24 @@ def update_pisunchik(message):
 
     if player_id not in pisunchik:
         pisunchik[player_id]['last_used'] = datetime.min
+    existing_characteristic = pisunchik[player_id]['characteristics']
+    # Check if the characteristic is already in the player's characteristics
+    characteristic_name = "Titan"
+    cooldown = 24
+    if existing_characteristic is not None:
+        for char_info in existing_characteristic:
+            if char_info.startswith(characteristic_name):
+                char_name, char_level = char_info.split(":")
+                int_level = int(char_level)
+                cooldown = int((24 * (100 - int_level * 3)) / 100)
 
-    if datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None) < timedelta(hours=24):
+
+    if datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None) < timedelta(hours=cooldown):
         time_diff = timedelta(hours=24) - (datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None))
         time_left = time_diff - timedelta(microseconds=time_diff.microseconds)
         bot.reply_to(message, f"Вы можете использовать эту команду только раз в день \nОсталось времени: {time_left}")
         return
+
 
     if player_id in pisunchik:
         pisunchik[player_id]['last_used'] = datetime.now()
@@ -680,7 +788,8 @@ def update_pisunchik(message):
 
         # Check if the player has 'prezervativ' in their inventory and apply its effect
         if 'prezervativ' in pisunchik[player_id]['items'] and number < 0:
-            current_time = datetime.now(timezone.utc)  # Use datetime.now(timezone.utc) + timedelta(hours=2) to create an offset-aware datetime
+            current_time = datetime.now(
+                timezone.utc)  # Use datetime.now(timezone.utc) + timedelta(hours=2) to create an offset-aware datetime
             if current_time - pisunchik[player_id]['last_prezervativ'] >= timedelta(days=4):
                 number = 0
                 ne_umenshilsya = True
@@ -760,6 +869,27 @@ def handle_roll_option(call):
         neededCoins = option * 6
         if 'kubik_seksa' in pisunchik[user_id]['items']:
             neededCoins = option * 3
+
+        existing_characteristic = pisunchik[user_id]['characteristics']
+        # Check if the characteristic is already in the player's characteristics
+        player_name = get_player_name(user_id)
+        characteristic_name = "Invisible"
+        n = 0
+        if existing_characteristic is not None:
+            for char_info in existing_characteristic:
+                if char_info.startswith(characteristic_name):
+                    char_name, char_level = char_info.split(":")
+                    int_level = int(char_level)
+                    probability = 0.03 + ((int_level - 1) * 0.03)
+
+                    # Generate a random number between 0 and 1
+                    random_number = random.random()
+
+                    # Check if the random number is less than or equal to the probability
+                    if random_number <= probability:
+                        neededCoins = 0
+                        bot.send_message(call.from_user.id, "Поздравляю ролл для вас 0 BTC")
+                    break
 
         if pisunchik[user_id]['coins'] >= neededCoins:
             if 'kubik_seksa' in pisunchik[user_id]['items']:
@@ -870,9 +1000,50 @@ def show_items(message):
             n = len(user_statuetki)
             bot.send_message(message.chat.id, f"Количество статуэток у вас: {n} из 4")
 
-
         else:
             bot.reply_to(message, "Нету описания предметов (Странно)")
+
+
+        if len(user_statuetki) == 4:
+            pisunchik[player_id]['statuetki'].remove('Pudginio')
+            pisunchik[player_id]['statuetki'].remove('Ryadovoi Rudgers')
+            pisunchik[player_id]['statuetki'].remove('Polkovnik Buchantos')
+            pisunchik[player_id]['statuetki'].remove('General Chin-Choppa')
+            strochki2 = [
+                'Вы замечаете что на вас пристально смотрит торговец',
+                '"О, я вижу вы собрали все 4 статуэтки"',
+                '"Насколько я знаю мне нужно сделать вот это", сказал загадочный торговец, копошась в своём рюкзаке',
+                'Он достал из неё маленький флакончик с фиолетовым содержимым.',
+                '"Пожулуйста, покажите ваши статуэтки"',
+                'Вы вынимаете их и раскаладываете на стол.',
+                'Торговец капает фиолетовую жидкость на каждую из статуэток',
+                '"Смотрите внимательнее, сейчас произойдёт нечто", произносит он и отходит на 3 метра назад.',
+                '...',
+                '.....',
+                '"*Ничего не происходит*(кроме того что юра так и не поменял обосранные штаны после шаурмы)"',
+                '"Хммм, что же могло пойти не так, я всё делал по инструкции"',
+                'Вы подходите к стутэткам и осматриваете их со всех сторон, но ничего необычного не замечаете. Только надписи - Капрал, Генерал, которые вы уже видели',
+                'Попробовав расставить их в порядке возрастания ранга, вы замечаете что первая статуэтка начинает мерцать',
+                'Вскоре уже все статуэтки синхронно излучают свет с одинаковой частотой, всё ускоряясь и ускоряясь.',
+                'Вас ослепляет яркий свет и вы лишь краем глаза успеваете заметить как статуэтки сливаються в одну большую золотую статуэтку',
+                'И надпись на небе "ПУДЖИНИО-ФАМОЗА',
+                'Статуэтка стремительно летит к вам, но под странным углом, как будто-бы она хочет...',
+                'ОНА ОТКУСИЛА ВАМ ЧЛЕН!!!!',
+                'А...',
+                'Совсем не больно...',
+                'Золотая фигура взлетает в небо и начинает вертеться с огромной скоростью',
+                'Опять яркая вспышка!',
+                'Статуэтка пропадает, а ваш член снова на месте.',
+                '*Поздравляю вы разблокировали новую характеристику для вашего члена*',
+                '*Посмотреть какую характеристику вы получили можно испозовав команду /characteristics*',
+            ]
+
+            for line in strochki2:
+                time.sleep(5)
+                bot.send_message(message.chat.id, line)
+
+            add_characteristic(message)
+
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
 
@@ -965,9 +1136,33 @@ def cancel_purchase(call):
     bot.send_message(call.message.chat.id, "Покупка отменена")
 
 
+discount = 0
+
+
 # Function to display available items in the shop
-def display_shop_items():
-    shop_items = "\n".join([f"{item}: {price} coins" for item, price in shop_prices.items()])
+def display_shop_items(player):
+    existing_characteristic = pisunchik[player]['characteristics']
+    # Check if the characteristic is already in the player's characteristics
+    player_name = get_player_name(player)
+    characteristic_name = "Hot"
+    n = 0
+    shop_items = " "
+    global discount
+    if existing_characteristic is not None:
+        for char_info in existing_characteristic:
+            if char_info.startswith(characteristic_name):
+                char_name, char_level = char_info.split(":")
+                int_level = int(char_level)
+                discount = 5 + ((int_level - 1) * 3)
+                bot.send_message(741542965, 'Магазинный автомат плавится...')
+                time.sleep(3)
+                shop_items = "\n".join(
+                    [f"{item}: {int(price * (100 - discount) / 100)} coins" for item, price in shop_prices.items()])
+            else:
+                shop_items = "\n".join([f"{item}: {price} coins" for item, price in shop_prices.items()])
+    else:
+        shop_items = "\n".join([f"{item}: {price} coins" for item, price in shop_prices.items()])
+
     return f"Предметы в магазине: \n{shop_items}"
 
 
@@ -977,7 +1172,7 @@ def show_shop(message):
     user_balance = pisunchik[player_id]['coins']
 
     # Display available items and prices
-    shop_message = display_shop_items()
+    shop_message = display_shop_items(player_id)
     shop_message += f"\n\nУ вас есть: {user_balance} BTC"
     shop_message += f"\n\nВаши предметы: /items"
 
@@ -1000,7 +1195,7 @@ def buy_item(message):
             markup.add(confirm_button, cancel_button)
 
             # Ask for confirmation
-            confirmation_message = f"Вы хотите купить {item_name} за {item_price} ВТС?"
+            confirmation_message = f"Вы хотите купить {item_name} за {int(item_price * (100 - discount) / 100)} ВТС?"
             bot.send_message(message.chat.id, confirmation_message, reply_markup=markup)
         else:
             bot.reply_to(message, "Недостаточно денег((")
@@ -1023,7 +1218,7 @@ def confirm_purchase(call):
 
     if user_balance >= item_price:
         # Deduct the item price from the user's balance
-        pisunchik[player_id]['coins'] -= item_price
+        pisunchik[player_id]['coins'] -= int(item_price * (100 - discount) / 100)
         # Add the item to the user's inventory
         pisunchik[player_id]['items'].append(item_name)
         # Update the 'items' field in the database with the new item list
@@ -1342,7 +1537,7 @@ def otsos(message):
                          reply_markup=markup, parse_mode='html')
 
 
-@bot.callback_query_handler(func=lambda call: True)
+@bot.callback_query_handler(func=lambda call: call.data.startswith('otsos'))
 def otsos_callback(call):
     bot.edit_message_reply_markup(
         chat_id=call.message.chat.id,
@@ -1380,19 +1575,100 @@ def otsos_callback(call):
             bot.send_message(call.message.chat.id, "Вы отсосали Богдану. У него член: Не встал :(")
 
 
+@bot.message_handler(commands=['vor'])
+def otsos(message):
+    player_id = str(message.from_user.id)
+
+    existing_characteristic = pisunchik[player_id]['characteristics']
+    # Check if the characteristic is already in the player's characteristics
+    player_name = get_player_name(player_id)
+    characteristic_name = "Glowing"
+    if existing_characteristic is not None:
+        for char_info in existing_characteristic:
+            if char_info.startswith(characteristic_name):
+                char_name, char_level = char_info.split(":")
+                int_level = int(char_level)
+
+                if player_id == "742272644":
+                    markup = types.InlineKeyboardMarkup()
+                    max_button = types.InlineKeyboardButton(text="Макс", callback_data="vor_max")
+                    bogdan_button = types.InlineKeyboardButton(text="Богдан", callback_data="vor_bogdan")
+                    markup.add(max_button, bogdan_button)
+                    bot.send_message(message.chat.id,
+                                     f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, у кого крадём член?",
+                                     reply_markup=markup, parse_mode='html')
+
+                elif player_id == "741542965":
+                    markup = types.InlineKeyboardMarkup()
+                    yura_button = types.InlineKeyboardButton(text="Юра", callback_data="vor_yura")
+                    bogdan_button = types.InlineKeyboardButton(text="Богдан", callback_data="vor_bogdan")
+                    markup.add(yura_button, bogdan_button)
+                    bot.send_message(message.chat.id,
+                                     f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, у кого крадём член?",
+                                     reply_markup=markup, parse_mode='html')
+
+                elif player_id == "855951767":
+                    markup = types.InlineKeyboardMarkup()
+                    max_button = types.InlineKeyboardButton(text="Макс", callback_data="vor_max")
+                    yura_button = types.InlineKeyboardButton(text="Юра", callback_data="vor_yura")
+                    markup.add(max_button, yura_button)
+                    bot.send_message(message.chat.id,
+                                     f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a"
+                                     f">, у кого крадём член?",
+                                     reply_markup=markup, parse_mode='html')
+
+                elif player_id == "1561630034":
+                    markup = types.InlineKeyboardMarkup()
+                    max_button = types.InlineKeyboardButton(text="Макс", callback_data="vor_max")
+                    markup.add(max_button)
+                    bot.send_message(message.chat.id,
+                                     f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, у кого крадём член?",
+                                     reply_markup=markup, parse_mode='html')
+                break
+    else:
+        bot.send_message(message.chat.id, "У вас нету нужной характеристики для писюничка :(")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("vor"))
+def otsos_callback(call):
+    bot.edit_message_reply_markup(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        reply_markup=None
+    )
+    player_id = call.from_user.id
+    existing_characteristic = pisunchik[player_id]['characteristics']
+    characteristic_name = "Glowing"
+    vor_number = 0
+    for char_info in existing_characteristic:
+        if char_info.startswith(characteristic_name):
+            char_name, char_level = char_info.split(":")
+            int_level = int(char_level)
+            vor_number = 2 + ((int_level - 1) * 2)
+
+    if call.data == "otsos_yura":
+        pisunchik[str(YURA_ID)]['pisunchik_size'] -= vor_number
+        pisunchik[player_id]['pisunchik_size'] += vor_number
+        bot.send_message(call.message.chat.id, f"Вы украли {vor_number} см у Юры...")
+        time.sleep(3)
+    elif call.data == "otsos_max":
+        pisunchik[str(MAX_ID)]['pisunchik_size'] -= vor_number
+        pisunchik[player_id]['pisunchik_size'] += vor_number
+        bot.send_message(call.message.chat.id, f"Вы украли {vor_number} см у Макса...")
+
+    elif call.data == "otsos_bogdan":
+        pisunchik[str(BODYA_ID)]['pisunchik_size'] -= vor_number
+        pisunchik[player_id]['pisunchik_size'] += vor_number
+        bot.send_message(call.message.chat.id, f"Вы украли {vor_number} см у Богдана...")
+
+
 def save_data():
     cursor.execute("DELETE FROM pisunchik_data")
 
     for player_id, data in pisunchik.items():
-
-
         columns = ', '.join(data.keys())
         placeholders = ', '.join(['%s'] * len(data))
         values = tuple(data.values())
-
-        if 'characteristics' in data:
-            characteristics = json.dumps(data['characteristics'])
-            values += (characteristics,)
 
         # Build the INSERT query dynamically.
         query = f"INSERT INTO pisunchik_data ({columns}) VALUES ({placeholders})"
@@ -1400,6 +1676,7 @@ def save_data():
         cursor.execute(query, values)
 
     conn.commit()
+
 
 # Function to check if a user can use the /pisunchik command
 def can_use_pisunchik():
@@ -1420,7 +1697,40 @@ def can_use_pisunchik():
                         bot.send_message(-1001294162183, f"{player_name2} теперь может использовать /pisunchik")
                         pisunchik[player]['notified'] = True
                         save_data()
-
+        curr_time = datetime.now(timezone.utc) + timedelta(hours=2)
+        if curr_time.hour == 12 and curr_time.minute == 0:
+            for player in pisunchik:
+                existing_characteristic = pisunchik[player]['characteristics']
+                # Check if the characteristic is already in the player's characteristics
+                player_name = get_player_name(player)
+                characteristic_name = "Gold"
+                n = 0
+                if existing_characteristic is not None:
+                    for char_info in existing_characteristic:
+                        if char_info.startswith(characteristic_name):
+                            char_name, char_level = char_info.split(":")
+                            int_level = int(char_level)
+                            income = 1 + ((int_level - 1) * 3)
+                            pisunchik[player]['coins'] += income
+                            bot.send_message(-1001294162183,
+                                             f"{player_name}, ваш золотой член принёс сегодня прибыль в размере {income} BTC")
+        for player in pisunchik:
+            existing_characteristic = pisunchik[player]['characteristics']
+            # Check if the characteristic is already in the player's characteristics
+            player_name = get_player_name(player)
+            characteristic_name = "Big Black"
+            n = 0
+            if existing_characteristic is not None:
+                for char_info in existing_characteristic:
+                    if char_info.startswith(characteristic_name):
+                        char_name, char_level = char_info.split(":")
+                        int_level = int(char_level)
+                        min_pisunchik = 0 + ((int_level - 1) * 3)
+                        if pisunchik[player]['pisunchik_size'] < min_pisunchik:
+                            pisunchik[player]['pisunchik_size'] = min_pisunchik
+                            save_data()
+                            bot.send_message(741542965,
+                                             f"{player_name}, ваш член менее {min_pisunchik} сантиметров :( Но, не переживайте благодаря вашей Big Black характеристике ваш член снова стал {min_pisunchik} см")
 
         time.sleep(60)  # Sleep for 1 minute (adjust as needed)
 
@@ -1472,3 +1782,4 @@ def handle_message(message):
 
 
 bot.polling()
+# 741542965
