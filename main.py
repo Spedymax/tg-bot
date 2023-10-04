@@ -195,7 +195,7 @@ def show_characteristics(message):
         bot.reply_to(message, "You are not registered as a player.")
 
 
-@bot.message_handler(commands=['upgradeChar'])
+@bot.message_handler(commands=['upgrade_char'])
 def upgrade_characteristic(message):
     player_id = str(message.from_user.id)
     if player_id in pisunchik:
@@ -933,7 +933,7 @@ def show_items(message):
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
 
 
-@bot.message_handler(commands=['statuetkiShop'])
+@bot.message_handler(commands=['statuetki_shop'])
 def show_statuetki_shop(message):
     chat_id = message.chat.id
 
