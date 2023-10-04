@@ -238,7 +238,7 @@ def handle_characteristic_upgrade(call):
 
     if pisunchik[player_id]['coins'] >= 100:
         # Deduct 100 coins from the player's balance
-        pisunchik[player_id]['coins'] - 100
+        pisunchik[player_id]['coins'] -= 100
 
         # Extract the characteristic name and current level
         characteristic_name, current_level = selected_characteristic.split(":")
@@ -260,10 +260,10 @@ def handle_characteristic_upgrade(call):
 
 
         # Send a message to confirm the upgrade
-        bot.send_message(chat_id, f"You have upgraded {characteristic_name} to level {new_level}!")
+        bot.send_message(chat_id, f"Вы улучшили {characteristic_name} до лвла {new_level}!")
     else:
         # Send a message if the player doesn't have enough coins
-        bot.send_message(chat_id, "You don't have enough coins to upgrade this characteristic.")
+        bot.send_message(chat_id, "У вас недостаточно денег для улучшения (Надо 100)")
 
 
 strochki = [
