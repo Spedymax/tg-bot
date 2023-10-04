@@ -144,122 +144,6 @@ item_desc = {
 
 }
 
-
-# poroshochek
-#
-# # Define game states
-# START, IN_DUNGEON, FOUND_EXIT = range(3)
-#
-# player_gold = 0
-# mob_hp = 10
-#
-# # Initialize the game state
-# current_state = START
-#
-# # Define dungeon rooms dungeon_rooms = [ "Вы просыпаетесь в темной подземной камере. Тут мокро и сыро,
-# не очень хочеться тут оставаться. Ничего не видно но вы нащупываете две двери перед вами. Выберите одну,
-# чтобы продолжить", "Вы попадаете в загадочную комнату с магическим алтарем. Жертвенный камень манит вас но вы
-# сопротивляетесь изо всех сил. Куда вы пойдете дальше?", "Справа вы встречаете мост через бездонную пропасть.
-# Решите, перейти ли вам на другую сторону или пойти налево?", "Вы попадаете в мрачное и опасное место. Оно заполнено
-# пауками всех размеров, от крошечных паучков до огромных пауков-людоедов. Они могут быстро перемещаться и стрелять
-# паутиной. Игрок должен быть осторожным, чтобы не попасть в паутину.", "Вы доходите до тупика. Вам придется
-# вернуться назад. Вы разворачиваетесь, куда же вы пойдете?", "Вы видите сундук неподалёку. Вы открываете сундук и
-# находите 40 BTC! Продолжайте путешевствие.", "Вы входите в забытый город который был построен в древние времена,
-# но теперь он заброшен и забыт. Город состоит из огромных каменных зданий, украшенных резьбой и скульптурами. В
-# центре города находится огромный храм, в котором вы видите огромный алтарь. Вы опять видите две двери. Куда вы
-# пойдете?", "Вы попадаете в заброшенную шахту которая находится глубоко под землей. Она была построена много лет
-# назад, но теперь она заброшена. Шахта состоит из узких проходов, глубоких колодцев и опасных ловушек. В шахте можно
-# найти полезные ресурсы, такие как руда, золото и драгоценные камни. Вы прячите один из драгоценных камней себе в
-# карман. Куда отправимся дальше?", "Перед вами огромный ледник который находится в глубине гор. Он состоит из
-# огромного слоя льда, который образовался много лет назад. Ледник покрыт ледяными статуями, замерзшими водопадами и
-# другими удивительными природными явлениями. Однако ледник также опасен. В нем может быть скользко, а холодный
-# воздух может привести к обморожению. Вы видите две двери. Куда вы пойдете?", "Вы видите сундук неподалёку. Вы
-# открываете сундук и находите 60 BTC! Юху!", "Вы рядом с подземным озером которое находится в глубине горы. Оно
-# питается подземными источниками. Озеро окружено высокими скалами и зарослями деревьев. В озере можно найти рыбу,
-# водоросли и другие обитателей подводного мира. Но в нем могут быть водовороты, ямы и другие опасности, лучше уйти
-# отсюда поскорее.", "Вы забираетесь на остров который находится в центре озера. Он окружен высокими скалами. На
-# острове есть деревья, цветы и другие растения. Но тут очень холодно. Уходите.", ] dungeon_room = 0
-#
-#
-# # Keyboard markup for game options
-# def get_keyboard():
-#     keyboard = types.InlineKeyboardMarkup(row_width=2)
-#     if current_state == IN_DUNGEON:
-#         keyboard.add(types.InlineKeyboardButton("Налево", callback_data='turn_left'),
-#                      types.InlineKeyboardButton("Направо", callback_data='turn_right'))
-#     return keyboard
-#
-#
-# # Start the game
-# @bot.message_handler(commands=['poroshochek'])
-# def start_game(message):
-#     player_id = str(message.from_user.id)
-#     if 'poroshochek' in pisunchik[player_id]['items']:
-#         global current_state
-#         current_state = IN_DUNGEON
-#         bot.send_message(message.chat.id, f"Вы достаете из кармана мешочек с порошком и вдыхаете его.")
-#         time.sleep(3)
-#         bot.send_message(message.chat.id, f"\nПеред вами появляется маленький человечек, возможно колдун!")
-#         time.sleep(3)
-#         bot.send_message(message.chat.id, f"Он что-то бормочет себе под нос и вдруг исчезает.")
-#         time.sleep(3)
-#         bot.send_message(message.chat.id,
-#                          f"Вы чувствуете как ваши яйца увеличиваются в размере.\nСейчас что-то произойдет!")
-#         time.sleep(3)
-#         bot.send_message(message.chat.id, f"Внезапно в глазах темнеет, и вы падаете на пол....")
-#         time.sleep(3)
-#         bot.send_message(message.chat.id, dungeon_rooms[0], reply_markup=get_keyboard())
-#
-#
-# # Handle button callbacks
-# @bot.callback_query_handler(func=lambda call: call.data.startswith("turn"))
-# def handle_callback(call):
-#     global current_state, player_gold, dungeon_room
-#     player_id = str(call.from_user.id)
-#     if current_state == IN_DUNGEON:
-#         if call.data == 'turn_left':
-#             dungeon_room += 1
-#         elif call.data == 'turn_right':
-#             dungeon_room += 1
-#
-#         elif dungeon_room == 5:
-#             player_gold += 50
-#         elif dungeon_room == 9:
-#             player_gold += 50
-#
-#         if dungeon_room == 12 or dungeon_room == 13 or dungeon_room == 14:
-#             current_state = FOUND_EXIT
-#             dungeon_room = 11
-#             bot.edit_message_text(f"Вы достигли выхода из подземелья! Поздравляю!", call.message.chat.id,
-#                                   call.message.message_id,
-#                                   reply_markup=None)
-#         else:
-#             bot.edit_message_text(dungeon_rooms[dungeon_room], call.message.chat.id, call.message.message_id,
-#                                   reply_markup=get_keyboard())
-#
-#         if current_state == FOUND_EXIT:
-#             bot.send_message(call.message.chat.id, f"Вы достигли выхода из подземелья! Поздравляем!\n")
-#             time.sleep(3)
-#             bot.send_message(call.message.chat.id,
-#                              f"Вы осматриваетесь по сторонам и видите колдуна которого вы встретили ранее\n")
-#             time.sleep(3)
-#             bot.send_message(call.message.chat.id, f"Он опять что-то бормочет себе под нос и изчезает!\n")
-#             time.sleep(3)
-#             bot.send_message(call.message.chat.id, f"Вы понимаете что у вас пропал мешочек с порошком :(\n")
-#             pisunchik[player_id]['items'].remove('poroshochek')
-#             time.sleep(3)
-#             bot.send_message(call.message.chat.id,
-#                              f"Вы снимаете с себя трусы и понимаете что ваш писюнчик увеличился на 20 см!\n")
-#             time.sleep(3)
-#             bot.send_message(call.message.chat.id, f"А еще вы получили 100 BTC\n")
-#             pisunchik[player_id]['pisunchik_size'] += 20
-#             pisunchik[player_id]['coins'] += 100
-#             bot.send_message(call.message.chat.id, "Спасибо за игру!")
-#             save_data()
-
-
-# Command to initiate sending a message to the group
-
 @bot.message_handler(commands=['giveChar'])
 def add_characteristic(message):
     player_id = str(message.from_user.id)
@@ -320,7 +204,6 @@ def upgrade_characteristic(message):
         # Check if the player has any characteristics to upgrade
         if existing_characteristic is not None:
             # Send a message asking the user to select a characteristic to upgrade
-            bot.send_message(message.chat.id, "Select a characteristic to upgrade:")
 
             # Create a list of inline keyboard buttons for each characteristic
             characteristic_buttons = []
@@ -335,9 +218,9 @@ def upgrade_characteristic(message):
             keyboard.add(*characteristic_buttons)
 
             # Send the keyboard to the user
-            bot.send_message(message.chat.id, "Choose a characteristic to upgrade:", reply_markup=keyboard)
+            bot.send_message(message.chat.id, "Выберите характеристику для улучшения:", reply_markup=keyboard)
         else:
-            bot.send_message(message.chat.id, "You don't have any characteristics to upgrade.")
+            bot.send_message(message.chat.id, "У вас нету характристик для улучшения.")
     else:
         bot.send_message(message.chat.id, "You are not registered as a player.")
 
@@ -360,6 +243,9 @@ def handle_characteristic_upgrade(call):
         # Extract the characteristic name and current level
         characteristic_name, current_level = selected_characteristic.split(":")
         current_level = int(current_level)
+        if current_level >= 15:
+            bot.send_message(call.message.chat.id, "Вы уже достигли максимального уровня этой характеристики :)")
+            return
 
         # Increase the level of the characteristic by 1
         new_level = current_level + 1
@@ -370,9 +256,8 @@ def handle_characteristic_upgrade(call):
                 pisunchik[player_id]['characteristics'][n] = updated_characteristic
                 save_data()
             n += 1
+        save_data()
 
-        # Commit the database changes
-        conn.commit()
 
         # Send a message to confirm the upgrade
         bot.send_message(chat_id, f"You have upgraded {characteristic_name} to level {new_level}!")
