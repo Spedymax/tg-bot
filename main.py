@@ -636,24 +636,24 @@ def update_pisunchik(message):
     existing_characteristic = pisunchik[player_id]['characteristics']
     # Check if the characteristic is already in the player's characteristics
     characteristic_name = "Titan"
-    cooldown = 24
+    cooldown = 26
     if existing_characteristic is not None:
         for char_info in existing_characteristic:
             if char_info.startswith(characteristic_name):
                 char_name, char_level = char_info.split(":")
                 int_level = int(char_level)
-                cooldown = int((24 * (100 - int_level * 3)) / 100)
+                cooldown = int((26 * (100 - int_level * 3)) / 100)
 
 
     if datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None) < timedelta(hours=cooldown):
-        time_diff = timedelta(hours=24) - (datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None))
+        time_diff = timedelta(hours=26) - (datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None))
         time_left = time_diff - timedelta(microseconds=time_diff.microseconds)
         bot.reply_to(message, f"Вы можете использовать эту команду только раз в день \nОсталось времени: {time_left}")
         return
 
 
     if player_id in pisunchik:
-        pisunchik[player_id]['last_used'] = datetime.now()
+        pisunchik[player_id]['last_used'] = datetime.now(timezone.utc)
         number = random.randint(-10, 17)
         number2 = random.randint(5, 15)
         kolzo_random = random.random()
@@ -1346,38 +1346,39 @@ max_usage_per_day = 3
 
 @bot.message_handler(commands=['kazik'])
 def kazik(message):
-    player_id = str(message.from_user.id)
+    for i in range(1, 4):
+        player_id = str(message.from_user.id)
 
-    # Check if the user has exceeded the usage limit for today
-    if player_id in pisunchik:
-        last_usage_time = pisunchik[player_id]['casino_last_used']
-        current_time = datetime.now(timezone.utc) + timedelta(hours=2)
+        # Check if the user has exceeded the usage limit for today
+        if player_id in pisunchik:
+            last_usage_time = pisunchik[player_id]['casino_last_used']
+            current_time = datetime.now(timezone.utc) + timedelta(hours=2)
 
-        # Calculate the time elapsed since the last usage
-        time_elapsed = current_time - last_usage_time
+            # Calculate the time elapsed since the last usage
+            time_elapsed = current_time - last_usage_time
 
-        # If less than 24 hours have passed, and the usage limit is reached, deny access
-        if time_elapsed < timedelta(days=1) and pisunchik[player_id]['casino_usage_count'] >= max_usage_per_day:
-            bot.send_message(message.chat.id,
-                             f"Вы достигли лимита использования команды на сегодня.\n Времени осталось: {timedelta(days=1) - time_elapsed}")
+            # If less than 26 hours have passed, and the usage limit is reached, deny access
+            if time_elapsed < timedelta(hours=26) and pisunchik[player_id]['casino_usage_count'] >= max_usage_per_day:
+                bot.send_message(message.chat.id,
+                                 f"Вы достигли лимита использования команды на сегодня.\n Времени осталось: {timedelta(days=1) - time_elapsed}")
+                return
+            elif time_elapsed >= timedelta(hours=26):
+                # If 26 hours have passed since the last usage, reset the usage count
+                pisunchik[player_id]['casino_usage_count'] = 0
+
+        # Update the last usage time and count for the user
+        if player_id not in pisunchik:
+            bot.send_message(message.chat.id, 'Вы не зарегистрированы как игрок')
             return
-        elif time_elapsed >= timedelta(days=1):
-            # If 24 hours have passed since the last usage, reset the usage count
-            pisunchik[player_id]['casino_usage_count'] = 0
+        else:
+            pisunchik[player_id]['casino_last_used'] = datetime.now(timezone.utc)
+            pisunchik[player_id]['casino_usage_count'] += 1
 
-    # Update the last usage time and count for the user
-    if player_id not in pisunchik:
-        bot.send_message(message.chat.id, 'Вы не зарегистрированы как игрок')
-        return
-    else:
-        pisunchik[player_id]['casino_last_used'] = datetime.now(timezone.utc)
-        pisunchik[player_id]['casino_usage_count'] += 1
-
-    result = bot.send_dice(message.chat.id, emoji='🎰')
-    if result.dice.value in {64, 1, 22, 43}:
-        time.sleep(4)
-        bot.send_message(message.chat.id, "ДЕКПОТ! Вы получаете 300 BTC!")
-        pisunchik[player_id]['coins'] += 300
+        result = bot.send_dice(message.chat.id, emoji='🎰')
+        if result.dice.value in {64, 1, 22, 43}:
+            time.sleep(4)
+            bot.send_message(message.chat.id, "ДЕКПОТ! Вы получаете 300 BTC!")
+            pisunchik[player_id]['coins'] += 300
 
     save_data()
 
@@ -1573,14 +1574,14 @@ def can_use_pisunchik():
             # Calculate the time difference
             time_difference = current_time - last_used_time
 
-            # Check if the cooldown period (24 hours) has passed
-            if time_difference >= timedelta(hours=24):
+            # Check if the cooldown period (26 hours) has passed
+            if time_difference >= timedelta(hours=26):
                 # Update the last_used timestamp in the database
                 if not pisunchik[player]['notified']:
                     if player != '1561630034':
                         player_name2 = get_player_name(player)
-                        bot.send_message(-1001294162183, f"{player_name2} теперь может использовать /pisunchik")
-                        pisunchik[player]['notified'] = True
+                        # bot.send_message(-1001294162183, f"{player_name2} теперь может использовать /pisunchik")
+                        # pisunchik[player]['notified'] = True
                         save_data()
         curr_time = datetime.now(timezone.utc) + timedelta(hours=2)
         if curr_time.hour == 12 and curr_time.minute == 0:
