@@ -1,1 +1,1 @@
-bot: python3 main.py && python3 love.py
+bot: python3 forever.py

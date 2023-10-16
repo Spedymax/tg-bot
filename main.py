@@ -1030,7 +1030,6 @@ def display_shop_items(player):
     # Check if the characteristic is already in the player's characteristics
     player_name = get_player_name(player)
     characteristic_name = "Hot"
-    n = 0
     shop_items = " "
     global discount
     if existing_characteristic is not None:
@@ -1039,7 +1038,7 @@ def display_shop_items(player):
                 char_name, char_level = char_info.split(":")
                 int_level = int(char_level)
                 discount = 5 + ((int_level - 1) * 3)
-                bot.send_message(741542965, 'Магазинный автомат плавится...')
+                bot.send_message(-1001294162183, 'Магазинный автомат плавится...')
                 time.sleep(3)
                 shop_items = "\n".join(
                     [f"{item}: {int(price * (100 - discount) / 100)} coins" for item, price in shop_prices.items()])
@@ -1615,7 +1614,7 @@ def can_use_pisunchik():
                         if pisunchik[player]['pisunchik_size'] < min_pisunchik:
                             pisunchik[player]['pisunchik_size'] = min_pisunchik
                             save_data()
-                            bot.send_message(741542965,
+                            bot.send_message(-1001294162183,
                                              f"{player_name}, ваш член менее {min_pisunchik} сантиметров :( Но, не переживайте благодаря вашей Big Black характеристике ваш член снова стал {min_pisunchik} см")
 
         time.sleep(60)  # Sleep for 1 minute (adjust as needed)
