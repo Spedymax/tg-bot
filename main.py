@@ -643,11 +643,11 @@ def update_pisunchik(message):
             if char_info.startswith(characteristic_name):
                 char_name, char_level = char_info.split(":")
                 int_level = int(char_level)
-                cooldown = int((26 * (100 - int_level * 3)) / 100)
+                cooldown = int((24 * (100 - int_level * 3)) / 100)
 
 
     if datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None) < timedelta(hours=cooldown):
-        time_diff = timedelta(hours=26) - (datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None))
+        time_diff = timedelta(hours=cooldown) - (datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None))
         time_left = time_diff - timedelta(microseconds=time_diff.microseconds)
         bot.reply_to(message, f"Вы можете использовать эту команду только раз в день \nОсталось времени: {time_left}")
         return
