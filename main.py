@@ -229,6 +229,7 @@ def upgrade_characteristic(message):
 def handle_characteristic_upgrade(call):
     chat_id = call.message.chat.id
     player_id = str(call.from_user.id)
+    call2 = call
     call = call.data.split("_", 1)  # Split the callback data into action and player
     selected_characteristic = call[1]
 
@@ -244,7 +245,7 @@ def handle_characteristic_upgrade(call):
         characteristic_name, current_level = selected_characteristic.split(":")
         current_level = int(current_level)
         if current_level >= 15:
-            bot.send_message(call.message.chat.id, "Вы уже достигли максимального уровня этой характеристики :)")
+            bot.send_message(call2.message.chat.id, "Вы уже достигли максимального уровня этой характеристики :)")
             return
 
         # Increase the level of the characteristic by 1
