@@ -749,7 +749,7 @@ def handle_roll_option(call):
     option = int(call.data.split('_')[1])
     user_id = str(call.from_user.id)
 
-    jackpot_message = f"🆘🤑БОГ ТЫ МОЙ! ТЫ ВЫИГРАЛ ДЖЕКПОТ! 300 BTC ТЕБЕ НА СЧЕТ!🤑🆘\n"
+    jackpot_message = f"🆘🤑БОГ ТЫ МОЙ! ТЫ ВЫИГРАЛ ДЖЕКПОТ! 400 BTC ТЕБЕ НА СЧЕТ!🤑🆘\n"
 
     if user_id in pisunchik:
         neededCoins = option * 6
@@ -788,7 +788,7 @@ def handle_roll_option(call):
             for _ in range(option):
                 number = random.randint(1, 6)
                 roll_results.append(number)
-                number2 = random.randint(1, 40)
+                number2 = random.randint(1, 101)
                 if number2 == 14:
                     jackpot += 1
             for number in roll_results:
@@ -815,7 +815,7 @@ def handle_roll_option(call):
                     if i >= 1:
                         bot.send_message(call.message.chat.id, "ЧТО? ЕЩЕ ОДИН?")
                         time.sleep(2)
-                    pisunchik[user_id]['coins'] += 300
+                    pisunchik[user_id]['coins'] += 400
                     bot.send_message(call.message.chat.id, jackpot_message)
         else:
             bot.send_message(call.message.chat.id, f"Недостаточно BTC. Нужно {neededCoins} BTC")
