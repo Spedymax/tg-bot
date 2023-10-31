@@ -1583,7 +1583,8 @@ def can_use_pisunchik():
                 if not pisunchik[player]['notified']:
                     if player != '1561630034':
                         player_name2 = get_player_name(player)
-                        bot.send_message(-1001294162183, f"@{player_name2} теперь может использовать /pisunchik")
+                        bot.send_message(-1001294162183, f"<a href='tg://user?id={player}'>@{player_name2}</a>, вы можете использовать /pisunchik",
+                                         parse_mode='html')
                         pisunchik[player]['notified'] = True
                         save_data()
         curr_time = datetime.now(timezone.utc) + timedelta(hours=2)
