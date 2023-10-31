@@ -1379,6 +1379,9 @@ def kazik(message):
             time.sleep(4)
             bot.send_message(message.chat.id, "ДЕКПОТ! Вы получаете 300 BTC!")
             pisunchik[player_id]['coins'] += 300
+        elif result.dice.value in {1, 22, 43}:
+            time.sleep(4)
+            bot.send_message(message.chat.id, "Сори, джекпот только для семёрок((")
 
     save_data()
 
