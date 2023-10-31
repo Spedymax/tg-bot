@@ -1386,10 +1386,16 @@ def kazik(message):
     save_data()
 
 @bot.message_handler(commands=['prosipaisya'])
-def prosipaisya(message):
+def prosipaisya():
     for i in range(1, 5):
         bot.send_message(-1001294162183,
                          f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>",
+                         parse_mode='html')
+
+@bot.message_handler(commands=['totalysafecommand'])
+def link(message):
+        bot.send_message(message.chat.id,
+                         f"<a href='www.pornhub.com'>@Spedymax</a>",
                          parse_mode='html')
 
 
