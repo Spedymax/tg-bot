@@ -1375,7 +1375,7 @@ def kazik(message):
             pisunchik[player_id]['casino_usage_count'] += 1
 
         result = bot.send_dice(message.chat.id, emoji='🎰')
-        if result.dice.value in {64, 1, 22, 43}:
+        if result.dice.value in {64}:
             time.sleep(4)
             bot.send_message(message.chat.id, "ДЕКПОТ! Вы получаете 300 BTC!")
             pisunchik[player_id]['coins'] += 300
