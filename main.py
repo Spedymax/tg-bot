@@ -189,7 +189,7 @@ def show_characteristics(message):
             characteristic_name, current_level = characteristic.split(":")
             if characteristic_name in xarakteristiks_desc:
                 current_level = int(current_level)
-                characteristics_text += f"{characteristic_name}(Level {current_level}): {xarakteristiks_desc[characteristic_name]}"
+                characteristics_text += f"{characteristic_name}(Level {current_level}): {xarakteristiks_desc[characteristic_name]}\n"
             bot.reply_to(message, characteristics_text)
     else:
         bot.reply_to(message, "You are not registered as a player.")
