@@ -190,7 +190,7 @@ def show_characteristics(message):
             if characteristic_name in xarakteristiks_desc:
                 current_level = int(current_level)
                 characteristics_text += f"{characteristic_name}(Level {current_level}): {xarakteristiks_desc[characteristic_name]}\n"
-            bot.reply_to(message, characteristics_text)
+        bot.reply_to(message, characteristics_text)
     else:
         bot.reply_to(message, "You are not registered as a player.")
 
@@ -1389,12 +1389,6 @@ def prosipaisya():
     for i in range(1, 5):
         bot.send_message(-1001294162183,
                          f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>",
-                         parse_mode='html')
-
-@bot.message_handler(commands=['totalysafecommand'])
-def link(message):
-        bot.send_message(message.chat.id,
-                         f"<a href='www.pornhub.com'>@Spedymax</a>",
                          parse_mode='html')
 
 
