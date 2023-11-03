@@ -637,7 +637,7 @@ def update_pisunchik(message):
     existing_characteristic = pisunchik[player_id]['characteristics']
     # Check if the characteristic is already in the player's characteristics
     characteristic_name = "Titan"
-    cooldown = 26
+    cooldown = 24
     if existing_characteristic is not None:
         for char_info in existing_characteristic:
             if char_info.startswith(characteristic_name):
@@ -675,13 +675,12 @@ def update_pisunchik(message):
         # Check if the player has 'prezervativ' in their inventory and apply its effect
         if 'prezervativ' in pisunchik[player_id]['items'] and number < 0:
             current_time = datetime.now(
-                timezone.utc)  # Use datetime.now(timezone.utc) + timedelta(hours=2) to create an offset-aware datetime
+                timezone.utc)  # Use datetime.now(timezone.utc)  to create an offset-aware datetime
             if current_time - pisunchik[player_id]['last_prezervativ'] >= timedelta(days=4):
                 number = 0
                 ne_umenshilsya = True
                 pisunchik[player_id]['pisunchik_size'] += number
-                pisunchik[player_id]['last_prezervativ'] = current_time + timedelta(
-                    hours=2)  # Update to use the current time
+                pisunchik[player_id]['last_prezervativ'] = current_time  # Update to use the current time
             else:
                 cooldown = True
 
@@ -1352,18 +1351,18 @@ def kazik(message):
         # Check if the user has exceeded the usage limit for today
         if player_id in pisunchik:
             last_usage_time = pisunchik[player_id]['casino_last_used']
-            current_time = datetime.now(timezone.utc) + timedelta(hours=2)
+            current_time = datetime.now(timezone.utc)
 
             # Calculate the time elapsed since the last usage
             time_elapsed = current_time - last_usage_time
 
-            # If less than 26 hours have passed, and the usage limit is reached, deny access
-            if time_elapsed < timedelta(hours=26) and pisunchik[player_id]['casino_usage_count'] >= max_usage_per_day:
+            # If less than 24 hours have passed, and the usage limit is reached, deny access
+            if time_elapsed < timedelta(hours=24) and pisunchik[player_id]['casino_usage_count'] >= max_usage_per_day:
                 bot.send_message(message.chat.id,
                                  f"Вы достигли лимита использования команды на сегодня.\n Времени осталось: {timedelta(days=1) - time_elapsed}")
                 return
-            elif time_elapsed >= timedelta(hours=26):
-                # If 26 hours have passed since the last usage, reset the usage count
+            elif time_elapsed >= timedelta(hours=24):
+                # If 24 hours have passed since the last usage, reset the usage count
                 pisunchik[player_id]['casino_usage_count'] = 0
 
         # Update the last usage time and count for the user
@@ -1381,7 +1380,7 @@ def kazik(message):
             pisunchik[player_id]['coins'] += 300
         elif result.dice.value in {1, 22, 43}:
             time.sleep(4)
-            bot.send_message(message.chat.id, "Сори, джекпот только для семёрок((")
+            bot.send_message(message.chat.id, "Сори, джекпот только для трёх семёрок((")
 
     save_data()
 
@@ -1590,8 +1589,8 @@ def can_use_pisunchik():
             # Calculate the time difference
             time_difference = current_time - last_used_time
 
-            # Check if the cooldown period (26 hours) has passed
-            if time_difference >= timedelta(hours=26):
+            # Check if the cooldown period (4 hours) has passed
+            if time_difference >= timedelta(hours=24):
                 # Update the last_used timestamp in the database
                 if not pisunchik[player]['notified']:
                     if player != '1561630034':
@@ -1600,7 +1599,7 @@ def can_use_pisunchik():
                                          parse_mode='html')
                         pisunchik[player]['notified'] = True
                         save_data()
-        curr_time = datetime.now(timezone.utc) + timedelta(hours=2)
+        curr_time = datetime.now(timezone.utc)
         if curr_time.hour == 12 and curr_time.minute == 0:
             for player in pisunchik:
                 existing_characteristic = pisunchik[player]['characteristics']
