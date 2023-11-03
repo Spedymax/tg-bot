@@ -1385,7 +1385,7 @@ def kazik(message):
     save_data()
 
 @bot.message_handler(commands=['prosipaisya'])
-def prosipaisya():
+def prosipaisya(message):
     for i in range(1, 5):
         bot.send_message(-1001294162183,
                          f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>",
