@@ -144,6 +144,7 @@ item_desc = {
 
 }
 
+
 @bot.message_handler(commands=['giveChar'])
 def add_characteristic(message):
     player_id = str(message.from_user.id)
@@ -258,7 +259,6 @@ def handle_characteristic_upgrade(call):
                 save_data()
             n += 1
         save_data()
-
 
         # Send a message to confirm the upgrade
         bot.send_message(chat_id, f"Вы улучшили {characteristic_name} до лвла {new_level}!")
@@ -645,13 +645,12 @@ def update_pisunchik(message):
                 int_level = int(char_level)
                 cooldown = int((24 * (100 - int_level * 3)) / 100)
 
-
     if datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None) < timedelta(hours=cooldown):
-        time_diff = timedelta(hours=cooldown) - (datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None))
+        time_diff = timedelta(hours=cooldown) - (
+                    datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None))
         time_left = time_diff - timedelta(microseconds=time_diff.microseconds)
         bot.reply_to(message, f"Вы можете использовать эту команду только раз в день \nОсталось времени: {time_left}")
         return
-
 
     if player_id in pisunchik:
         pisunchik[player_id]['last_used'] = datetime.now(timezone.utc)
@@ -887,7 +886,6 @@ def show_items(message):
 
         else:
             bot.reply_to(message, "Нету описания предметов (Странно)")
-
 
         if len(user_statuetki) == 4:
             pisunchik[player_id]['statuetki'].remove('Pudginio')
@@ -1384,8 +1382,9 @@ def kazik(message):
 
     save_data()
 
+
 @bot.message_handler(commands=['prosipaisya'])
-def prosipaisya(message):
+def prosipaisya():
     for i in range(1, 5):
         bot.send_message(-1001294162183,
                          f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>",
@@ -1589,7 +1588,8 @@ def can_use_pisunchik():
                 if not pisunchik[player]['notified']:
                     if player != '1561630034':
                         player_name2 = get_player_name(player)
-                        bot.send_message(-1001294162183, f"<a href='tg://user?id={player}'>@{player_name2}</a>, вы можете использовать /pisunchik",
+                        bot.send_message(-1001294162183,
+                                         f"<a href='tg://user?id={player}'>@{player_name2}</a>, вы можете использовать /pisunchik",
                                          parse_mode='html')
                         pisunchik[player]['notified'] = True
                         save_data()
@@ -1610,6 +1610,11 @@ def can_use_pisunchik():
                             pisunchik[player]['coins'] += income
                             bot.send_message(-1001294162183,
                                              f"{player_name}, ваш золотой член принёс сегодня прибыль в размере {income} BTC")
+
+        if curr_time.hour == 6 and curr_time.minute == 0:
+            prosipaisya()
+            with open('Napominalka.wav', 'rb') as audio_file:
+                bot.send_audio(-1001294162183, audio_file)
         for player in pisunchik:
             existing_characteristic = pisunchik[player]['characteristics']
             # Check if the characteristic is already in the player's characteristics
