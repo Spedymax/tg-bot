@@ -12,7 +12,7 @@ import json
 from openai import OpenAI
 
 client = OpenAI(
-    api_key='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'
+    api_key='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'
 )
 client.models.list()
 
