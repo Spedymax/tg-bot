@@ -9,6 +9,17 @@ import requests
 from bs4 import BeautifulSoup
 import threading
 import json
+from openai import OpenAI
+
+client = OpenAI(
+    api_key='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'
+)
+client.models.list()
+
+headers = {
+    'Content-Type': 'application/json',
+    'Authorization': f'Bearer {client.api_key}',
+}
 
 # Establish a database connection
 conn = psycopg2.connect(
@@ -293,6 +304,26 @@ def misha(message):
     bot.send_message(message.chat.id,
                      'Мммииишааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааа')
 
+@bot.message_handler(commands=['sho_tam_novogo'])
+def get_recent_messages(message):
+    cursor.execute("SELECT name, message_text FROM messages")
+    converted_string = '\n'.join(f'{name}: {phrase}' for name, phrase in cursor.fetchall())
+    data = {
+        "model": "gpt-3.5-turbo",
+        "messages": [
+            {"role": "system",
+             "content": "Ты бот анализатор. Тебе будут давать сообщения от пользователей, твоё задание сделать краткую сводку того о чем была речь в этих сообщениях. Разделяй каждую отдельную тему на абзацы"},
+            {"role": "system",
+             "content": "Начинай своё сообщение с: За последние 12 часов речь шла о том что: *и потом перечень того о чём шла речь*"},
+            {"role": "user", "content": f"{converted_string}"},
+        ],
+        "temperature": 0.7
+    }
+
+    response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers, data=json.dumps(data))
+    response_data = response.json()
+    bot.send_message(message.chat.id, "Ожидайте, анализирую сообщения...")
+    bot.send_message(message.chat.id, f"{response_data['choices'][0]['message']['content']}")
 
 @bot.message_handler(commands=['start'])
 def start_game(message):
@@ -1671,6 +1702,36 @@ def handle_send_to_group_message(message):
             time.sleep(2)
             bot.restrict_chat_member(message.chat.id, message.from_user.id,
                                      until_date=datetime.now() + timedelta(minutes=10), permissions=None)
+    user_id = message.from_user.id
+    message_text = message.text
+    timestamp = datetime.fromtimestamp(message.date)
+    name = get_player_name(str(user_id))
+
+    # Insert message into the database
+    cursor.execute("INSERT INTO messages (user_id, message_text, timestamp, name) VALUES (%s, %s, %s, %s)",
+                   (user_id, message_text, timestamp, name))
+    conn.commit()
+    some_hours_ago = datetime.utcnow() - timedelta(hours=12)
+    # Delete messages older than 12 hours
+    cursor.execute("DELETE FROM messages WHERE timestamp < %s", (some_hours_ago,))
+    conn.commit()
+    # Check total count of messages
+    cursor.execute("SELECT COUNT(*) FROM messages")
+    message_count = cursor.fetchone()[0]
+
+    # If message count is greater than 500, delete the oldest ones
+    if message_count > 500:
+        # Find out how many messages to delete to get back to 500
+        delete_count = message_count - 500
+        cursor.execute("""
+                DELETE FROM messages 
+                WHERE id IN (
+                    SELECT id FROM messages 
+                    ORDER BY timestamp ASC 
+                    LIMIT %s
+                )
+            """, (delete_count,))
+        conn.commit()
 
 
 @bot.message_handler(content_types=['animation'])
