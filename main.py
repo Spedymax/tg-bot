@@ -746,36 +746,45 @@ def handle_roll_option(call):
     jackpot_message = f"🆘🤑БОГ ТЫ МОЙ! ТЫ ВЫИГРАЛ ДЖЕКПОТ! 400 BTC ТЕБЕ НА СЧЕТ!🤑🆘\n"
 
     if user_id in pisunchik:
-        neededCoins = option * 6
-        if 'kubik_seksa' in pisunchik[user_id]['items']:
-            neededCoins = option * 3
+
 
         existing_characteristic = pisunchik[user_id]['characteristics']
         # Check if the characteristic is already in the player's characteristics
         player_name = get_player_name(user_id)
         characteristic_name = "Invisible"
-        n = 0
-        if existing_characteristic is not None:
-            for char_info in existing_characteristic:
-                if char_info.startswith(characteristic_name):
-                    char_name, char_level = char_info.split(":")
-                    int_level = int(char_level)
-                    probability = 0.03 + ((int_level - 1) * 0.03)
+        notNeededCoins = 0
+        for i in range(0, option):
+            if existing_characteristic is not None:
+                for char_info in existing_characteristic:
 
-                    # Generate a random number between 0 and 1
-                    random_number = random.random()
+                    if char_info.startswith(characteristic_name):
+                        char_name, char_level = char_info.split(":")
+                        int_level = int(char_level)
+                        probability = 0.03 + ((int_level - 1) * 0.03)
 
-                    # Check if the random number is less than or equal to the probability
-                    if random_number <= probability:
-                        neededCoins = 0
-                        bot.send_message(call.message.chat.id, "Поздравляю ролл для вас 0 BTC")
-                    break
+                        # Generate a random number between 0 and 1
+                        random_number = random.random()
+
+                        # Check if the random number is less than or equal to the probability
+                        if random_number <= probability:
+                            notNeededCoins += 1
+                        break
+        if notNeededCoins >= 0:
+            bot.send_message(call.message.chat.id, f"Поздравляю, вот столько роллов для вас бесплатны: {notNeededCoins}")
+
+        neededCoins = option * 6 - notNeededCoins * 6
+        if 'kubik_seksa' in pisunchik[user_id]['items']:
+            neededCoins = option * 3 - notNeededCoins * 3
+
+
 
         if pisunchik[user_id]['coins'] >= neededCoins:
             if 'kubik_seksa' in pisunchik[user_id]['items']:
                 pisunchik[user_id]['coins'] -= neededCoins
             else:
                 pisunchik[user_id]['coins'] -= neededCoins
+
+            bot.send_message(call.message.chat.id, f"Всего потрачено: {neededCoins} BTC")
 
             roll_results = []
             jackpot = 0
@@ -793,7 +802,6 @@ def handle_roll_option(call):
             # Display the roll results in one message
             roll_message = f"Результаты бросков: {' '.join(map(str, roll_results))}\n"
             bot.send_message(call.message.chat.id, roll_message)
-
             # Display the updated pizunchik size
             bot.send_message(call.message.chat.id, f"Ваш писюнчик: {pisunchik[user_id]['pisunchik_size']} см")
 
