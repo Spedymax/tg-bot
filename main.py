@@ -10,9 +10,23 @@ from bs4 import BeautifulSoup
 import threading
 import json
 from openai import OpenAI
+import Crypto
+from openpyxl import load_workbook
+
+
+encrypted_file = 'encrypted.xlsx'  # Replace with path for the encrypted file
+decrypted_file = 'decrypted.xlsx'  # Replace with path for the decrypted file
+
+Crypto.decrypt_file(encrypted_file, decrypted_file)
+
+workbook = load_workbook(filename='decrypted.xlsx')
+sheet = workbook.active  # Assumes you want the active sheet
+
+# Read the value from cell A1
+a1_value = sheet['A1'].value
 
 client = OpenAI(
-    api_key='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'
+    api_key=f'{a1_value}'
 )
 client.models.list()
 
@@ -306,6 +320,7 @@ def misha(message):
 
 @bot.message_handler(commands=['sho_tam_novogo'])
 def get_recent_messages(message):
+    bot.send_message(message.chat.id, "Ожидайте, анализирую сообщения...")
     cursor.execute("SELECT name, message_text FROM messages")
     converted_string = '\n'.join(f'{name}: {phrase}' for name, phrase in cursor.fetchall())
     data = {
@@ -319,10 +334,8 @@ def get_recent_messages(message):
         ],
         "temperature": 0.7
     }
-
     response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers, data=json.dumps(data))
     response_data = response.json()
-    bot.send_message(message.chat.id, "Ожидайте, анализирую сообщения...")
     bot.send_message(message.chat.id, f"{response_data['choices'][0]['message']['content']}")
 
 @bot.message_handler(commands=['start'])
