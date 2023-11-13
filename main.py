@@ -667,9 +667,7 @@ def update_pisunchik(message):
 
         # Check if the player has 'kolczo_na_chlen' in their inventory and apply its effect
         if 'kolczo_na_chlen' in pisunchik[player_id]['items'] and kolzo_random <= 0.2:
-            print(number2)
             number2 *= 2  # Double the amount of BTC
-            print(number2)
 
         # Check if the player has 'prezervativ' in their inventory and apply its effect
         if 'prezervativ' in pisunchik[player_id]['items'] and number < 0:
@@ -685,9 +683,7 @@ def update_pisunchik(message):
 
         # Check if the player has 'bdsm_kostumchik' in their inventory and apply its effect
         if 'bdsm_kostumchik' in pisunchik[player_id]['items'] and bdsm_random <= 0.1:
-            print(number)
             number += 5  # Add +5 cm to the pisunchik size
-            print(number)
 
         pisunchik[player_id]['pisunchik_size'] += number
         pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + number2
@@ -772,7 +768,7 @@ def handle_roll_option(call):
                     # Check if the random number is less than or equal to the probability
                     if random_number <= probability:
                         neededCoins = 0
-                        bot.send_message(call.from_user.id, "Поздравляю ролл для вас 0 BTC")
+                        bot.send_message(call.message.chat.id, "Поздравляю ролл для вас 0 BTC")
                     break
 
         if pisunchik[user_id]['coins'] >= neededCoins:
@@ -1302,7 +1298,7 @@ def get_furry_images():
     # Get the URL of the furry images website.
     image_urls = []
     for x in range(1, 9):
-        url = "https://imgbin.com/free-png/furry-art/" + str(x)
+        url = "https://www.deviantart.com/tag/furries" + str(x)
         # Make a request to the website.
         response = requests.get(url)
 
