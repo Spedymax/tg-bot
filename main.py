@@ -1458,9 +1458,9 @@ def kazik(message):
 
 
 @bot.message_handler(commands=['prosipaisya'])
-def prosipaisya():
+def prosipaisya(message):
     for i in range(1, 5):
-        bot.send_message(-1001294162183,
+        bot.send_message(message.chat.id,
                          f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>",
                          parse_mode='html')
 
@@ -1686,7 +1686,10 @@ def can_use_pisunchik():
                                              f"{player_name}, ваш золотой член принёс сегодня прибыль в размере {income} BTC")
 
         if curr_time.hour == 6 and curr_time.minute == 0:
-            prosipaisya()
+            for i in range(1, 5):
+                bot.send_message(-1001294162183,
+                                 f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>",
+                                 parse_mode='html')
             with open('Napominalka.wav', 'rb') as audio_file:
                 bot.send_audio(-1001294162183, audio_file)
         for player in pisunchik:
