@@ -373,14 +373,13 @@ def imagine(message):
     if prompt:
         bot.send_message(message.chat.id, "Подождите, обрабатываю запрос...")
         response = client.images.generate(
-            model="dall-e-3",
+            model="dall-e-2",
             prompt=f"{prompt}",
             size="1024x1024",
             quality="standard",
             n=1,
         )
         image_url = response.data[0].url
-        print(image_url)
         bot.send_photo(message.chat.id, image_url)
 
 
