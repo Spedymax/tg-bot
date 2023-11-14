@@ -1732,10 +1732,10 @@ def handle_send_to_group_message(message):
     cursor.execute("SELECT COUNT(*) FROM messages")
     message_count = cursor.fetchone()[0]
 
-    # If message count is greater than 500, delete the oldest ones
-    if message_count > 500:
-        # Find out how many messages to delete to get back to 500
-        delete_count = message_count - 500
+    # If message count is greater than 199, delete the oldest ones
+    if message_count > 199:
+        # Find out how many messages to delete to get back to 199
+        delete_count = message_count - 199
         cursor.execute("""
                 DELETE FROM messages 
                 WHERE id IN (
