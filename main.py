@@ -13,7 +13,6 @@ from openai import OpenAI
 import Crypto
 from openpyxl import load_workbook
 
-
 encrypted_file = 'encrypted.xlsx'  # Replace with path for the encrypted file
 decrypted_file = 'decrypted.xlsx'  # Replace with path for the decrypted file
 
@@ -318,6 +317,7 @@ def misha(message):
     bot.send_message(message.chat.id,
                      'Мммииишааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааа')
 
+
 @bot.message_handler(commands=['sho_tam_novogo'])
 def get_recent_messages(message):
     bot.send_message(message.chat.id, "Ожидайте, анализирую сообщения...")
@@ -337,6 +337,39 @@ def get_recent_messages(message):
     response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers, data=json.dumps(data))
     response_data = response.json()
     bot.send_message(message.chat.id, f"{response_data['choices'][0]['message']['content']}")
+
+
+# Function to send prompt to OpenAI and get a response
+def ask_openai(prompt):
+    data = {
+        "model": "gpt-3.5-turbo",  # or another model you prefer
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant."
+            },
+            {
+                "role": "user",
+                "content": f"{prompt}"}
+        ],
+        "temperature": 0.7
+    }
+
+    response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers, data=json.dumps(data))
+    response_data = response.json()
+    return response_data['choices'][0]['message']['content']
+
+
+# Handler for messages mentioning the bot
+@bot.message_handler(func=lambda message: f"@GgAllMute" in message.text)
+def handle_mention(message):
+    # Extract text following the bot's username
+    prompt = message.text.split("@GgAllMute_bot", 1)[1].strip()
+    if prompt:
+        bot.send_message(message.chat.id, "Подождите, обрабатываю запрос...")
+        response_text = ask_openai(prompt)
+        bot.reply_to(message, response_text)
+
 
 @bot.message_handler(commands=['start'])
 def start_game(message):
@@ -691,7 +724,7 @@ def update_pisunchik(message):
 
     if datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None) < timedelta(hours=cooldown):
         time_diff = timedelta(hours=cooldown) - (
-                    datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None))
+                datetime.now() - pisunchik[player_id]['last_used'].replace(tzinfo=None))
         time_left = time_diff - timedelta(microseconds=time_diff.microseconds)
         bot.reply_to(message, f"Вы можете использовать эту команду только раз в день \nОсталось времени: {time_left}")
         return
@@ -791,7 +824,6 @@ def handle_roll_option(call):
 
     if user_id in pisunchik:
 
-
         existing_characteristic = pisunchik[user_id]['characteristics']
         # Check if the characteristic is already in the player's characteristics
         player_name = get_player_name(user_id)
@@ -814,13 +846,12 @@ def handle_roll_option(call):
                             notNeededCoins += 1
                         break
         if notNeededCoins >= 0:
-            bot.send_message(call.message.chat.id, f"Поздравляю, вот столько роллов для вас бесплатны: {notNeededCoins}")
+            bot.send_message(call.message.chat.id,
+                             f"Поздравляю, вот столько роллов для вас бесплатны: {notNeededCoins}")
 
         neededCoins = option * 6 - notNeededCoins * 6
         if 'kubik_seksa' in pisunchik[user_id]['items']:
             neededCoins = option * 3 - notNeededCoins * 3
-
-
 
         if pisunchik[user_id]['coins'] >= neededCoins:
             if 'kubik_seksa' in pisunchik[user_id]['items']:
@@ -1733,9 +1764,9 @@ def handle_send_to_group_message(message):
     message_count = cursor.fetchone()[0]
 
     # If message count is greater than 199, delete the oldest ones
-    if message_count > 199:
+    if message_count > 150:
         # Find out how many messages to delete to get back to 199
-        delete_count = message_count - 199
+        delete_count = message_count - 150
         cursor.execute("""
                 DELETE FROM messages 
                 WHERE id IN (
