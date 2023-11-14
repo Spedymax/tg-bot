@@ -4,9 +4,8 @@ import os
 
 # Generate a key for encryption and decryption
 # You should store this key securely - if you lose it, you will not be able to decrypt your files!
-key = Fernet.generate_key()
+key = b'Nfv2uvCjgJPdymgG5sTXC28-VygFCtIeI-tlYSHIbok='
 cipher_suite = Fernet(key)
-
 
 # Function to encrypt the file
 def encrypt_file(file_path, encrypted_file_path):
@@ -29,12 +28,12 @@ def decrypt_file(encrypted_file_path, decrypted_file_path):
 
 
 # Usage
-original_file = 'Api Keys.xlsx'  # Replace with your Excel file path
-encrypted_file = 'encrypted.xlsx'  # Replace with path for the encrypted file
-decrypted_file = 'decrypted.xlsx'  # Replace with path for the decrypted file
-
-# Encrypt the Excel file
-encrypt_file(original_file, encrypted_file)
-
-# Decrypt the Excel file
-decrypt_file(encrypted_file, decrypted_file)
+# original_file = '../Api Keys.xlsx'  # Replace with your Excel file path
+# encrypted_file = 'encrypted.xlsx'  # Replace with path for the encrypted file
+# decrypted_file = 'decrypted.xlsx'  # Replace with path for the decrypted file
+#
+# # Encrypt the Excel file
+# encrypt_file(original_file, encrypted_file)
+#
+# # Decrypt the Excel file
+# decrypt_file(encrypted_file, decrypted_file)
