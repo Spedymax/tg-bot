@@ -355,6 +355,7 @@ def ask_openai(prompt):
     response_data = response.json()
     return response_data['choices'][0]['message']['content']
 
+
 # Handler for messages mentioning the bot
 @bot.message_handler(func=lambda message: f"@GgAllMute" in message.text)
 def handle_mention(message):
@@ -364,6 +365,23 @@ def handle_mention(message):
         bot.send_message(message.chat.id, "Подождите, обрабатываю запрос...")
         response_text = ask_openai(prompt)
         bot.reply_to(message, response_text)
+
+
+@bot.message_handler(commands=['imagine'])
+def imagine(message):
+    prompt = message.text.split("/imagine", 1)[1].strip()
+    if prompt:
+        bot.send_message(message.chat.id, "Подождите, обрабатываю запрос...")
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=f"{prompt}",
+            size="1024x1024",
+            quality="standard",
+            n=1,
+        )
+        image_url = response.data[0].url
+        print(image_url)
+        bot.send_photo(message.chat.id, image_url)
 
 
 @bot.message_handler(commands=['start'])
