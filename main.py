@@ -345,10 +345,6 @@ def ask_openai(prompt):
         "model": "gpt-3.5-turbo",  # or another model you prefer
         "messages": [
             {
-                "role": "system",
-                "content": "You are a helpful assistant."
-            },
-            {
                 "role": "user",
                 "content": f"{prompt}"}
         ],
@@ -358,7 +354,6 @@ def ask_openai(prompt):
     response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers, data=json.dumps(data))
     response_data = response.json()
     return response_data['choices'][0]['message']['content']
-
 
 # Handler for messages mentioning the bot
 @bot.message_handler(func=lambda message: f"@GgAllMute" in message.text)
