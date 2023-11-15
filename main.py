@@ -339,23 +339,6 @@ def get_recent_messages(message):
     bot.send_message(message.chat.id, f"{response_data['choices'][0]['message']['content']}")
 
 
-# Function to send prompt to OpenAI and get a response
-def ask_openai(prompt):
-    data = {
-        "model": "gpt-3.5-turbo",  # or another model you prefer
-        "messages": [
-            {
-                "role": "user",
-                "content": f"{prompt}"}
-        ],
-        "temperature": 0.7
-    }
-
-    response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers, data=json.dumps(data))
-    response_data = response.json()
-    return response_data['choices'][0]['message']['content']
-
-
 # Handler for messages mentioning the bot
 @bot.message_handler(func=lambda message: f"@GgAllMute" in message.text)
 def handle_mention(message):
@@ -363,24 +346,43 @@ def handle_mention(message):
     prompt = message.text.split("@GgAllMute_bot", 1)[1].strip()
     if prompt:
         bot.send_message(message.chat.id, "Подождите, обрабатываю запрос...")
-        response_text = ask_openai(prompt)
-        bot.reply_to(message, response_text)
+        try:
+            data = {
+                "model": "gpt-3.5-turbo",  # or another model you prefer
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"{prompt}"}
+                ],
+                "temperature": 0.7
+            }
+
+            response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers,
+                                     data=json.dumps(data))
+            response_data = response.json()
+            bot.reply_to(message, response_data['choices'][0]['message']['content'])
+        except:
+            bot.send_message(message.chat.id, "Нормальное что-то попроси :(")
+
 
 
 @bot.message_handler(commands=['imagine'])
 def imagine(message):
-    prompt = message.text.split("/imagine", 1)[1].strip()
-    if prompt:
-        bot.send_message(message.chat.id, "Подождите, обрабатываю запрос...")
-        response = client.images.generate(
-            model="dall-e-2",
-            prompt=f"{prompt}",
-            size="1024x1024",
-            quality="standard",
-            n=1,
-        )
-        image_url = response.data[0].url
-        bot.send_photo(message.chat.id, image_url)
+    try:
+        prompt = message.text.split("/imagine", 1)[1].strip()
+        if prompt:
+            bot.send_message(message.chat.id, "Подождите, обрабатываю запрос...")
+            response = client.images.generate(
+                model="dall-e-2",
+                prompt=f"{prompt}",
+                size="1024x1024",
+                quality="standard",
+                n=1,
+            )
+            image_url = response.data[0].url
+            bot.send_photo(message.chat.id, image_url)
+    except:
+        bot.send_message(message.chat.id, "Нормальное что-то попроси :(")
 
 
 @bot.message_handler(commands=['start'])
