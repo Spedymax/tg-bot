@@ -339,31 +339,6 @@ def get_recent_messages(message):
     bot.send_message(message.chat.id, f"{response_data['choices'][0]['message']['content']}")
 
 
-# Handler for messages mentioning the bot
-@bot.message_handler(func=lambda message: f"@GgAllMute" in message.text)
-def handle_mention(message):
-    # Extract text following the bot's username
-    prompt = message.text.split("@GgAllMute_bot", 1)[1].strip()
-    if prompt:
-        bot.send_message(message.chat.id, "Подождите, обрабатываю запрос...")
-        try:
-            data = {
-                "model": "gpt-3.5-turbo",  # or another model you prefer
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": f"{prompt}"}
-                ],
-                "temperature": 0.7
-            }
-
-            response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers,
-                                     data=json.dumps(data))
-            response_data = response.json()
-            bot.reply_to(message, response_data['choices'][0]['message']['content'])
-        except:
-            bot.send_message(message.chat.id, "Нормальное что-то попроси :(")
-
 
 
 @bot.message_handler(commands=['imagine'])
@@ -1746,6 +1721,34 @@ start_cooldown_check_thread()
 def send_to_group_command(message):
     # Ask the user to send the message they want to forward
     bot.send_message(message.chat.id, "Please send the message you want to forward to the group chat.")
+
+
+# Handler for messages mentioning the bot
+@bot.message_handler(func=lambda message: f"@GgAllMute" in message.text)
+def handle_mention(message):
+    # Extract text following the bot's username
+    prompt = message.text.split("@GgAllMute_bot", 1)[1].strip()
+    if prompt:
+        bot.send_message(message.chat.id, "Подождите, обрабатываю запрос...")
+        try:
+            data = {
+                "model": "gpt-3.5-turbo",  # or another model you prefer
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"{prompt}"}
+                ],
+                "temperature": 0.7
+            }
+
+            response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers,
+                                     data=json.dumps(data))
+            response_data = response.json()
+            bot.reply_to(message, response_data['choices'][0]['message']['content'])
+        except:
+            bot.send_message(message.chat.id, "Нормальное что-то попроси :(")
+
+
 
 
 # Handle user messages for sending a message to the group
