@@ -1796,9 +1796,6 @@ def handle_send_to_group_message(message):
                 )
             """, (delete_count,))
         conn.commit()
-    bot.send_message(message.chat.id,
-                     f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>",
-                     parse_mode='html')
 
 
 @bot.message_handler(content_types=['animation'])
