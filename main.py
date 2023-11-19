@@ -386,7 +386,7 @@ def show_leaderboard(message):
             name = bot.get_chat(int(player_id)).first_name
             pisunchik_size = data['pisunchik_size']
             coins = data['coins']
-            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
+            leaderboard += f"{i + str(1)}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
 
         bot.reply_to(message, leaderboard)
     elif message.chat.id == -1001932619845:
@@ -410,7 +410,7 @@ def show_leaderboard(message):
             name = bot.get_chat(int(player_id)).first_name
             pisunchik_size = data['pisunchik_size']
             coins = data['coins']
-            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
+            leaderboard += f"{i + str(1)}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
 
         bot.reply_to(message, leaderboard)
     else:
@@ -422,7 +422,7 @@ def show_leaderboard(message):
             name = bot.get_chat(int(player_id)).first_name
             pisunchik_size = data['pisunchik_size']
             coins = data['coins']
-            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
+            leaderboard += f"{i + str(1)}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
 
         bot.reply_to(message, leaderboard)
 
@@ -1370,7 +1370,7 @@ def get_furry_images():
     # Get the URL of the furry images website.
     image_urls = []
     for x in range(1, 9):
-        url = "https://www.deviantart.com/tag/furries" + str(x)
+        url = "https://imgbin.com/free-png/furry-art/" + str(x)
         # Make a request to the website.
         response = requests.get(url)
 
