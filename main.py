@@ -363,10 +363,33 @@ def imagine(message):
 @bot.message_handler(commands=['start'])
 def start_game(message):
     player_id = str(message.from_user.id)
-    pisunchik_size = pisunchik[player_id]['pisunchik_size']
-    coins = pisunchik[player_id]['coins']
+    if player_id in pisunchik:
+        # Existing player: display current pisunchik and coins
+        pisunchik_size = pisunchik[player_id]['pisunchik_size']
+        coins = pisunchik[player_id]['coins']
+        bot.reply_to(message, f"Your pisunchik: {pisunchik_size} cm\nYou have {coins} coins!")
+    else:
+        # New player: add to database and initialize data
+        pisunchik[player_id] = {
+            'pisunchik_size': 0,
+            'coins': 0,
+            'items': [],
+            'characteristics': [],
+            'statuetki': [],
+            'last_used': datetime.min.replace(tzinfo=timezone.utc),
+            'casino_last_used': datetime.min.replace(tzinfo=timezone.utc),
+            'casino_usage_count': 0,
+            'ballzzz_number': None,
+            'notified': False
+            # Add other necessary fields here
+        }
+        # Insert new player into the database
+        cursor.execute("INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, characteristics, statuetki, last_used, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                       (int(player_id), 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, 0, None, False))
+        conn.commit()
 
-    bot.reply_to(message, f"Your pisunchik: {pisunchik_size} cm\nYou have {coins} coins!")
+        bot.reply_to(message, "Welcome to the game! You've been registered as a new player.")
+
 
 
 @bot.message_handler(commands=['leaderboard'])
@@ -1094,11 +1117,10 @@ discount = 0
 def display_shop_items(player):
     existing_characteristic = pisunchik[player]['characteristics']
     # Check if the characteristic is already in the player's characteristics
-    player_name = get_player_name(player)
     characteristic_name = "Hot"
     shop_items = " "
     global discount
-    if existing_characteristic is not None:
+    if existing_characteristic is not None and not '[]':
         for char_info in existing_characteristic:
             if char_info.startswith(characteristic_name):
                 char_name, char_level = char_info.split(":")
@@ -1625,18 +1647,26 @@ def otsos_callback(call):
 
 
 def save_data():
+    # First, clear all existing data from the table, consider if this is what you really want to do
     cursor.execute("DELETE FROM pisunchik_data")
 
+    # Loop through each player in the pisunchik dictionary
     for player_id, data in pisunchik.items():
-        columns = ', '.join(data.keys())
-        placeholders = ', '.join(['%s'] * len(data))
-        values = tuple(data.values())
+        # Ensure player_id is not None or empty
+        if player_id:
+            # Prepare the data for insertion
+            # Add player_id to the data dictionary
+            data_with_id = {'player_id': player_id, **data}
 
-        # Build the INSERT query dynamically.
-        query = f"INSERT INTO pisunchik_data ({columns}) VALUES ({placeholders})"
+            columns = ', '.join(data_with_id.keys())
+            placeholders = ', '.join(['%s'] * len(data_with_id))
+            values = tuple(data_with_id.values())
 
-        cursor.execute(query, values)
+            # Build and execute the INSERT query
+            query = f"INSERT INTO pisunchik_data ({columns}) VALUES ({placeholders})"
+            cursor.execute(query, values)
 
+    # Commit changes to the database
     conn.commit()
 
 
