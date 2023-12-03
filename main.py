@@ -12,6 +12,7 @@ import json
 from openai import OpenAI
 import Crypto
 from openpyxl import load_workbook
+import re
 
 encrypted_file = 'encrypted.xlsx'  # Replace with path for the encrypted file
 decrypted_file = 'decrypted.xlsx'  # Replace with path for the decrypted file
@@ -1114,8 +1115,9 @@ discount = 0
 
 
 # Function to display available items in the shop
-def display_shop_items(player):
-    existing_characteristic = pisunchik[player]['characteristics']
+def display_shop_items(message):
+    player_id = str(message.from_user.id)
+    existing_characteristic = pisunchik[player_id]['characteristics']
     # Check if the characteristic is already in the player's characteristics
     characteristic_name = "Hot"
     shop_items = " "
@@ -1144,7 +1146,7 @@ def show_shop(message):
     user_balance = pisunchik[player_id]['coins']
 
     # Display available items and prices
-    shop_message = display_shop_items(player_id)
+    shop_message = display_shop_items(message)
     shop_message += f"\n\nУ вас есть: {user_balance} BTC"
     shop_message += f"\n\nВаши предметы: /items"
 
@@ -1779,7 +1781,15 @@ def handle_mention(message):
             bot.send_message(message.chat.id, "Нормальное что-то попроси :(")
 
 
-
+# Regular expression pattern for emojis
+emoji_pattern = re.compile("["
+                           u"\U0001F600-\U0001F64F"  # emoticons
+                           u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                           u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                           u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                           u"\U00002702-\U000027B0"
+                           u"\U000024C2-\U0001F251"
+                           "]+", flags=re.UNICODE)
 
 # Handle user messages for sending a message to the group
 @bot.message_handler(func=lambda message: True, content_types=['text'])
@@ -1790,12 +1800,12 @@ def handle_send_to_group_message(message):
         bot.send_message(-1001294162183, message.text)
         bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
     if message.from_user.id == 742272644:
-        if message.text == '🤓':
-            bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 10 минут)")
+        if emoji_pattern.search(message.text):
+            bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 30 минут)")
             bot.send_message(message.chat.id, "Пока-пока 🤓")
             time.sleep(2)
             bot.restrict_chat_member(message.chat.id, message.from_user.id,
-                                     until_date=datetime.now() + timedelta(minutes=10), permissions=None)
+                                     until_date=datetime.now() + timedelta(minutes=30), permissions=None)
     user_id = message.from_user.id
     message_text = message.text
     timestamp = datetime.fromtimestamp(message.date)
