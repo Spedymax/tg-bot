@@ -1936,7 +1936,7 @@ def can_use_pisunchik():
                                              f"{player_name}, ваш золотой член принёс сегодня прибыль в размере {income} BTC")
         if curr_time.hour == 9 and curr_time.minute == 0:
             update_stock_prices()
-        if curr_time.hour == 14 and curr_time.minute == 20:
+        if curr_time.hour == 13 and curr_time.minute == 25:
             update_stock_prices()
         if curr_time.hour == 20 and curr_time.minute == 0:
             update_stock_prices()
