@@ -13,6 +13,8 @@ from openai import OpenAI
 import Crypto
 from openpyxl import load_workbook
 import re
+from decimal import Decimal, ROUND_HALF_EVEN
+
 
 encrypted_file = 'encrypted.xlsx'  # Replace with path for the encrypted file
 decrypted_file = 'decrypted.xlsx'  # Replace with path for the decrypted file
@@ -1482,20 +1484,21 @@ def kazik(message):
 
 def update_stock_prices():
     # Fetch the stock data
-    query = "SELECT * FROM stocks"
+    query = "SELECT company_name, price FROM stocks"
     cursor.execute(query)
     stock_data = cursor.fetchall()
-
 
     for company, price in stock_data:
         # Randomly increase or decrease price by up to 10%
         change_percent = random.uniform(-0.1, 0.1)
         new_price = round(price * (1 + change_percent), 2)
-        stock_data[company] = new_price
+
         # Update the new price in the database
-        # Example: UPDATE stocks SET price = new_price WHERE company_name = company
-    query = "UPDATE stocks SET price = new_price WHERE company_name = company"
+        update_query = "UPDATE stocks SET price = %s WHERE company_name = %s"
+        cursor.execute(update_query, (new_price, company))
+    query = "SELECT company_name, price FROM stocks"
     cursor.execute(query)
+    stock_data = cursor.fetchall()
     # Format the message
     stock_message = "Акции компаний на данный момент:\n\n"
     for company, price in stock_data:
@@ -1936,7 +1939,7 @@ def can_use_pisunchik():
                                              f"{player_name}, ваш золотой член принёс сегодня прибыль в размере {income} BTC")
         if curr_time.hour == 9 and curr_time.minute == 0:
             update_stock_prices()
-        if curr_time.hour == 13 and curr_time.minute == 25:
+        if curr_time.hour == 14 and curr_time.minute == 0:
             update_stock_prices()
         if curr_time.hour == 20 and curr_time.minute == 0:
             update_stock_prices()
