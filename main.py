@@ -1560,7 +1560,7 @@ def handle_company_selection(call):
     bot.send_message(call.message.chat.id, msg)
 
 
-@bot.message_handler(func=lambda message: message.chat.id in temp_user_data)
+@bot.message_handler(func=lambda message: message.from_user.id in temp_user_data)
 def handle_quantity_selection(message):
     try:
         quantity = message.text
@@ -1644,7 +1644,7 @@ def handle_sell_company_selection(call):
     bot.send_message(call.message.chat.id, msg)
     # Next, the user will send a message with the quantity, which you'll handle in a different function
 
-@bot.message_handler(func=lambda message: message.chat.id in temp_user_sell_data)
+@bot.message_handler(func=lambda message: message.from_user.id in temp_user_sell_data)
 def handle_sell_quantity_selection(message):
     try:
         quantity = message.text
