@@ -13,7 +13,7 @@ from openai import OpenAI
 import Crypto
 from openpyxl import load_workbook
 import re
-from decimal import Decimal, ROUND_HALF_EVEN
+
 
 
 encrypted_file = 'encrypted.xlsx'  # Replace with path for the encrypted file
@@ -1547,7 +1547,7 @@ temp_user_sell_data ={}
 def buy_stocks(message):
     markup = types.InlineKeyboardMarkup()
     # Assuming you have a list of companies
-    companies = ['ATB', 'Rockstar', 'Google', 'Apple', 'Valve']
+    companies = ['ATB', 'Rockstar', 'Google', 'Apple', 'Valve', 'Obuhov toilet paper']
     for company in companies:
         markup.add(types.InlineKeyboardButton(company, callback_data=f"buy_stocks_{company}"))
     bot.send_message(message.chat.id, "Выберите компанию акции которой хотите купить:", reply_markup=markup)
