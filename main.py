@@ -1536,7 +1536,7 @@ def myStocks(message):
             quantity = int(quantity)
             stock_price = result[0]
             total_cost = stock_price * quantity
-            stocks_text += f"Компания {company_name}, кол-во акций: {quantity}  \n Цена ваших активов компании {company_name}: {total_cost}"
+            stocks_text += f"Компания {company_name}, кол-во акций: {quantity}  \n Цена ваших активов компании {company_name}: {total_cost}\n"
         bot.reply_to(message, stocks_text)
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок, используйте /start")
