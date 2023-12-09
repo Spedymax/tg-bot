@@ -1517,6 +1517,13 @@ def update_stock_prices():
     bot.send_message(-1001294162183, "Чтобы купить акции используйте /buy_stocks \nЧтобы посмотреть свои акции используйте /my_stocks. \nЧтобы посмотреть стоимость акций на данный момент используйте /current_stocks")
 
 
+@bot.message_handler(commands=['stocks_update'])
+def stocks_update(message):
+    if message.from_user.id in admin_ids:
+        update_stock_prices()
+    else:
+        bot.send_message(message.chat.id, "Вы не админ((((((((((((")
+
 @bot.message_handler(commands=['current_stocks'])
 def current_stocks(message):
     query = "SELECT * FROM stocks"
@@ -1947,7 +1954,7 @@ def can_use_pisunchik():
                                              f"{player_name}, ваш золотой член принёс сегодня прибыль в размере {income} BTC")
         if curr_time.hour == 9 and curr_time.minute == 0:
             update_stock_prices()
-        if curr_time.hour == 14 and curr_time.minute == 13:
+        if curr_time.hour == 14 and curr_time.minute == 0:
             update_stock_prices()
         if curr_time.hour == 20 and curr_time.minute == 0:
             update_stock_prices()
