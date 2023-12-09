@@ -1488,21 +1488,29 @@ def update_stock_prices():
     cursor.execute(query)
     stock_data = cursor.fetchall()
 
-    for company, price in stock_data:
+    # Store old prices in a dictionary for comparison
+    old_prices = {company: price for company, price in stock_data}
+
+    for company, old_price in old_prices.items():
         # Randomly increase or decrease price by up to 10%
         change_percent = random.uniform(-0.1, 0.1)
-        new_price = round(price * (1 + change_percent), 2)
+        new_price = round(old_price * (1 + change_percent), 2)
 
         # Update the new price in the database
         update_query = "UPDATE stocks SET price = %s WHERE company_name = %s"
         cursor.execute(update_query, (new_price, company))
-    query = "SELECT company_name, price FROM stocks"
+
+    # Fetch updated stock data
     cursor.execute(query)
-    stock_data = cursor.fetchall()
+    updated_stock_data = cursor.fetchall()
+
     # Format the message
     stock_message = "Акции компаний на данный момент:\n\n"
-    for company, price in stock_data:
-        stock_message += f"{company}: {price} BTC\n"
+    for company, new_price in updated_stock_data:
+        old_price = old_prices[company]
+        change = ((new_price - old_price) / old_price) * 100
+        arrow = '⬆️' if change > 0 else '⬇️'
+        stock_message += f"{company}: {new_price} BTC ({abs(change):.2f}% {arrow})\n"
 
     # Send the message
     bot.send_message(-1001294162183, stock_message)
@@ -1939,7 +1947,7 @@ def can_use_pisunchik():
                                              f"{player_name}, ваш золотой член принёс сегодня прибыль в размере {income} BTC")
         if curr_time.hour == 9 and curr_time.minute == 0:
             update_stock_prices()
-        if curr_time.hour == 14 and curr_time.minute == 0:
+        if curr_time.hour == 14 and curr_time.minute == 13:
             update_stock_prices()
         if curr_time.hour == 20 and curr_time.minute == 0:
             update_stock_prices()
