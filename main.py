@@ -1,3 +1,5 @@
+import subprocess
+
 import telebot.apihelper
 import random
 from datetime import datetime, timedelta, timezone
@@ -13,8 +15,11 @@ from openai import OpenAI
 import Crypto
 from openpyxl import load_workbook
 import re
+from subprocess import Popen, PIPE
+import signal
 
-
+# Global variable to keep track of the subprocess
+script_process = None
 
 encrypted_file = 'encrypted.xlsx'  # Replace with path for the encrypted file
 decrypted_file = 'decrypted.xlsx'  # Replace with path for the decrypted file
@@ -399,6 +404,31 @@ def start_game(message):
 
         bot.reply_to(message, "Welcome to the game! You've been registered as a new player.")
 
+
+@bot.message_handler(commands=['start_online'])
+def start_script(message):
+    global script_process
+    if script_process is None or script_process.poll() is not None:
+        # Start the script
+        script_process = Popen(['python', 'check_online.py'], stdout=PIPE, stderr=PIPE)
+        bot.reply_to(message, "Script started.")
+    else:
+        bot.reply_to(message, "Script is already running.")
+
+
+@bot.message_handler(commands=['stop_online'])
+def stop_script(message):
+    global script_process
+    if script_process is not None and script_process.poll() is None:
+        # Stop the script
+        script_process.terminate()
+        try:
+            script_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            script_process.kill()
+        bot.reply_to(message, "Script stopped.")
+    else:
+        bot.reply_to(message, "Script is not running.")
 
 
 @bot.message_handler(commands=['leaderboard'])
