@@ -418,7 +418,7 @@ def show_leaderboard(message):
             name = bot.get_chat(int(player_id)).first_name
             pisunchik_size = data['pisunchik_size']
             coins = data['coins']
-            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
+            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {int(coins)} BTC💰\n"
 
         bot.reply_to(message, leaderboard)
     elif message.chat.id == -1001932619845:
@@ -442,7 +442,7 @@ def show_leaderboard(message):
             name = bot.get_chat(int(player_id)).first_name
             pisunchik_size = data['pisunchik_size']
             coins = data['coins']
-            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
+            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {int(coins)} BTC💰\n"
 
         bot.reply_to(message, leaderboard)
     else:
@@ -454,7 +454,7 @@ def show_leaderboard(message):
             name = bot.get_chat(int(player_id)).first_name
             pisunchik_size = data['pisunchik_size']
             coins = data['coins']
-            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {coins} BTC💰\n"
+            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {int(coins)} BTC💰\n"
 
         bot.reply_to(message, leaderboard)
 
