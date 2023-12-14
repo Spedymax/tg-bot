@@ -431,51 +431,8 @@ def stop_script(message):
         bot.reply_to(message, "Script is not running.")
 
 
-@bot.message_handler(commands=['leaderboard'])
+@bot.message_handler(commands=['global_leaderboard'])
 def show_leaderboard(message):
-    if message.chat.id == -1001294162183:
-        # Sort pisunchik by pisunchik_size in descending order
-        sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
-
-        # Suppose you want to remove the player with a specific player_id
-        player_id_to_remove = '1561630034'
-
-        # Use a list comprehension to filter out the player with the specified player_id
-        sorted_players = [player for player in sorted_players if player[0] != player_id_to_remove]
-
-        leaderboard = "🏆 Большой член, большие яйца 🏆\n\n"
-        for i, (player_id, data) in enumerate(sorted_players[:5]):
-            name = bot.get_chat(int(player_id)).first_name
-            pisunchik_size = data['pisunchik_size']
-            coins = data['coins']
-            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {int(coins)} BTC💰\n"
-
-        bot.reply_to(message, leaderboard)
-    elif message.chat.id == -1001932619845:
-        # Sort pisunchik by pisunchik_size in descending order
-        sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
-
-        # Suppose you want to remove the player with a specific player_id
-        player_id_to_remove = '742272644'
-
-        # Use a list comprehension to filter out the player with the specified player_id
-        sorted_players = [player for player in sorted_players if player[0] != player_id_to_remove]
-
-        # Suppose you want to remove the player with a specific player_id
-        player_id_to_remove = '855951767'
-
-        # Use a list comprehension to filter out the player with the specified player_id
-        sorted_players = [player for player in sorted_players if player[0] != player_id_to_remove]
-
-        leaderboard = "🏆 Большой член, большие яйца 🏆\n\n"
-        for i, (player_id, data) in enumerate(sorted_players[:5]):
-            name = bot.get_chat(int(player_id)).first_name
-            pisunchik_size = data['pisunchik_size']
-            coins = data['coins']
-            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {int(coins)} BTC💰\n"
-
-        bot.reply_to(message, leaderboard)
-    else:
         # Sort pisunchik by pisunchik_size in descending order
         sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
 
@@ -487,6 +444,30 @@ def show_leaderboard(message):
             leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {int(coins)} BTC💰\n"
 
         bot.reply_to(message, leaderboard)
+
+@bot.message_handler(commands=['leaderboard'])
+def show_local_leaderboard(message):
+    # Get the current chat id
+    current_chat_id = message.chat.id
+
+    # Filter pisunchik to include only users in the current chat
+    local_players = {player_id: data for player_id, data in pisunchik.items() if bot.get_chat_member(current_chat_id, int(player_id)).status != 'left'}
+
+    # Sort local_players by pisunchik_size in descending order
+    sorted_local_players = sorted(local_players.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
+
+    leaderboard = "🏆 Local Leaderboard 🏆\n\n"
+    for i, (player_id, data) in enumerate(sorted_local_players[:5]):
+        try:
+            name = bot.get_chat(int(player_id)).first_name
+            pisunchik_size = data['pisunchik_size']
+            coins = data['coins']
+            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {int(coins)} BTC💰\n"
+        except Exception as e:
+            continue  # Skip if the user is not found or any other exception occurs
+
+    bot.reply_to(message, leaderboard)
+
 
 
 @bot.message_handler(commands=['smazka'])
@@ -1978,10 +1959,10 @@ def can_use_pisunchik():
                         if char_info.startswith(characteristic_name):
                             char_name, char_level = char_info.split(":")
                             int_level = int(char_level)
-                            income = 1 + ((int_level - 1) * 3)
-                            pisunchik[player]['coins'] += income
+                            income = 2 + ((int_level - 1) * 1.5)
+                            pisunchik[player]['coins'] += int(income)
                             bot.send_message(-1001294162183,
-                                             f"{player_name}, ваш золотой член принёс сегодня прибыль в размере {income} BTC")
+                                             f"{player_name}, ваш золотой член принёс сегодня прибыль в размере {int(income)} BTC")
         if curr_time.hour == 9 and curr_time.minute == 0:
             update_stock_prices()
         if curr_time.hour == 14 and curr_time.minute == 0:
