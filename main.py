@@ -1939,13 +1939,12 @@ def can_use_pisunchik():
             if time_difference >= timedelta(hours=24):
                 # Update the last_used timestamp in the database
                 if not pisunchik[player]['notified']:
-                    if player != '1561630034':
-                        player_name2 = get_player_name(player)
-                        bot.send_message(-1001294162183,
-                                         f"<a href='tg://user?id={player}'>@{player_name2}</a>, вы можете использовать /pisunchik",
-                                         parse_mode='html')
-                        pisunchik[player]['notified'] = True
-                        save_data()
+                    player_name2 = get_player_name(player)
+                    bot.send_message(-1001294162183,
+                                     f"<a href='tg://user?id={player}'>@{player_name2}</a>, вы можете использовать /pisunchik",
+                                     parse_mode='html')
+                    pisunchik[player]['notified'] = True
+                    save_data()
         curr_time = datetime.now(timezone.utc)
         if curr_time.hour == 12 and curr_time.minute == 0:
             for player in pisunchik:
@@ -2057,13 +2056,13 @@ def handle_send_to_group_message(message):
         # Forward the user's message to the group chat
         bot.send_message(-1001294162183, message.text)
         bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
-    if message.from_user.id == 742272644:
-        if emoji_pattern.search(message.text):
-            bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 15 минут)")
-            bot.send_message(message.chat.id, "Пока-пока 🤓")
-            time.sleep(2)
-            bot.restrict_chat_member(message.chat.id, message.from_user.id,
-                                     until_date=datetime.now() + timedelta(minutes=15), permissions=None)
+    # if message.from_user.id == 742272644:
+    #     if emoji_pattern.search(message.text):
+    #         bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 15 минут)")
+    #         bot.send_message(message.chat.id, "Пока-пока 🤓")
+    #         time.sleep(2)
+    #         bot.restrict_chat_member(message.chat.id, message.from_user.id,
+    #                                  until_date=datetime.now() + timedelta(minutes=15), permissions=None)
     user_id = message.from_user.id
     message_text = message.text
     timestamp = datetime.fromtimestamp(message.date)
@@ -2096,17 +2095,17 @@ def handle_send_to_group_message(message):
         conn.commit()
 
 
-@bot.message_handler(content_types=['animation'])
-def handle_message(message):
-    if message.from_user.id == 742272644:
-        if message.content_type == 'animation':
-            time.sleep(2)
-            bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 5 минут)")
-            time.sleep(2)
-            bot.send_message(message.chat.id, "Пока-пока 🤓")
-            time.sleep(2)
-            bot.restrict_chat_member(message.chat.id, message.from_user.id,
-                                     until_date=datetime.now() + timedelta(minutes=5), permissions=None)
+# @bot.message_handler(content_types=['animation'])
+# def handle_message(message):
+#     if message.from_user.id == 742272644:
+#         if message.content_type == 'animation':
+#             time.sleep(2)
+#             bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 5 минут)")
+#             time.sleep(2)
+#             bot.send_message(message.chat.id, "Пока-пока 🤓")
+#             time.sleep(2)
+#             bot.restrict_chat_member(message.chat.id, message.from_user.id,
+#                                      until_date=datetime.now() + timedelta(minutes=5), permissions=None)
 
 
 bot.polling()
