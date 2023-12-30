@@ -1505,7 +1505,7 @@ def update_stock_prices():
     for company, old_price in old_prices.items():
         if company == 'Google' or company == 'Rockstar':
             # Randomly increase or decrease price by up to 10%
-            change_percent = random.uniform(0.03, 0.1)
+            change_percent = random.uniform(0.03, 0.2)
             new_price = round(old_price * (1 + change_percent), 2)
 
             # Update the new price in the database
@@ -1513,7 +1513,7 @@ def update_stock_prices():
             cursor.execute(update_query, (new_price, company))
         elif company == 'Obuhov toilet paper':
             # Randomly increase or decrease price by up to 10%
-            change_percent = random.uniform(-0.1, 0)
+            change_percent = random.uniform(-0.2, 0)
             new_price = round(old_price * (1 + change_percent), 2)
 
             # Update the new price in the database
@@ -1521,7 +1521,7 @@ def update_stock_prices():
             cursor.execute(update_query, (new_price, company))
         else:
             # Randomly increase or decrease price by up to 10%
-            change_percent = random.uniform(-0.1, 0.1)
+            change_percent = random.uniform(-0.2, 0.2)
             new_price = round(old_price * (1 + change_percent), 2)
 
             # Update the new price in the database
@@ -1989,10 +1989,9 @@ def can_use_pisunchik():
         if curr_time.hour == 6 and curr_time.minute == 0:
             for i in range(1, 5):
                 bot.send_message(-1001294162183,
-                                 f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>",
-                                 parse_mode='html')
-            with open('Napominalka.wav', 'rb') as audio_file:
-                bot.send_audio(-1001294162183, audio_file)
+                                 'Хохлик, просыпайся)')
+            # with open('Napominalka.wav', 'rb') as audio_file:
+            #     bot.send_audio(-1001294162183, audio_file)
         for player in pisunchik:
             existing_characteristic = pisunchik[player]['characteristics']
             # Check if the characteristic is already in the player's characteristics
