@@ -321,6 +321,22 @@ def torgovec(message):
         bot.send_message(message.chat.id, line)
         time.sleep(5)
 
+proshaem_yuru = [
+    'Юра, поздравляю!',
+    'Ты прошёл все испытания, какими сложными они бы не были',
+    'Когда рухнули акции...',
+    'Когда ласково называли "хохликом"...',
+    'Когда шутили про бабулю...',
+    'Ты не сдался!',
+    'В честь этого рыночная цена Обуховской туалетной бумаги взлетает до 75 BTC за штуку',
+    'А так же, на некоторое время изменения цены Обуховской туалетной бумаги будут варьироваться от -7% до +14%',
+]
+@bot.message_handler(commands=['podarok'])
+def torgovec(message):
+    for line in proshaem_yuru:
+        bot.send_message(message.chat.id, line)
+        time.sleep(2)
+
 
 @bot.message_handler(commands=['misha'])
 def misha(message):
@@ -1986,10 +2002,13 @@ def can_use_pisunchik():
             update_stock_prices()
         if curr_time.hour == 20 and curr_time.minute == 0:
             update_stock_prices()
-        if curr_time.hour == 6 and curr_time.minute == 0:
-            for i in range(1, 5):
-                bot.send_message(-1001294162183,
-                                 'Хохлик, просыпайся)')
+        if curr_time.hour == 12 and curr_time.minute == 0:
+            bot.send_message(-1001294162183,
+                             "Юра, вам был отправлен подарок. Нажмите /podarok чтобы открыть его...")
+        # if curr_time.hour == 6 and curr_time.minute == 0:
+        #     for i in range(1, 5):
+        #         bot.send_message(-1001294162183,
+        #                          'Хохлик, просыпайся)')
             # with open('Napominalka.wav', 'rb') as audio_file:
             #     bot.send_audio(-1001294162183, audio_file)
         for player in pisunchik:
