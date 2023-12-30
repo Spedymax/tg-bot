@@ -1519,17 +1519,10 @@ def update_stock_prices():
     old_prices = {company: price for company, price in stock_data}
 
     for company, old_price in old_prices.items():
-        if company == 'Google' or company == 'Rockstar':
-            # Randomly increase or decrease price by up to 10%
-            change_percent = random.uniform(0.03, 0.2)
-            new_price = round(old_price * (1 + change_percent), 2)
 
-            # Update the new price in the database
-            update_query = "UPDATE stocks SET price = %s WHERE company_name = %s"
-            cursor.execute(update_query, (new_price, company))
-        elif company == 'Obuhov toilet paper':
+        if company == 'Obuhov toilet paper':
             # Randomly increase or decrease price by up to 10%
-            change_percent = random.uniform(-0.2, 0)
+            change_percent = random.uniform(-0.07, 0.14)
             new_price = round(old_price * (1 + change_percent), 2)
 
             # Update the new price in the database
