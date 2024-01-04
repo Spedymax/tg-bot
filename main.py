@@ -44,10 +44,10 @@ headers = {
 
 # Establish a database connection
 conn = psycopg2.connect(
-    database="d8otdn21efhdgi",
-    user="mbcexgnddtvzwu",
-    host="ec2-99-80-246-170.eu-west-1.compute.amazonaws.com",
-    password="ee48e2314e60e9610de0ac20be76ea1be559261e30ac0990f8267aeac1215a26",
+    database="d7onbblv7h1j4i",
+    user="u3psg5rd33v41r",
+    host="ec2-63-34-142-108.eu-west-1.compute.amazonaws.com",
+    password="p7c71c8e38f3263fb7a19db15d7859bf744268751399974714630cfda41547fa9",
     sslmode='require'
 )
 
