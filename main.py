@@ -1519,7 +1519,7 @@ def update_stock_prices():
     old_prices = {company: price for company, price in stock_data}
 
     for company, old_price in old_prices.items():
-        if company == 'Obuhov toilet paper':
+        if company == 'ATB':
             # Randomly increase or decrease price by up to 10%
             change_percent = random.uniform(-0.07, 0.14)
             new_price = round(old_price * (1 + change_percent), 2)
