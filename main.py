@@ -1955,14 +1955,25 @@ def save_data():
 def can_use_pisunchik():
     while True:
         for player in pisunchik:
+            existing_characteristic = pisunchik[player]['characteristics']
+            # Check if the characteristic is already in the player's characteristics
+            characteristic_name = "Titan"
+            cooldown = 24
+            if existing_characteristic is not None:
+                for char_info in existing_characteristic:
+                    if char_info.startswith(characteristic_name):
+                        char_name, char_level = char_info.split(":")
+                        int_level = int(char_level)
+                        cooldown = int((24 * (100 - int_level * 3)) / 100)
+
             current_time = datetime.now(timezone.utc)
             last_used_time = pisunchik[player]['last_used']
 
             # Calculate the time difference
             time_difference = current_time - last_used_time
 
-            # Check if the cooldown period (4 hours) has passed
-            if time_difference >= timedelta(hours=24):
+            # Check if the cooldown period (24 or 13 hours) has passed
+            if time_difference >= timedelta(hours=cooldown):
                 # Update the last_used timestamp in the database
                 if not pisunchik[player]['notified']:
                     player_name2 = get_player_name(player)

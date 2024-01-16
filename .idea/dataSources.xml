@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="DataSourceManagerImpl" format="xml" multifile-model="true">
-    <data-source source="LOCAL" name="bot-DB" uuid="cd8a80f3-2898-45d2-b471-6cdd19e7c173">
+    <data-source source="LOCAL" name="bot-db" uuid="7edbaa2f-3af7-4d3c-a310-87bb4d3a10a7">
       <driver-ref>postgresql</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>org.postgresql.Driver</jdbc-driver>
-      <jdbc-url>jdbc:postgresql://ec2-63-34-142-108.eu-west-1.compute.amazonaws.com:5432/d7onbblv7h1j4i</jdbc-url>
+      <jdbc-url>jdbc:postgresql://ec2-54-73-22-169.eu-west-1.compute.amazonaws.com:5432/d58fv4tmqqgtif</jdbc-url>
       <working-dir>$ProjectFileDir$</working-dir>
     </data-source>
   </component>
