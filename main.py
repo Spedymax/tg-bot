@@ -218,91 +218,73 @@ def add_characteristic(message):
         print(f"Player with ID {player_id} not found")
 
 
-@bot.message_handler(commands=['characteristics'])
-def show_characteristics(message):
-    player_id = str(message.from_user.id)
-    if player_id in pisunchik:
-        characteristics_text = "Ваши характеристики:\n"
-        existing_characteristic = pisunchik[player_id]['characteristics']
-        for characteristic in existing_characteristic:
-            characteristic_name, current_level = characteristic.split(":")
-            if characteristic_name in xarakteristiks_desc:
-                current_level = int(current_level)
-                characteristics_text += f"{characteristic_name}(Level {current_level}): {xarakteristiks_desc[characteristic_name]}\n"
-        bot.reply_to(message, characteristics_text)
-    else:
-        bot.reply_to(message, "Вы не зарегистрированы как игрок, используйте /start")
-
-
 @bot.message_handler(commands=['upgrade_char'])
 def upgrade_characteristic(message):
     player_id = str(message.from_user.id)
     if player_id in pisunchik:
         existing_characteristic = pisunchik[player_id]['characteristics']
 
-        # Check if the player has any characteristics to upgrade
         if existing_characteristic is not None:
-            # Send a message asking the user to select a characteristic to upgrade
-
-            # Create a list of inline keyboard buttons for each characteristic
             characteristic_buttons = []
             for characteristic in existing_characteristic:
-                characteristic_name, current_level = characteristic.split(":")
-                button_text = f"{characteristic_name} (Level {current_level})"
-                characteristic_buttons.append(
-                    types.InlineKeyboardButton(text=button_text, callback_data=f"upgrade_{characteristic}"))
+                characteristic_name, _ = characteristic.split(":")
+                button_text = f"{characteristic_name}"
+                callback_data = f"select_{characteristic}"
+                characteristic_buttons.append(types.InlineKeyboardButton(text=button_text, callback_data=callback_data))
 
-            # Create an inline keyboard with the characteristic buttons
             keyboard = types.InlineKeyboardMarkup()
             keyboard.add(*characteristic_buttons)
 
-            # Send the keyboard to the user
             bot.send_message(message.chat.id, "Выберите характеристику для улучшения:", reply_markup=keyboard)
         else:
-            bot.send_message(message.chat.id, "У вас нету характристик для улучшения.")
+            bot.send_message(message.chat.id, "У вас нет характеристик для улучшения.")
     else:
         bot.send_message(message.chat.id, "Вы не зарегистрированы как игрок, используйте /start")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("select"))
+def select_characteristic_for_upgrade(call):
+    chat_id = call.message.chat.id
+    selected_characteristic = call.data.split("_")[1]
+
+    level_buttons = []
+    for i in range(1, 15):  # Предположим, что можно повысить максимум на 3 уровня
+        button_text = f"Повысить на {i} уровень(ей)"
+        callback_data = f"upgrade_{selected_characteristic}_{i}"
+        level_buttons.append(types.InlineKeyboardButton(text=button_text, callback_data=callback_data))
+
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(*level_buttons)
+
+    bot.send_message(chat_id, "Выберите количество уровней для улучшения:", reply_markup=keyboard)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("upgrade"))
 def handle_characteristic_upgrade(call):
     chat_id = call.message.chat.id
     player_id = str(call.from_user.id)
-    call2 = call
-    call = call.data.split("_", 1)  # Split the callback data into action and player
-    selected_characteristic = call[1]
+    call_data = call.data.split("_")
+    selected_characteristic, levels_to_upgrade = call_data[1], int(call_data[2])
 
-    # Get the player's ID
+    characteristic_name, current_level = selected_characteristic.split(":")
+    current_level = int(current_level)
 
-    # Check if the player has enough coins to perform the upgrade (assuming a cost of 10 coins per upgrade)
+    upgrade_cost = 100 * levels_to_upgrade  # Каждый уровень стоит 100 монет
 
-    if pisunchik[player_id]['coins'] >= 100:
-        # Deduct 100 coins from the player's balance
-        pisunchik[player_id]['coins'] -= 100
-
-        # Extract the characteristic name and current level
-        characteristic_name, current_level = selected_characteristic.split(":")
-        current_level = int(current_level)
-        if current_level >= 15:
-            bot.send_message(call2.message.chat.id, "Вы уже достигли максимального уровня этой характеристики :)")
-            return
-
-        # Increase the level of the characteristic by 1
-        new_level = current_level + 1
+    if pisunchik[player_id][
+        'coins'] >= upgrade_cost and current_level + levels_to_upgrade <= 15:  # Проверка на максимальный уровень и достаточно средств
+        pisunchik[player_id]['coins'] -= upgrade_cost
+        new_level = current_level + levels_to_upgrade
         updated_characteristic = f"{characteristic_name}:{new_level}"
-        n = 0
-        for characteristic in pisunchik[player_id]['characteristics']:
+
+        for n, characteristic in enumerate(pisunchik[player_id]['characteristics']):
             if selected_characteristic == characteristic:
                 pisunchik[player_id]['characteristics'][n] = updated_characteristic
-                save_data()
-            n += 1
-        save_data()
 
-        # Send a message to confirm the upgrade
-        bot.send_message(chat_id, f"Вы улучшили {characteristic_name} до лвла {new_level}!")
+        save_data()
+        bot.send_message(chat_id, f"Вы улучшили {characteristic_name} до уровня {new_level}!")
     else:
-        # Send a message if the player doesn't have enough coins
-        bot.send_message(chat_id, "У вас недостаточно денег для улучшения (Надо 100)")
+        bot.send_message(chat_id, "Недостаточно денег для улучшения или превышен максимальный уровень.")
 
 
 strochki = [
@@ -320,6 +302,7 @@ def torgovec(message):
     for line in strochki:
         bot.send_message(message.chat.id, line)
         time.sleep(5)
+
 
 # proshaem_yuru = [
 #     'Юра, поздравляю!',
@@ -369,8 +352,6 @@ def get_recent_messages(message):
     bot.send_message(message.chat.id, f"{response_data['choices'][0]['message']['content']}")
 
 
-
-
 @bot.message_handler(commands=['imagine'])
 def imagine(message):
     try:
@@ -414,8 +395,9 @@ def start_game(message):
             # Add other necessary fields here
         }
         # Insert new player into the database
-        cursor.execute("INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, characteristics, statuetki, last_used, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                       (int(player_id), 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, 0, None, False))
+        cursor.execute(
+            "INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, characteristics, statuetki, last_used, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (int(player_id), 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, 0, None, False))
         conn.commit()
 
         bot.reply_to(message, "Welcome to the game! You've been registered as a new player.")
@@ -449,17 +431,18 @@ def stop_script(message):
 
 @bot.message_handler(commands=['global_leaderboard'])
 def show_leaderboard(message):
-        # Sort pisunchik by pisunchik_size in descending order
-        sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
+    # Sort pisunchik by pisunchik_size in descending order
+    sorted_players = sorted(pisunchik.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
 
-        leaderboard = "🏆 Большой член, большие яйца 🏆\n\n"
-        for i, (player_id, data) in enumerate(sorted_players[:5]):
-            name = bot.get_chat(int(player_id)).first_name
-            pisunchik_size = data['pisunchik_size']
-            coins = data['coins']
-            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {int(coins)} BTC💰\n"
+    leaderboard = "🏆 Большой член, большие яйца 🏆\n\n"
+    for i, (player_id, data) in enumerate(sorted_players[:5]):
+        name = bot.get_chat(int(player_id)).first_name
+        pisunchik_size = data['pisunchik_size']
+        coins = data['coins']
+        leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {int(coins)} BTC💰\n"
 
-        bot.reply_to(message, leaderboard)
+    bot.reply_to(message, leaderboard)
+
 
 @bot.message_handler(commands=['leaderboard'])
 def show_local_leaderboard(message):
@@ -467,7 +450,8 @@ def show_local_leaderboard(message):
     current_chat_id = message.chat.id
 
     # Filter pisunchik to include only users in the current chat
-    local_players = {player_id: data for player_id, data in pisunchik.items() if bot.get_chat_member(current_chat_id, int(player_id)).status != 'left'}
+    local_players = {player_id: data for player_id, data in pisunchik.items() if
+                     bot.get_chat_member(current_chat_id, int(player_id)).status != 'left'}
 
     # Sort local_players by pisunchik_size in descending order
     sorted_local_players = sorted(local_players.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
@@ -483,7 +467,6 @@ def show_local_leaderboard(message):
             continue  # Skip if the user is not found or any other exception occurs
 
     bot.reply_to(message, leaderboard)
-
 
 
 @bot.message_handler(commands=['smazka'])
@@ -1509,6 +1492,7 @@ def kazik(message):
 
     save_data()
 
+
 def update_stock_prices():
     # Fetch the stock data
     query = "SELECT company_name, price FROM stocks"
@@ -1536,7 +1520,6 @@ def update_stock_prices():
             update_query = "UPDATE stocks SET price = %s WHERE company_name = %s"
             cursor.execute(update_query, (new_price, company))
 
-
     # Fetch updated stock data
     cursor.execute(query)
     updated_stock_data = cursor.fetchall()
@@ -1551,7 +1534,8 @@ def update_stock_prices():
 
     # Send the message
     bot.send_message(-1001294162183, stock_message)
-    bot.send_message(-1001294162183, "Чтобы купить акции используйте /buy_stocks \nЧтобы посмотреть свои акции используйте /my_stocks. \nЧтобы посмотреть стоимость акций на данный момент используйте /current_stocks")
+    bot.send_message(-1001294162183,
+                     "Чтобы купить акции используйте /buy_stocks \nЧтобы посмотреть свои акции используйте /my_stocks. \nЧтобы посмотреть стоимость акций на данный момент используйте /current_stocks")
 
 
 @bot.message_handler(commands=['stocks_update'])
@@ -1560,6 +1544,7 @@ def stocks_update(message):
         update_stock_prices()
     else:
         bot.send_message(message.chat.id, "Вы не админ((((((((((((")
+
 
 @bot.message_handler(commands=['current_stocks'])
 def current_stocks(message):
@@ -1572,6 +1557,8 @@ def current_stocks(message):
 
     # Send the message
     bot.reply_to(message, stock_message)
+
+
 @bot.message_handler(commands=['my_stocks'])
 def myStocks(message):
     player_id = str(message.from_user.id)
@@ -1593,8 +1580,11 @@ def myStocks(message):
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок, используйте /start")
 
-temp_user_data ={}
-temp_user_sell_data ={}
+
+temp_user_data = {}
+temp_user_sell_data = {}
+
+
 @bot.message_handler(commands=['buy_stocks'])
 def buy_stocks(message):
     markup = types.InlineKeyboardMarkup()
@@ -1603,6 +1593,7 @@ def buy_stocks(message):
     for company in companies:
         markup.add(types.InlineKeyboardButton(company, callback_data=f"buy_stocks_{company}"))
     bot.send_message(message.chat.id, "Выберите компанию акции которой хотите купить:", reply_markup=markup)
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('buy_stocks_'))
 def handle_company_selection(call):
@@ -1672,6 +1663,7 @@ def handle_quantity_selection(message):
         if user_id in temp_user_data:
             del temp_user_data[user_id]
 
+
 @bot.message_handler(commands=['sell_stocks'])
 def sell_stocks(message):
     markup = types.InlineKeyboardMarkup()
@@ -1687,6 +1679,7 @@ def sell_stocks(message):
         markup.add(types.InlineKeyboardButton(company, callback_data=f"sell_stocks_{company}"))
     bot.send_message(message.chat.id, "Выберите свою компанию:", reply_markup=markup)
 
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith('sell_stocks_'))
 def handle_sell_company_selection(call):
     company = call.data.split('_')[2]
@@ -1695,6 +1688,7 @@ def handle_sell_company_selection(call):
     msg = f"Сколько акций компании {company} вы хотите продать?"
     bot.send_message(call.message.chat.id, msg)
     # Next, the user will send a message with the quantity, which you'll handle in a different function
+
 
 @bot.message_handler(func=lambda message: message.from_user.id in temp_user_sell_data)
 def handle_sell_quantity_selection(message):
@@ -1741,7 +1735,8 @@ def handle_sell_quantity_selection(message):
                                (pisunchik[player_id]['coins'], pisunchik[player_id]['player_stocks'], user_id))
                 conn.commit()
 
-                bot.reply_to(message, f"Вы успешно продали {quantity} акций компании {company}.\n И вы заработали: {total_earned}")
+                bot.reply_to(message,
+                             f"Вы успешно продали {quantity} акций компании {company}.\n И вы заработали: {total_earned}")
 
                 break
         else:
@@ -1846,13 +1841,29 @@ def otsos(message):
 
     existing_characteristic = pisunchik[player_id]['characteristics']
     # Check if the characteristic is already in the player's characteristics
-    player_name = get_player_name(player_id)
+    exist = False
     characteristic_name = "Glowing"
     if existing_characteristic is not None:
         for char_info in existing_characteristic:
             if char_info.startswith(characteristic_name):
+                if player_id in pisunchik:
+                    last_usage_time = pisunchik[player_id]['last_vor']
+                    current_time = datetime.now(timezone.utc)
+
+                    # Calculate the time elapsed since the last usage
+                    time_elapsed = current_time - last_usage_time
+
+                    # If less than 24 hours have passed, and the usage limit is reached, deny access
+                    if time_elapsed < timedelta(days=7) and pisunchik[player_id][
+                        'last_vor'] >= max_usage_per_day:
+                        bot.send_message(message.chat.id,
+                                         f"Вы достигли лимита использования команды на эту неделю.\n Времени осталось: {timedelta(days=7) - time_elapsed}")
+                        return
+                    elif time_elapsed >= timedelta(hours=7):
+                        # If 24 hours have passed since the last usage, reset the usage count
+                        pisunchik[player_id]['last_vor'] = 0
+                exist = True
                 char_name, char_level = char_info.split(":")
-                int_level = int(char_level)
 
                 if player_id == "742272644":
                     markup = types.InlineKeyboardMarkup()
@@ -1890,8 +1901,8 @@ def otsos(message):
                                      f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, у кого крадём член?",
                                      reply_markup=markup, parse_mode='html')
                 break
-    else:
-        bot.send_message(message.chat.id, "У вас нету нужной характеристики для писюничка :(")
+        if not exist:
+            bot.send_message(message.chat.id, "У вас нету нужной характеристики для писюничка :(")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("vor"))
@@ -1902,7 +1913,8 @@ def otsos_callback(call):
         reply_markup=None
     )
     player_id = call.from_user.id
-    existing_characteristic = pisunchik[player_id]['characteristics']
+    player = str(player_id)
+    existing_characteristic = pisunchik[player]['characteristics']
     characteristic_name = "Glowing"
     vor_number = 0
     for char_info in existing_characteristic:
@@ -1911,19 +1923,19 @@ def otsos_callback(call):
             int_level = int(char_level)
             vor_number = 2 + ((int_level - 1) * 2)
 
-    if call.data == "otsos_yura":
+    if call.data == "vor_yura":
         pisunchik[str(YURA_ID)]['pisunchik_size'] -= vor_number
-        pisunchik[player_id]['pisunchik_size'] += vor_number
+        pisunchik[player]['pisunchik_size'] += vor_number
         bot.send_message(call.message.chat.id, f"Вы украли {vor_number} см у Юры...")
         time.sleep(3)
-    elif call.data == "otsos_max":
+    elif call.data == "vor_max":
         pisunchik[str(MAX_ID)]['pisunchik_size'] -= vor_number
-        pisunchik[player_id]['pisunchik_size'] += vor_number
+        pisunchik[player]['pisunchik_size'] += vor_number
         bot.send_message(call.message.chat.id, f"Вы украли {vor_number} см у Макса...")
 
-    elif call.data == "otsos_bogdan":
+    elif call.data == "vor_bogdan":
         pisunchik[str(BODYA_ID)]['pisunchik_size'] -= vor_number
-        pisunchik[player_id]['pisunchik_size'] += vor_number
+        pisunchik[player]['pisunchik_size'] += vor_number
         bot.send_message(call.message.chat.id, f"Вы украли {vor_number} см у Богдана...")
 
 
@@ -2012,8 +2024,8 @@ def can_use_pisunchik():
         #     for i in range(1, 5):
         #         bot.send_message(-1001294162183,
         #                          'Хохлик, просыпайся)')
-            # with open('Napominalka.wav', 'rb') as audio_file:
-            #     bot.send_audio(-1001294162183, audio_file)
+        # with open('Napominalka.wav', 'rb') as audio_file:
+        #     bot.send_audio(-1001294162183, audio_file)
         for player in pisunchik:
             existing_characteristic = pisunchik[player]['characteristics']
             # Check if the characteristic is already in the player's characteristics
@@ -2087,6 +2099,7 @@ emoji_pattern = re.compile("["
                            u"\U000024C2-\U0001F251"
                            "]+", flags=re.UNICODE)
 
+
 # Handle user messages for sending a message to the group
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_send_to_group_message(message):
@@ -2119,9 +2132,9 @@ def handle_send_to_group_message(message):
     cursor.execute("SELECT COUNT(*) FROM messages")
     message_count = cursor.fetchone()[0]
 
-    # If message count is greater than 199, delete the oldest ones
+    # If message count is greater than 150, delete the oldest ones
     if message_count > 150:
-        # Find out how many messages to delete to get back to 199
+        # Find out how many messages to delete to get back to 150
         delete_count = message_count - 150
         cursor.execute("""
                 DELETE FROM messages 
