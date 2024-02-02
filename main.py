@@ -2072,9 +2072,12 @@ def handle_mention(message):
         bot.send_message(message.chat.id, "Подождите, обрабатываю запрос...")
         try:
             data = {
-                "model": "gpt-3.5-turbo",  # or another model you prefer
+                "model": "gpt-3.5-turbo",
                 "messages": [
+                    {"role": "system",
+                     "content": "If user asks you: 'Как тебя зовут?', respond with: 'Привет, меня зовут Миша)))'"},
                     {
+
                         "role": "user",
                         "content": f"{prompt}"}
                 ],
