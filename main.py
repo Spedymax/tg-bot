@@ -1058,12 +1058,15 @@ def show_characteristics(message):
     if player_id in pisunchik:
         characteristics_text = "Ваши характеристики:\n"
         existing_characteristic = pisunchik[player_id]['characteristics']
-        for characteristic in existing_characteristic:
-            characteristic_name, current_level = characteristic.split(":")
-            if characteristic_name in xarakteristiks_desc:
-                current_level = int(current_level)
-                characteristics_text += f"{characteristic_name}(Level {current_level}): {xarakteristiks_desc[characteristic_name]}\n"
-        bot.reply_to(message, characteristics_text)
+        if existing_characteristic:
+            for characteristic in existing_characteristic:
+                characteristic_name, current_level = characteristic.split(":")
+                if characteristic_name in xarakteristiks_desc:
+                    current_level = int(current_level)
+                    characteristics_text += f"{characteristic_name}(Level {current_level}): {xarakteristiks_desc[characteristic_name]}\n"
+            bot.reply_to(message, characteristics_text)
+        else:
+            bot.reply_to(message, "Ой, у вас нету характеристик :( \n Сначала купите все статуэтки используя /statuetki_shop")
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок, используйте /start")
 
