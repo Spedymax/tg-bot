@@ -6,7 +6,7 @@ import os
 from PIL import Image, ImageDraw, ImageFont
 import schedule
 
-bot = telebot.TeleBot('6608486511:AAF_Ro0BOUXhfwBME5DM5NU_n2N7ut_PZ_U')
+bot = telebot.TeleBot('6916186852:AAGWpqvr_fzE--gcG6DX6bMMqyNzzDRX688')
 
 # Define trivia questions and answers
 trivia_questions = [
@@ -76,15 +76,10 @@ trivia_questions = [
         "answer": "2 июня"
     },
     {
-        "question": "Когда Макс думает мы начали встречаться?(Мяу😋)",
+        "question": "Когда Макс думает мы начали встречаться?",
         "options": ["9 января", "Зимой", "Когда признался", "2 июня"],
         "answer": "2 июня"
-    },
-    {
-        "question": "За что Макс любит Вику больше всего?",
-        "options": ["За глаза", "За то что ты есть у него❤️", "За ум", "За ножки и попку"],
-        "answer": "За то что ты есть у него❤️"
-    },
+    }
 
 ]
 
