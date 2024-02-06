@@ -1759,42 +1759,21 @@ def prosipaisya(message):
 
 @bot.message_handler(commands=['otsos'])
 def otsos(message):
-    player_id = str(message.from_user.id)
+    chat_id = message.chat.id
+    user_id = str(message.from_user.id)
 
-    if player_id == "742272644":
-        markup = types.InlineKeyboardMarkup()
-        max_button = types.InlineKeyboardButton(text="Макс", callback_data="otsos_max")
-        bogdan_button = types.InlineKeyboardButton(text="Богдан", callback_data="otsos_bogdan")
-        markup.add(max_button, bogdan_button)
-        bot.send_message(message.chat.id,
-                         f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?",
-                         reply_markup=markup, parse_mode='html')
+    # Filter pisunchik to include only users in the current chat and exclude the user who triggered the command
+    local_players = {player_id: data for player_id, data in pisunchik.items() if
+                     bot.get_chat_member(chat_id, int(player_id)).status != 'left' and player_id != user_id}
 
-    elif player_id == "741542965":
-        markup = types.InlineKeyboardMarkup()
-        yura_button = types.InlineKeyboardButton(text="Юра", callback_data="otsos_yura")
-        bogdan_button = types.InlineKeyboardButton(text="Богдан", callback_data="otsos_bogdan")
-        markup.add(yura_button, bogdan_button)
-        bot.send_message(message.chat.id,
-                         f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?",
-                         reply_markup=markup, parse_mode='html')
+    markup = types.InlineKeyboardMarkup()
+    for player_id, data in local_players.items():
+        button = types.InlineKeyboardButton(text=f"{data['player_name']}", callback_data=f"otsos_{player_id}")
+        markup.add(button)
 
-    elif player_id == "855951767":
-        markup = types.InlineKeyboardMarkup()
-        max_button = types.InlineKeyboardButton(text="Макс", callback_data="otsos_max")
-        yura_button = types.InlineKeyboardButton(text="Юра", callback_data="otsos_yura")
-        markup.add(max_button, yura_button)
-        bot.send_message(message.chat.id,
-                         f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?",
-                         reply_markup=markup, parse_mode='html')
-
-    elif player_id == "1561630034":
-        markup = types.InlineKeyboardMarkup()
-        max_button = types.InlineKeyboardButton(text="Макс", callback_data="otsos_max")
-        markup.add(max_button)
-        bot.send_message(message.chat.id,
-                         f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, кому отсасываем?",
-                         reply_markup=markup, parse_mode='html')
+    bot.send_message(chat_id,
+                     "Кому отсасываем?",
+                     reply_markup=markup, parse_mode='html')
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('otsos'))
@@ -1804,35 +1783,16 @@ def otsos_callback(call):
         message_id=call.message.message_id,
         reply_markup=None
     )
-    if call.data == "otsos_yura":
-        bot.send_message(call.message.chat.id, "Вы отсасываете Юре...")
-        time.sleep(3)
+    user_id = int(call.data.split('_')[1])  # Получаем ID пользователя из callback data
+    user_name = pisunchik[str(user_id)]['player_name']
+    bot.send_message(call.message.chat.id, f"Вы отсасываете пользователю {user_name}...")
+    time.sleep(3)
 
-        number = random.randint(1, 2)
-        if number == 1:
-            bot.send_message(call.message.chat.id, "Вы отсосали Юре. У него член: Встал :)")
-        else:
-            bot.send_message(call.message.chat.id, "Вы отсосали Юре. У него член: Не встал :(")
-
-    elif call.data == "otsos_max":
-        bot.send_message(call.message.chat.id, "Вы отсасываете Максу...")
-        time.sleep(3)
-
-        number = random.randint(1, 2)
-        if number == 1:
-            bot.send_message(call.message.chat.id, "Вы отсосали Максу. У него член: Встал :)")
-        else:
-            bot.send_message(call.message.chat.id, "Вы отсосали Максу. У него член: Не встал :(")
-
-    elif call.data == "otsos_bogdan":
-        bot.send_message(call.message.chat.id, "Вы отсасываете Богдану...")
-        time.sleep(3)
-
-        number = random.randint(1, 2)
-        if number == 1:
-            bot.send_message(call.message.chat.id, "Вы отсосали Богдану. У него член: Встал :)")
-        else:
-            bot.send_message(call.message.chat.id, "Вы отсосали Богдану. У него член: Не встал :(")
+    number = random.randint(1, 2)
+    if number == 1:
+        bot.send_message(call.message.chat.id, f"Вы отсосали пользователю {user_name}. У него член: Встал :)")
+    else:
+        bot.send_message(call.message.chat.id, f"Вы отсосали пользователю {user_name}. У него член: Не встал :(")
 
 
 @bot.message_handler(commands=['vor'])
