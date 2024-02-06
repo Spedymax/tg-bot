@@ -380,27 +380,38 @@ def start_game(message):
         coins = pisunchik[player_id]['coins']
         bot.reply_to(message, f"Your pisunchik: {pisunchik_size} cm\nYou have {coins} coins!")
     else:
-        # New player: add to database and initialize data
-        pisunchik[player_id] = {
-            'pisunchik_size': 0,
-            'coins': 0,
-            'items': [],
-            'characteristics': [],
-            'statuetki': [],
-            'last_used': datetime.min.replace(tzinfo=timezone.utc),
-            'casino_last_used': datetime.min.replace(tzinfo=timezone.utc),
-            'casino_usage_count': 0,
-            'ballzzz_number': None,
-            'notified': False
-            # Add other necessary fields here
-        }
-        # Insert new player into the database
-        cursor.execute(
-            "INSERT INTO pisunchik_data (player_id, pisunchik_size, coins, items, characteristics, statuetki, last_used, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (int(player_id), 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, 0, None, False))
-        conn.commit()
+        # New player: ask for name and add to database
+        bot.reply_to(message, "Добро пожаловать! Напишите ваше имя:")
+        bot.register_next_step_handler(message, process_name_step)
 
-        bot.reply_to(message, "Welcome to the game! You've been registered as a new player.")
+def process_name_step(message):
+    player_id = str(message.from_user.id)
+    name = message.text.strip()
+
+    # Add new player to database and initialize data
+    pisunchik[player_id] = {
+        'player_name': name,
+        'pisunchik_size': 0,
+        'coins': 0,
+        'items': [],
+        'characteristics': [],
+        'player_stocks': [],
+        'statuetki': [],
+        'last_used': datetime.min.replace(tzinfo=timezone.utc),
+        'last_prezervativ': datetime.min.replace(tzinfo=timezone.utc),
+        'casino_last_used': datetime.min.replace(tzinfo=timezone.utc),
+        'casino_usage_count': 0,
+        'ballzzz_number': None,
+        'notified': False,
+    }
+    # Insert new player into the database
+    cursor.execute(
+        "INSERT INTO pisunchik_data (player_id, player_name, pisunchik_size, coins, items, characteristics, statuetki, last_used, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, player_stocks) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (int(player_id), name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, 0, None, False, '{}'))
+    conn.commit()
+
+    bot.reply_to(message, f"Приятной игры, {name}! Вы зарегистрированы как новый игрок!")
+
 
 
 @bot.message_handler(commands=['start_online'])
@@ -1039,6 +1050,23 @@ def show_items(message):
 
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
+
+
+@bot.message_handler(commands=['characteristics'])
+def show_characteristics(message):
+    player_id = str(message.from_user.id)
+    if player_id in pisunchik:
+        characteristics_text = "Ваши характеристики:\n"
+        existing_characteristic = pisunchik[player_id]['characteristics']
+        for characteristic in existing_characteristic:
+            characteristic_name, current_level = characteristic.split(":")
+            if characteristic_name in xarakteristiks_desc:
+                current_level = int(current_level)
+                characteristics_text += f"{characteristic_name}(Level {current_level}): {xarakteristiks_desc[characteristic_name]}\n"
+        bot.reply_to(message, characteristics_text)
+    else:
+        bot.reply_to(message, "Вы не зарегистрированы как игрок, используйте /start")
+
 
 
 @bot.message_handler(commands=['statuetki_shop'])
