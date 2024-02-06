@@ -265,7 +265,7 @@ def answers(message):
 
     # Send a message with the user's score and correct answers
     response = f"Правильные ответы:"
-    for x in range(0, 15):
+    for x in range(0, 14):
         response += f"\n{trivia_questions[x]['question']}: {trivia_questions[x]['answer']}"
 
     bot.send_message(user_id, response)
