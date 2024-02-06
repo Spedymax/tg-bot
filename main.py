@@ -16,7 +16,6 @@ import Crypto
 from openpyxl import load_workbook
 import re
 from subprocess import Popen, PIPE
-import signal
 
 # Global variable to keep track of the subprocess
 script_process = None
@@ -414,18 +413,18 @@ def process_name_step(message):
 
 
 
-@bot.message_handler(commands=['start_online'])
+@bot.message_handler(commands=['start_love'])
 def start_script(message):
     global script_process
     if script_process is None or script_process.poll() is not None:
         # Start the script
-        script_process = Popen(['python', 'check_online.py'], stdout=PIPE, stderr=PIPE)
+        script_process = Popen(['python', 'love.py'], stdout=PIPE, stderr=PIPE)
         bot.reply_to(message, "Script started.")
     else:
         bot.reply_to(message, "Script is already running.")
 
 
-@bot.message_handler(commands=['stop_online'])
+@bot.message_handler(commands=['stop_love'])
 def stop_script(message):
     global script_process
     if script_process is not None and script_process.poll() is None:
