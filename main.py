@@ -16,6 +16,7 @@ import Crypto
 from openpyxl import load_workbook
 import re
 from subprocess import Popen, PIPE
+import html
 
 # Global variable to keep track of the subprocess
 script_process = None
@@ -392,6 +393,7 @@ def process_name_step(message):
         'player_name': name,
         'pisunchik_size': 0,
         'coins': 0,
+        'correct_answers': 0,
         'items': [],
         'characteristics': [],
         'player_stocks': [],
@@ -405,8 +407,8 @@ def process_name_step(message):
     }
     # Insert new player into the database
     cursor.execute(
-        "INSERT INTO pisunchik_data (player_id, player_name, pisunchik_size, coins, items, characteristics, statuetki, last_used, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, player_stocks) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        (int(player_id), name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, 0, None, False, '{}'))
+        "INSERT INTO pisunchik_data (player_id, player_name, pisunchik_size, coins, items, characteristics, statuetki, last_used, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, player_stocks, correct_answers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (int(player_id), name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, 0, None, False, '{}', 0))
     conn.commit()
 
     bot.reply_to(message, f"Приятной игры, {name}! Вы зарегистрированы как новый игрок!")
@@ -967,6 +969,66 @@ def show_items(message):
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
 
+@bot.message_handler(commands=['ya_grazhdanskiy'])
+def introducing_trivia(message):
+    strochki3 = [
+    "Сегодня вы проснулись в мире, пропитанном запахом гари и разрушений.",
+    "Вы были взволнованы, никак не могли понять, как вы оказались здесь.",
+    "Вокруг вас были развалины зданий, разбитые машины и крики отдалённых сражений, которые настойчиво проникали в ваши сновидения.",
+    "Решив выяснить, где вы находитесь, вы начали бродить по руинам, пытаясь вспомнить что-либо о происходящем.",
+    "Ваша одежда была запачкана пылью, а сердце билось так быстро, что вы чувствовали его в ушах.",
+    "Вдыхая запах гари и металла, вы продолжали идти, стараясь не думать о том, что может скрываться за следующим поворотом.",
+    "Внезапно вы услышали чей-то голос.",
+    "\"Эй, вы там! Подойдите сюда!\" - раздался приглушённый крик.",
+    "Вы остановились и оглянулись, пытаясь определить, откуда идет звук.",
+    "И тут вы увидели его - человека, стоящего в тени развалин.",
+    "Он махал вам рукой, приглашая присоединиться.",
+    "Не раздумывая, вы приблизились к нему.",
+    "\"Вы не из военных?\" - спросил он, когда вы оказались рядом.",
+    "Вы покачали головой, слишком ошеломленные, чтобы говорить.",
+    "Он улыбнулся и протянул руку.",
+    "\"Я Джо, я гражданский\" - представился он.",
+    "Вы стали беседовать, обмениваясь рассказами о том, как оказались здесь.",
+    "Джек рассказал вам, что он был гражданским, жившим в этом городе до войны.",
+    "Он рассказал вам о своей семье, о том, как они пытались выжить в этом аду.",
+    "Вы были поражены его силой духа и решимостью.",
+    "Вы стали друзьями, двигаясь вместе сквозь опустошенные улицы.",
+    "Но ваша радость была недолгой.",
+    "Внезапно, когда вы были в самом сердце разрушений, Джек обернулся к вам, его глаза смотрели на вас с неким холодным выражением.",
+    "\"Прости, друг, но мне нужно это сделать,\" - прошептал он, выхватив из-за пояса пистолет.",
+    "Вы не могли поверить своим глазам.",
+    "В мгновение ока все ваше доверие и вера в него исчезли.",
+    "Секунды стали вечностью, когда вы увидели, как он прицеливается прямо в ваше сердце.",
+    "Вы поняли, что это конец.",
+    "В этом мире разрушений и войны, вы были просто еще одной жертвой.",
+    "Пистолет выстрелил, и всё погрузилось в темноту.",
+    "Когда тьма поглотила вас, вы чувствовали, как будто погружаетесь в бездонную пропасть.",
+    "Но вместо того, чтобы погрузиться в вечную тьму, вы почувствовали легкость, словно плыли в невесомости.",
+    "Ваш разум замирал, а мир вокруг вас начал растворяться, словно картина, смывающаяся каплями дождя.",
+    "Когда вы снова открыли глаза, вы осознали, что лежите на кровати",
+    "Но что было настоящим, а что сном?",
+    "Внезапно ваш взгляд упал на фигуру человека, стоящего неподалеку.",
+    "Это был торговец, которого вы видели раньше.",
+    "Он улыбнулся вам, словно зная, что вы его заметили.",
+    "\"Давно не виделись,\" - проговорил торговец, приближаясь к вам.",
+    "\"У меня есть кое-что, что я хочу вам показать.\"",
+    "Ваш разум боролся с этой странной встречей.",
+    "Как это могло быть реальностью после всего, что вы только что пережили?",
+    "Но вы решили следовать за торговцем, ибо что-то в его голосе заставляло вас верить, что он знает ответы на ваши вопросы.",
+    "Когда вы зашли в его повозку он сказал:",
+    "\"Я недавно нашёл сборник вопросов на английском, думаю это будет хорошей мотивацией для вас\""
+    "\"Я буду задавать вам по 3 вопроса каждый день. Ваша задача правильно ответить на 30 вопросов\"",
+    "\"Как только мои требования будут выполнены я дам вам подарок. Поверьте, он вам понравится\"",
+    "\"Начнём с разминочного вопроса\"",
+    "После этих слов он провалился под землю, как будто его тут никогда и не было",
+    ]
+
+    for line in strochki3:
+        time.sleep(5)
+        bot.send_message(message.chat.id, line)
+
+    send_trivia_questions(message)
+
 
 @bot.message_handler(commands=['statuetki'])
 def show_items(message):
@@ -1521,6 +1583,100 @@ def kazik(message):
             bot.send_message(message.chat.id, "Сори, джекпот только для трёх семёрок((")
 
     save_data()
+correct_answer = ''
+today_questions = {}
+@bot.message_handler(commands=['trivia'])
+def send_trivia_questions(message):
+    chat_id = message.chat.id
+    while True:
+        try:
+            response = requests.post('https://opentdb.com/api.php?amount=1')
+            response_data = response.json()
+            break
+        except:
+            pass
+    question = response_data['results'][0]['question']
+    answer_options = response_data['results'][0]['incorrect_answers'] + [response_data['results'][0]['correct_answer']]
+    random.shuffle(answer_options)
+    global correct_answer
+    correct_answer = response_data['results'][0]['correct_answer']
+    question = html.unescape(question)
+    answer_options = [html.unescape(item) for item in answer_options]
+    correct_answer = html.unescape(correct_answer)
+    global today_questions
+
+    today_questions[question] = correct_answer
+
+    markup = types.InlineKeyboardMarkup()
+    for answer in answer_options:
+        button = types.InlineKeyboardButton(text=f"{answer}", callback_data=f"answer_{answer}")
+        markup.add(button)
+    bot.send_message(chat_id,
+                     "Внимание вопрос!")
+    bot.send_message(chat_id,
+                     question,
+                     reply_markup=markup, parse_mode='html')
+
+def send_trivia_questions2():
+    chat_id = -1001294162183
+    while True:
+        try:
+            response = requests.post('https://opentdb.com/api.php?amount=1')
+            response_data = response.json()
+            break
+        except:
+            pass
+    question = response_data['results'][0]['question']
+    answer_options = response_data['results'][0]['incorrect_answers'] + [response_data['results'][0]['correct_answer']]
+    random.shuffle(answer_options)
+    global correct_answer
+    correct_answer = response_data['results'][0]['correct_answer']
+    question = html.unescape(question)
+    answer_options = [html.unescape(item) for item in answer_options]
+    correct_answer = html.unescape(correct_answer)
+    global today_questions
+
+    today_questions[question] = correct_answer
+
+    markup = types.InlineKeyboardMarkup()
+    for answer in answer_options:
+        button = types.InlineKeyboardButton(text=f"{answer}", callback_data=f"answer_{answer}")
+        markup.add(button)
+    bot.send_message(chat_id,
+                     "Внимание вопрос!")
+    bot.send_message(chat_id,
+                     question,
+                     reply_markup=markup, parse_mode='html')
+
+@bot.message_handler(commands=['correct_answers'])
+def get_correct_answers(message):
+    bot.send_message(message.chat.id, f'А вот и правильные ответы:')
+    for i in range(0, 3):
+        bot.send_message(message.chat.id, f'Вопрос: {list(today_questions)[-1-i]} \nОтвет: {today_questions.get(list(today_questions)[-1-i])}')
+    bot.send_message(message.chat.id, f'Итого у игроков правильных ответов:')
+    bot.send_message(message.chat.id, f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
+    bot.send_message(message.chat.id, f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
+    bot.send_message(message.chat.id, f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
+
+def get_correct_answers2():
+    bot.send_message(-1001294162183, f'А вот и правильные ответы:')
+    for i in range(0, 3):
+        bot.send_message(-1001294162183, f'Вопрос: {list(today_questions)[-1-i]} \nОтвет: {today_questions.get(list(today_questions)[-1-i])}')
+    bot.send_message(-1001294162183, f'Итого у игроков правильных ответов:')
+    bot.send_message(-1001294162183, f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
+    bot.send_message(-1001294162183, f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
+    bot.send_message(-1001294162183, f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('answer'))
+def answer_callback(call):
+    global correct_answer
+    user_id = str(call.from_user.id)
+    answer = call.data.split('_')[1]
+    if answer == correct_answer:
+        pisunchik[user_id]["correct_answers"] += 1
+    bot.send_message(call.message.chat.id, f'Игрок {pisunchik[user_id]["player_name"]} сделал свой выбор...')
+    save_data()
 
 
 def update_stock_prices():
@@ -2005,8 +2161,16 @@ def can_use_pisunchik():
             update_stock_prices()
         if curr_time.hour == 14 and curr_time.minute == 0:
             update_stock_prices()
-        if curr_time.hour == 20 and curr_time.minute == 0:
+        if curr_time.hour == 18 and curr_time.minute == 0:
             update_stock_prices()
+        if curr_time.hour == 11 and curr_time.minute == 0:
+            send_trivia_questions2()
+        if curr_time.hour == 16 and curr_time.minute == 0:
+            send_trivia_questions2()
+        if curr_time.hour == 19 and curr_time.minute == 0:
+            send_trivia_questions2()
+        if curr_time.hour == 22 and curr_time.minute == 0:
+            get_correct_answers2()
         # if curr_time.hour == 12 and curr_time.minute == 0:
         #     bot.send_message(-1001294162183,
         #                      "Юра, вам был отправлен подарок. Нажмите /podarok чтобы открыть его...")
