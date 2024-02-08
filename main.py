@@ -2254,11 +2254,11 @@ def send_to_group_command(message):
     # Ask the user to send the message they want to forward
     bot.send_message(message.chat.id, "Please send the message you want to forward to the group chat.")
 
-@bot.message_handler(func=lambda message: f"Бот" in message.text)
+@bot.message_handler(func=lambda message: f"Бот," in message.text)
 def handle_mention(message):
     # Extract text following the bot's username
-    prompt = message.text.split("Бот", 1)[1].strip()
-    if prompt == " отшлёпай Юру":
+    prompt = message.text.split("Бот,", 1)[1].strip()
+    if prompt == "отшлёпай Юру" or "отшлёпай юру":
         bot.send_message(message.chat.id, "Юра отшлёпан :)")
 
 
