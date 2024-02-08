@@ -1024,7 +1024,7 @@ def introducing_trivia(message):
         "Как это могло быть реальностью после всего, что вы только что пережили?",
         "Но вы решили следовать за торговцем, ибо что-то в его голосе заставляло вас верить, что он знает ответы на ваши вопросы.",
         "Когда вы зашли в его повозку он сказал:",
-        "\"Я недавно нашёл сборник вопросов на английском, думаю это будет хорошей мотивацией для вас\""
+        "\"Я недавно нашёл сборник вопросов на английском, думаю это будет хорошей мотивацией для вас\"",
         "\"Я буду задавать вам по 3 вопроса каждый день. Ваша задача правильно ответить на 30 вопросов\"",
         "\"Как только мои требования будут выполнены я дам вам подарок. Поверьте, он вам понравится\"",
         "\"Начнём с разминочного вопроса\"",
@@ -2253,6 +2253,13 @@ start_cooldown_check_thread()
 def send_to_group_command(message):
     # Ask the user to send the message they want to forward
     bot.send_message(message.chat.id, "Please send the message you want to forward to the group chat.")
+
+@bot.message_handler(func=lambda message: f"Бот" in message.text)
+def handle_mention(message):
+    # Extract text following the bot's username
+    prompt = message.text.split("Бот", 1)[1].strip()
+    if prompt == " отшлёпай Юру":
+        bot.send_message(message.chat.id, "Юра отшлёпан :)")
 
 
 # Handler for messages mentioning the bot
