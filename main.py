@@ -110,6 +110,7 @@ print("Bot started")
 YURA_ID = 742272644
 MAX_ID = 741542965
 BODYA_ID = 855951767
+NIKA_ID = 1085180226
 VIKA_ID = 1561630034
 # List of admin user IDs
 admin_ids = [741542965]
@@ -216,6 +217,7 @@ def add_characteristic(message):
             save_data()
     else:
         print(f"Player with ID {player_id} not found")
+    save_data()
 
 
 @bot.message_handler(commands=['upgrade_char'])
@@ -240,6 +242,7 @@ def upgrade_characteristic(message):
             bot.send_message(message.chat.id, "У вас нет характеристик для улучшения.")
     else:
         bot.send_message(message.chat.id, "Вы не зарегистрированы как игрок, используйте /start")
+    save_data()
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("select"))
@@ -257,6 +260,7 @@ def select_characteristic_for_upgrade(call):
     keyboard.add(*level_buttons)
 
     bot.send_message(chat_id, "Выберите количество уровней для улучшения:", reply_markup=keyboard)
+    save_data()
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("upgrade"))
@@ -285,6 +289,7 @@ def handle_characteristic_upgrade(call):
         bot.send_message(chat_id, f"Вы улучшили {characteristic_name} до уровня {new_level}!")
     else:
         bot.send_message(chat_id, "Недостаточно денег для улучшения или превышен максимальный уровень.")
+    save_data()
 
 
 strochki = [
@@ -412,6 +417,7 @@ def process_name_step(message):
     conn.commit()
 
     bot.reply_to(message, f"Приятной игры, {name}! Вы зарегистрированы как новый игрок!")
+    save_data()
 
 
 
@@ -518,6 +524,7 @@ def use_krystalnie_ballzzz(message):
         effect_message = f"Следующее изменение писюнчика будет: {next_effect} см."
 
     bot.reply_to(message, effect_message)
+    save_data()
 
 
 # Command to access the admin panel
@@ -1319,6 +1326,7 @@ def confirm_purchase(call):
         bot.send_message(call.message.chat.id, f"Вы купили {item_name} за {item_price} ВТС.")
     else:
         bot.send_message(call.message.chat.id, "Недостаточно денег((")
+    save_data()
 
 
 @bot.callback_query_handler(func=lambda call: call.data == "buy_cancel")
@@ -1626,7 +1634,7 @@ def send_trivia_questions(message):
                      reply_markup=markup, parse_mode='html')
 
 def send_trivia_questions2():
-    chat_id = -1001294162183
+    chat_id = -4087198265
     while True:
         try:
             response = requests.post('https://opentdb.com/api.php?amount=1')
@@ -1665,15 +1673,19 @@ def get_correct_answers(message):
     bot.send_message(message.chat.id, f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
     bot.send_message(message.chat.id, f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
     bot.send_message(message.chat.id, f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
+    bot.send_message(message.chat.id, f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
 
 def get_correct_answers2():
-    bot.send_message(-1001294162183, f'А вот и правильные ответы:')
+    chat_id = -4087198265
+    bot.send_message(chat_id, f'А вот и правильные ответы:')
     for i in range(0, 3):
-        bot.send_message(-1001294162183, f'Вопрос: {list(today_questions)[-1-i]} \nОтвет: {today_questions.get(list(today_questions)[-1-i])}')
-    bot.send_message(-1001294162183, f'Итого у игроков правильных ответов:')
-    bot.send_message(-1001294162183, f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
-    bot.send_message(-1001294162183, f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
-    bot.send_message(-1001294162183, f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
+        bot.send_message(chat_id, f'Вопрос: {list(today_questions)[-1-i]} \nОтвет: {today_questions.get(list(today_questions)[-1-i])}')
+    bot.send_message(chat_id, f'Итого у игроков правильных ответов:')
+    bot.send_message(chat_id, f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
+    bot.send_message(chat_id, f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
+    bot.send_message(chat_id, f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
+    bot.send_message(chat_id, f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
+
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('answer'))
@@ -1850,6 +1862,7 @@ def handle_quantity_selection(message):
 
         # Inform the user
         bot.reply_to(message, f"Мои поздравления! Вы купили вот столько акций: {quantity}, компании {company}.")
+        save_data()
     except Exception as e:
         bot.reply_to(message, f"An error occurred: {str(e)}")
     finally:
@@ -1931,6 +1944,7 @@ def handle_sell_quantity_selection(message):
 
                 bot.reply_to(message,
                              f"Вы успешно продали {quantity} акций компании {company}.\n И вы заработали: {total_earned}")
+                save_data()
 
                 break
         else:
@@ -2057,10 +2071,11 @@ def otsos(message):
                 break
         if not exist:
             bot.send_message(message.chat.id, "У вас нету нужной характеристики для писюничка :(")
+        save_data()
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("vor"))
-def otsos_callback(call):
+def vor_callback(call):
     bot.edit_message_reply_markup(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
@@ -2171,14 +2186,14 @@ def can_use_pisunchik():
             update_stock_prices()
         if curr_time.hour == 18 and curr_time.minute == 0:
             update_stock_prices()
-        # if curr_time.hour == 11 and curr_time.minute == 0:
-        #     send_trivia_questions2()
-        # if curr_time.hour == 16 and curr_time.minute == 0:
-        #     send_trivia_questions2()
-        # if curr_time.hour == 19 and curr_time.minute == 0:
-        #     send_trivia_questions2()
-        # if curr_time.hour == 22 and curr_time.minute == 0:
-        #     get_correct_answers2()
+        if curr_time.hour == 11 and curr_time.minute == 0:
+            send_trivia_questions2()
+        if curr_time.hour == 16 and curr_time.minute == 0:
+            send_trivia_questions2()
+        if curr_time.hour == 19 and curr_time.minute == 0:
+            send_trivia_questions2()
+        if curr_time.hour == 22 and curr_time.minute == 0:
+            get_correct_answers2()
         # if curr_time.hour == 12 and curr_time.minute == 0:
         #     bot.send_message(-1001294162183,
         #                      "Юра, вам был отправлен подарок. Нажмите /podarok чтобы открыть его...")
@@ -2238,10 +2253,13 @@ def handle_mention(message):
                 "messages": [
                     {"role": "system",
                      "content": "If user asks you: 'Как правильно ухаживать за ребёнком?', you must respond only with: '1.Спускаем кровь \n Чтобы мясо не испортилось, спускают кровь. Делают это следующим образом: кладут ребёнка на правый бок так, чтобы голова оказалась ниже тела. Левую ногу нужно прижать к груди, затем острым охотничьим ножом протыкают артерии и вены. У детей нож вводить нужно в сердце и делать разрез по направлению к хребту. Для того, чтобы облегчить доступ к сердцу ребёнка, нужно левую ногу отвести в строну. Кровь выпускается до тех пор, пока она не перестанет вытекать. Если обескровить ребёнка не полностью, то мясо может плохо храниться или потерять вкусовые свойства. \n 2. Потрошение тушки \n Потрошение детей происходит по одинаковому алгоритму. Ребёнка кладут на спину и закрепляют в таком положении с помощью веревок и растяжек. Под бока следует подложить камни или поленья, чтобы тело не перекатилась на бок. Первое действие – разрезать кожу, проводя ножом от шеи через грудину и живот до анального отверстия. Далее нужно аккуратно снять шкуру с ребёнка, постепенно ее подрезая ножом. Внутренности начинают извлекать из шейной части: пищевод отделяют от трахеи и завязывают узлом, чтобы избежать загрязнения мяса. Далее Вам нужно высвободить пальцами пищевод и отрезать его у переднего конца. Пищевод из-за этих процедур достаточно плотно закрывается, после чего его нужно запихнуть подальше в грудную клетку. Чтобы избавить язык от связок, делают глубокие разрезы по обеим сторонам челюсти. Далее нужно обработать брюшную полость: делается разрез по средней линии живота до грудной кости. Для потрошения существуют специальные ножи, которые позволяют сделать вскрытие одним движением. Если тело большое, то после последнего ребра делают разрез до позвоночника. Еще один разрез делают по направлению к выходу прямой кишки. Когда будете вскрывать брюшную полость, действуйте предельно осторожно, чтобы не разрезать кишки и другие внутренние органы. В противном случае, можно загрязнить мясо. Помните, что диафрагма быстро портиться. Поэтому ее рекомендуют убрать от ребер сразу же при потрошении. Удаляя пищевод, прямую кишку, следите, чтобы содержимое не вылилось наружу. Почки, печень, селезенка, сердце, легкие, язык и желудок могут употребляться в пищу. Сердце нужно надрезать и выпустить кровь. Не забудьте обескровить тело до конца, для этого нужно сделать разрез на внутренней части бедра. Для того, чтобы кровь максимально стеклась, тело подвешивают за переднюю часть. При потрошении нужно обращать внимание на форму и цвет всех внутренних органов. Если заметите что-то подозрительное, то лучше не употреблять такое мясо в пищу. Не забудьте сдать мясо на проверку, вдруг ментам понравиться :)'"},
+                    {"role": "system",
+                     "content": "If user asks you: 'Какое действие стоит загадать Нике если бы мы играли в Правду или действие?', you must respond only with: 'Загадайте ей: Пойти на бал в БДСМ костюме :)'"},
                     {
 
                         "role": "user",
-                        "content": f"{prompt}"}
+                        "content": f"{prompt}"
+                    }
                 ],
                 "temperature": 0.7
             }
@@ -2327,3 +2345,5 @@ def handle_send_to_group_message(message):
 
 bot.polling()
 # 741542965
+# -4087198265 Багфикс с Никой
+# -4087198265 Чатик с пацанами
