@@ -1614,6 +1614,7 @@ def kazik(message):
             bot.send_message(message.chat.id, "Сори, джекпот только для трёх семёрок((")
 
     save_data()
+
 correct_answer = ''
 today_questions = {}
 @bot.message_handler(commands=['trivia'])
@@ -1642,6 +1643,7 @@ def send_trivia_questions(message):
     for answer in answer_options:
         button = types.InlineKeyboardButton(text=f"{answer}", callback_data=f"answer_{answer}")
         markup.add(button)
+    reset_answered_questions()
     bot.send_message(chat_id,
                      "Внимание вопрос!")
     bot.send_message(chat_id,
@@ -1673,11 +1675,13 @@ def send_trivia_questions2():
     for answer in answer_options:
         button = types.InlineKeyboardButton(text=f"{answer}", callback_data=f"answer_{answer}")
         markup.add(button)
+    reset_answered_questions()
     bot.send_message(chat_id,
                      "Внимание вопрос!")
     bot.send_message(chat_id,
                      question,
                      reply_markup=markup, parse_mode='html')
+
 
 @bot.message_handler(commands=['correct_answers'])
 def get_correct_answers(message):
@@ -1706,17 +1710,34 @@ def get_correct_answers2():
     bot.send_message(chat_id, f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
 
 
+answered_questions = {}  # Keep track of which questions each user has answered
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('answer'))
 def answer_callback(call):
     global correct_answer
     user_id = str(call.from_user.id)
     answer = call.data.split('_')[1]
+
+    # Check if the user has already answered a question today
+    if user_id in answered_questions:
+        bot.send_message(call.message.chat.id, "Вы уже ответили на вопрос сегодня.")
+        return
+
     if answer == correct_answer:
         pisunchik[user_id]["correct_answers"] += 1
+
+    # Update the answered questions dictionary
+    answered_questions[user_id] = correct_answer
+
     bot.send_message(call.message.chat.id, f'Игрок {pisunchik[user_id]["player_name"]} сделал свой выбор...')
     save_data()
 
+
+# Function to reset answered questions after sending out questions for the day
+def reset_answered_questions():
+    global answered_questions
+    answered_questions = {}
 
 def update_stock_prices():
     # Fetch the stock data
