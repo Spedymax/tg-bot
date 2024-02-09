@@ -1621,7 +1621,7 @@ def send_trivia_questions(message):
     chat_id = message.chat.id
     while True:
         try:
-            response = requests.post('https://opentdb.com/api.php?amount=1')
+            response = requests.post('https://opentdb.com/api.php?amount=1&difficulty=easy')
             response_data = response.json()
             break
         except:
@@ -1652,7 +1652,7 @@ def send_trivia_questions2():
     chat_id = -1001294162183
     while True:
         try:
-            response = requests.post('https://opentdb.com/api.php?amount=1')
+            response = requests.post('https://opentdb.com/api.php?amount=1&difficulty=easy')
             response_data = response.json()
             break
         except:
@@ -1682,7 +1682,9 @@ def send_trivia_questions2():
 @bot.message_handler(commands=['correct_answers'])
 def get_correct_answers(message):
     bot.send_message(message.chat.id, f'А вот и правильные ответы:')
-    for i in range(0, 3):
+    for i in range(0, len(list(today_questions.items()))):
+        if i >= 3:
+            break
         bot.send_message(message.chat.id, f'Вопрос: {list(today_questions)[-1-i]} \nОтвет: {today_questions.get(list(today_questions)[-1-i])}')
     bot.send_message(message.chat.id, f'Итого у игроков правильных ответов:')
     bot.send_message(message.chat.id, f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
@@ -1691,9 +1693,11 @@ def get_correct_answers(message):
     bot.send_message(message.chat.id, f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
 
 def get_correct_answers2():
-    chat_id = -4087198265
+    chat_id = -1001294162183
     bot.send_message(chat_id, f'А вот и правильные ответы:')
-    for i in range(0, 3):
+    for i in range(0, len(list(today_questions.items()))):
+        if i >= 3:
+            break
         bot.send_message(chat_id, f'Вопрос: {list(today_questions)[-1-i]} \nОтвет: {today_questions.get(list(today_questions)[-1-i])}')
     bot.send_message(chat_id, f'Итого у игроков правильных ответов:')
     bot.send_message(chat_id, f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
