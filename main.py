@@ -2274,10 +2274,15 @@ def start_cooldown_check_thread():
 start_cooldown_check_thread()
 
 
-@bot.message_handler(commands=['sendtogroup'])
+@bot.message_handler(commands=['send'])
 def send_to_group_command(message):
     # Ask the user to send the message they want to forward
     bot.send_message(message.chat.id, "Please send the message you want to forward to the group chat.")
+
+@bot.message_handler(commands=['send2'])
+def send_to_group_command(message):
+    # Ask the user to send the message they want to forward
+    bot.send_message(message.chat.id, "Please send the message you want to forward to the second group chat.")
 
 @bot.message_handler(func=lambda message: f"Бот," in message.text)
 def handle_mention(message):
@@ -2338,6 +2343,11 @@ def handle_send_to_group_message(message):
         # Forward the user's message to the group chat
         bot.send_message(-1001294162183, message.text)
         bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
+
+    if message.reply_to_message and message.reply_to_message.text == "Please send the message you want to forward to the second group chat.":
+        # Forward the user's message to the group chat
+        bot.send_message(-4087198265, message.text)
+        bot.send_message(message.chat.id, "Your message has been sent to the second group chat.")
     # if message.from_user.id == 742272644:
     #     if emoji_pattern.search(message.text):
     #         bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 15 минут)")
