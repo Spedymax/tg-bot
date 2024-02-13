@@ -17,6 +17,8 @@ from openpyxl import load_workbook
 import re
 from subprocess import Popen, PIPE
 import html
+import xml.etree.ElementTree as ET
+
 
 # Global variable to keep track of the subprocess
 script_process = None
@@ -1651,7 +1653,7 @@ def send_trivia_questions(message):
                      reply_markup=markup, parse_mode='html')
 
 def send_trivia_questions2():
-    chat_id = -1001294162183
+    chat_id = [-1001294162183, -4087198265]
     while True:
         try:
             response = requests.post('https://opentdb.com/api.php?amount=1&difficulty=easy')
@@ -1676,11 +1678,12 @@ def send_trivia_questions2():
         button = types.InlineKeyboardButton(text=f"{answer}", callback_data=f"answer_{answer}")
         markup.add(button)
     reset_answered_questions()
-    bot.send_message(chat_id,
-                     "Внимание вопрос!")
-    bot.send_message(chat_id,
-                     question,
-                     reply_markup=markup, parse_mode='html')
+    for chat in chat_id:
+        bot.send_message(chat,
+                         "Внимание вопрос!")
+        bot.send_message(chat,
+                         question,
+                         reply_markup=markup, parse_mode='html')
 
 
 @bot.message_handler(commands=['correct_answers'])
@@ -2114,6 +2117,7 @@ def otsos(message):
         save_data()
 
 
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("vor"))
 def vor_callback(call):
     bot.edit_message_reply_markup(
@@ -2146,6 +2150,15 @@ def vor_callback(call):
         pisunchik[str(BODYA_ID)]['pisunchik_size'] -= vor_number
         pisunchik[player]['pisunchik_size'] += vor_number
         bot.send_message(call.message.chat.id, f"Вы украли {vor_number} см у Богдана...")
+
+@bot.message_handler(commands=['anekdot'])
+def joke_forward(message):
+    s = requests.get('http://rzhunemogu.ru/Rand.aspx?Ctype=1')  # запрос к сайту с анекдотами
+    root = ET.fromstring(s.text)
+    # Get the content
+    anekdot = root.find('content').text
+    chat_id = -1001294162183
+    bot.send_message(chat_id, anekdot)
 
 
 def save_data():
@@ -2404,3 +2417,4 @@ bot.polling()
 # 741542965
 # -4087198265 Багфикс с Никой
 # -1001294162183 Чатик с пацанами
+# -1001857844029 joke chat
