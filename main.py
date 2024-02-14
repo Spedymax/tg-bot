@@ -2164,20 +2164,18 @@ def dad_jokes(message):
     response = requests.get(url, headers=headers)
     response = response.json()
 
-    chat_id = -1001294162183
     global punchline
     punchline = response['body'][0]['punchline']
     setup = response['body'][0]['setup']
 
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton('?', callback_data="punchline"))
-    bot.send_message(chat_id, setup, reply_markup=markup)
+    bot.send_message(message.chat.id, setup, reply_markup=markup)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("punchline"))
 def dad_jokes_handler(call):
-    chat_id = -1001294162183
-    bot.send_message(chat_id, punchline)
+    bot.send_message(call.message.chat.id, punchline)
 
 
 def save_data():
