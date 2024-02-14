@@ -2151,14 +2151,33 @@ def vor_callback(call):
         pisunchik[player]['pisunchik_size'] += vor_number
         bot.send_message(call.message.chat.id, f"Вы украли {vor_number} см у Богдана...")
 
+punchline = ""
 @bot.message_handler(commands=['anekdot'])
-def joke_forward(message):
-    s = requests.get('http://rzhunemogu.ru/Rand.aspx?Ctype=1')  # запрос к сайту с анекдотами
-    root = ET.fromstring(s.text)
-    # Get the content
-    anekdot = root.find('content').text
+def dad_jokes(message):
+    url = "https://dad-jokes.p.rapidapi.com/random/joke"
+
+    headers = {
+        "X-RapidAPI-Key": "b56bba012emshd183f9e61c8904bp160ae7jsn40271047c907",
+        "X-RapidAPI-Host": "dad-jokes.p.rapidapi.com"
+    }
+
+    response = requests.get(url, headers=headers)
+    response = response.json()
+
     chat_id = -1001294162183
-    bot.send_message(chat_id, anekdot)
+    global punchline
+    punchline = response['body'][0]['punchline']
+    setup = response['body'][0]['setup']
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton('?', callback_data="punchline"))
+    bot.send_message(chat_id, setup, reply_markup=markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("punchline"))
+def dad_jokes_handler(call):
+    chat_id = -1001294162183
+    bot.send_message(chat_id, punchline)
 
 
 def save_data():
