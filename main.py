@@ -17,7 +17,7 @@ from openpyxl import load_workbook
 import re
 from subprocess import Popen, PIPE
 import html
-import xml.etree.ElementTree as ET
+
 
 
 # Global variable to keep track of the subprocess
@@ -43,7 +43,6 @@ headers = {
     'Content-Type': 'application/json',
     'Authorization': f'Bearer {client.api_key}',
 }
-
 # Establish a database connection
 conn = psycopg2.connect(
     database="d58fv4tmqqgtif",
