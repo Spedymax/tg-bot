@@ -2319,7 +2319,12 @@ def handle_mention(message):
     prompt = message.text.split("Бот,", 1)[1].strip()
     if prompt == "отшлёпай Юру" or "отшлёпай юру":
         bot.send_message(message.chat.id, "Юра отшлёпан :)")
-
+    if prompt == "что-то жарко стало":
+        bot.send_message(message.chat.id, "Понял, включаю вентилятор 卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐...")
+        time.sleep(3)
+        bot.send_message(message.chat.id, "Чёт вентилятор сломался 卐卐卐卐卐卐, из-за грозы наверное ᛋᛋ")
+        time.sleep(3)
+        bot.send_message(message.chat.id, "Достаём инструменты ☭☭☭☭☭, всё починил, можно и поспать ZzzZZzZzZZZ")
 
 # Handler for messages mentioning the bot
 @bot.message_handler(func=lambda message: f"@GgAllMute" in message.text)
