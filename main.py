@@ -2317,13 +2317,13 @@ def send_to_group_command(message):
 def handle_mention(message):
     # Extract text following the bot's username
     prompt = message.text.split("Бот,", 1)[1].strip()
-    if prompt == "отшлёпай Юру" or "отшлёпай юру":
+    if prompt == "отшлёпай Юру" or prompt == "отшлёпай юру":
         bot.send_message(message.chat.id, "Юра отшлёпан :)")
     elif prompt == "что-то жарко стало":
         bot.send_message(message.chat.id, "Понял, включаю вентилятор 卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐...")
-        time.sleep(3)
+        time.sleep(5)
         bot.send_message(message.chat.id, "Чёт вентилятор сломался 卐卐卐卐卐卐, из-за грозы наверное ᛋᛋ")
-        time.sleep(3)
+        time.sleep(5)
         bot.send_message(message.chat.id, "Достаём инструменты ☭☭☭☭☭, всё починил, можно и поспать ZzzZZzZzZZZ")
 
 # Handler for messages mentioning the bot
