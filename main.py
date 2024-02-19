@@ -1699,17 +1699,18 @@ def get_correct_answers(message):
     bot.send_message(message.chat.id, f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
 
 def get_correct_answers2():
-    chat_id = -1001294162183
-    bot.send_message(chat_id, f'А вот и правильные ответы:')
-    for i in range(0, len(list(today_questions.items()))):
-        if i >= 3:
-            break
-        bot.send_message(chat_id, f'Вопрос: {list(today_questions)[-1-i]} \nОтвет: {today_questions.get(list(today_questions)[-1-i])}')
-    bot.send_message(chat_id, f'Итого у игроков правильных ответов:')
-    bot.send_message(chat_id, f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
-    bot.send_message(chat_id, f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
-    bot.send_message(chat_id, f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
-    bot.send_message(chat_id, f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
+    chat_id = [-1001294162183, -4087198265]
+    for chat in chat_id:
+        bot.send_message(chat, f'А вот и правильные ответы:')
+        for i in range(0, len(list(today_questions.items()))):
+            if i >= 3:
+                break
+            bot.send_message(chat, f'Вопрос: {list(today_questions)[-1-i]} \nОтвет: {today_questions.get(list(today_questions)[-1-i])}')
+        bot.send_message(chat, f'Итого у игроков правильных ответов:')
+        bot.send_message(chat, f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
+        bot.send_message(chat, f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
+        bot.send_message(chat, f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
+        bot.send_message(chat, f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
 
 
 answered_questions = {}  # Keep track of which questions each user has answered
@@ -2172,6 +2173,8 @@ def dad_jokes(message):
     bot.send_message(message.chat.id, setup, reply_markup=markup)
 
 
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("punchline"))
 def dad_jokes_handler(call):
     bot.send_message(call.message.chat.id, punchline)
@@ -2228,7 +2231,7 @@ def can_use_pisunchik():
                 if not pisunchik[player]['notified']:
                     player_name2 = get_player_name(player)
                     bot.send_message(-1001294162183,
-                                     f"<a href='tg://user?id={player}'>@{player_name2}</a>, вы можете использовать /pisunchik",
+                                     f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
                                      parse_mode='html')
                     pisunchik[player]['notified'] = True
                     save_data()
@@ -2237,7 +2240,6 @@ def can_use_pisunchik():
             for player in pisunchik:
                 existing_characteristic = pisunchik[player]['characteristics']
                 # Check if the characteristic is already in the player's characteristics
-                player_name = get_player_name(player)
                 characteristic_name = "Gold"
                 n = 0
                 if existing_characteristic is not None:
@@ -2248,7 +2250,7 @@ def can_use_pisunchik():
                             income = 2 + ((int_level - 1) * 1.5)
                             pisunchik[player]['coins'] += int(income)
                             bot.send_message(-1001294162183,
-                                             f"{player_name}, ваш золотой член принёс сегодня прибыль в размере {int(income)} BTC")
+                                             f"{pisunchik[player]['player_name']}, ваш золотой член принёс сегодня прибыль в размере {int(income)} BTC")
         if curr_time.hour == 9 and curr_time.minute == 0:
             update_stock_prices()
         if curr_time.hour == 14 and curr_time.minute == 0:
@@ -2319,12 +2321,19 @@ def handle_mention(message):
     prompt = message.text.split("Бот,", 1)[1].strip()
     if prompt == "отшлёпай Юру" or prompt == "отшлёпай юру":
         bot.send_message(message.chat.id, "Юра отшлёпан :)")
+    elif prompt == "отшлёпай Нику" or prompt == "отшлёпай нику":
+        bot.send_message(message.chat.id, "Ника отшлёпана :)")
+    elif prompt == "отшлёпай Макса" or prompt == "отшлёпай макса" or prompt == "отшлёпай максима" or prompt == "отшлёпай Максима":
+        bot.send_message(message.chat.id, "Макса нельзя шлёпать :(")
     elif prompt == "что-то жарко стало":
         bot.send_message(message.chat.id, "Понял, включаю вентилятор 卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐...")
         time.sleep(5)
         bot.send_message(message.chat.id, "Чёт вентилятор сломался 卐卐卐卐卐卐, из-за грозы наверное ᛋᛋ")
         time.sleep(5)
         bot.send_message(message.chat.id, "Достаём инструменты ☭☭☭☭☭, всё починил, можно и поспать ZzzZZzZzZZZ")
+    elif prompt == "расскажи анекдот":
+        dad_jokes(message)
+
 
 # Handler for messages mentioning the bot
 @bot.message_handler(func=lambda message: f"@GgAllMute" in message.text)
