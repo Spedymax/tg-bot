@@ -2229,10 +2229,14 @@ def can_use_pisunchik():
             if time_difference >= timedelta(hours=cooldown):
                 # Update the last_used timestamp in the database
                 if not pisunchik[player]['notified']:
-                    player_name2 = get_player_name(player)
-                    bot.send_message(-1001294162183,
-                                     f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
-                                     parse_mode='html')
+                    if pisunchik[player]['player_id'] == 1085180226:
+                        bot.send_message(1085180226,
+                                         f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
+                                         parse_mode='html')
+                    else:
+                        bot.send_message(-1001294162183,
+                                         f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
+                                         parse_mode='html')
                     pisunchik[player]['notified'] = True
                     save_data()
         curr_time = datetime.now(timezone.utc)
