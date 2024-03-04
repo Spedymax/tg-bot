@@ -18,8 +18,6 @@ import re
 from subprocess import Popen, PIPE
 import html
 
-
-
 # Global variable to keep track of the subprocess
 script_process = None
 
@@ -54,6 +52,18 @@ conn = psycopg2.connect(
 
 # Create a cursor for executing SQL queries
 cursor = conn.cursor()
+
+
+def load_trivia_data():
+    cursor.execute("SELECT * FROM questions")  # Получаем все записи из таблицы
+    data = cursor.fetchall()
+    trivia = []
+
+    for row in data:
+        question, correct_answer = row
+        trivia.append({'question': question, 'correct_answer': correct_answer})
+
+    return trivia
 
 
 def load_data():
@@ -390,6 +400,7 @@ def start_game(message):
         bot.reply_to(message, "Добро пожаловать! Напишите ваше имя:")
         bot.register_next_step_handler(message, process_name_step)
 
+
 def process_name_step(message):
     player_id = str(message.from_user.id)
     name = message.text.strip()
@@ -414,12 +425,12 @@ def process_name_step(message):
     # Insert new player into the database
     cursor.execute(
         "INSERT INTO pisunchik_data (player_id, player_name, pisunchik_size, coins, items, characteristics, statuetki, last_used, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, player_stocks, correct_answers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        (int(player_id), name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, 0, None, False, '{}', 0))
+        (int(player_id), name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, 0, None, False, '{}',
+         0))
     conn.commit()
 
     bot.reply_to(message, f"Приятной игры, {name}! Вы зарегистрированы как новый игрок!")
     save_data()
-
 
 
 @bot.message_handler(commands=['start_love'])
@@ -977,10 +988,13 @@ def show_items(message):
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
 
+
 users_with_trivia_access = []
+
+
 @bot.message_handler(commands=['ya_grazhdanskiy'])
 def introducing_trivia(message):
-        strochki3 = [
+    strochki3 = [
         "Сегодня вы проснулись в мире, пропитанном запахом гари и разрушений.",
         "Вы были взволнованы, никак не могли понять, как вы оказались здесь.",
         "Вокруг вас были развалины зданий, разбитые машины и крики отдалённых сражений, которые настойчиво проникали в ваши сновидения.",
@@ -1030,25 +1044,17 @@ def introducing_trivia(message):
         "\"Как только мои требования будут выполнены я дам вам подарок. Поверьте, он вам понравится\"",
         "\"Начнём с разминочного вопроса\"",
         "После этих слов он провалился под землю, как будто его тут никогда и не было",
-        ]
+    ]
 
-        if message.from_user.id == YURA_ID:
-            if YURA_ID in users_with_trivia_access:
-                bot.send_message(message.chat.id, "Юрка, не балуйся :)")
-                return
-            else:
-                bot.restrict_chat_member(message.chat.id, message.from_user.id,
-                                         until_date=datetime.now() + timedelta(minutes=5), permissions=None)
-                bot.send_message(message.chat.id, "Пользователь Юра забанен на 5 минут пока идёт сюжет ^_^")
-                users_with_trivia_access.append(YURA_ID)
-                for line in strochki3:
-                    time.sleep(2)
-                    bot.send_message(message.chat.id, line)
-                    time.sleep(3)
-
-                time.sleep(2)
-                send_trivia_questions2()
+    if message.from_user.id == YURA_ID:
+        if YURA_ID in users_with_trivia_access:
+            bot.send_message(message.chat.id, "Юрка, не балуйся :)")
+            return
         else:
+            bot.restrict_chat_member(message.chat.id, message.from_user.id,
+                                     until_date=datetime.now() + timedelta(minutes=5), permissions=None)
+            bot.send_message(message.chat.id, "Пользователь Юра забанен на 5 минут пока идёт сюжет ^_^")
+            users_with_trivia_access.append(YURA_ID)
             for line in strochki3:
                 time.sleep(2)
                 bot.send_message(message.chat.id, line)
@@ -1056,9 +1062,14 @@ def introducing_trivia(message):
 
             time.sleep(2)
             send_trivia_questions2()
+    else:
+        for line in strochki3:
+            time.sleep(2)
+            bot.send_message(message.chat.id, line)
+            time.sleep(3)
 
-
-
+        time.sleep(2)
+        send_trivia_questions2()
 
 
 @bot.message_handler(commands=['statuetki'])
@@ -1158,10 +1169,10 @@ def show_characteristics(message):
                     characteristics_text += f"{characteristic_name}(Level {current_level}): {xarakteristiks_desc[characteristic_name]}\n"
             bot.reply_to(message, characteristics_text)
         else:
-            bot.reply_to(message, "Ой, у вас нету характеристик :( \n Сначала купите все статуэтки используя /statuetki_shop")
+            bot.reply_to(message,
+                         "Ой, у вас нету характеристик :( \n Сначала купите все статуэтки используя /statuetki_shop")
     else:
         bot.reply_to(message, "Вы не зарегистрированы как игрок, используйте /start")
-
 
 
 @bot.message_handler(commands=['statuetki_shop'])
@@ -1616,11 +1627,14 @@ def kazik(message):
 
     save_data()
 
+
 correct_answer = ''
-today_questions = {}
+
+
 @bot.message_handler(commands=['trivia'])
 def send_trivia_questions(message):
     chat_id = message.chat.id
+    global correct_answer
     while True:
         try:
             response = requests.post('https://opentdb.com/api.php?amount=1&difficulty=easy')
@@ -1631,14 +1645,12 @@ def send_trivia_questions(message):
     question = response_data['results'][0]['question']
     answer_options = response_data['results'][0]['incorrect_answers'] + [response_data['results'][0]['correct_answer']]
     random.shuffle(answer_options)
-    global correct_answer
     correct_answer = response_data['results'][0]['correct_answer']
     question = html.unescape(question)
     answer_options = [html.unescape(item) for item in answer_options]
     correct_answer = html.unescape(correct_answer)
-    global today_questions
 
-    today_questions[question] = correct_answer
+    save_question(question, correct_answer)  # Сохраняем вопрос и ответ в базу данных
 
     markup = types.InlineKeyboardMarkup()
     for answer in answer_options:
@@ -1651,7 +1663,9 @@ def send_trivia_questions(message):
                      question,
                      reply_markup=markup, parse_mode='html')
 
+
 def send_trivia_questions2():
+    global correct_answer
     chat_id = [-1001294162183, -4087198265]
     while True:
         try:
@@ -1663,14 +1677,12 @@ def send_trivia_questions2():
     question = response_data['results'][0]['question']
     answer_options = response_data['results'][0]['incorrect_answers'] + [response_data['results'][0]['correct_answer']]
     random.shuffle(answer_options)
-    global correct_answer
     correct_answer = response_data['results'][0]['correct_answer']
     question = html.unescape(question)
     answer_options = [html.unescape(item) for item in answer_options]
     correct_answer = html.unescape(correct_answer)
-    global today_questions
 
-    today_questions[question] = correct_answer
+    save_question(question, correct_answer)  # Сохраняем вопрос и ответ в базу данных
 
     markup = types.InlineKeyboardMarkup()
     for answer in answer_options:
@@ -1687,33 +1699,52 @@ def send_trivia_questions2():
 
 @bot.message_handler(commands=['correct_answers'])
 def get_correct_answers(message):
+    trivia = load_trivia_data()
     bot.send_message(message.chat.id, f'А вот и правильные ответы:')
-    for i in range(0, len(list(today_questions.items()))):
-        if i >= 3:
-            break
-        bot.send_message(message.chat.id, f'Вопрос: {list(today_questions)[-1-i]} \nОтвет: {today_questions.get(list(today_questions)[-1-i])}')
+    for i in range(0, len(trivia)):
+        question = trivia[-1 - i]['question']
+        answer = trivia[-1 - i]['correct_answer']
+        bot.send_message(message.chat.id, f'Вопрос: {question} \nОтвет: {answer}')
     bot.send_message(message.chat.id, f'Итого у игроков правильных ответов:')
-    bot.send_message(message.chat.id, f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
-    bot.send_message(message.chat.id, f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
-    bot.send_message(message.chat.id, f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
-    bot.send_message(message.chat.id, f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
+    bot.send_message(message.chat.id,
+                     f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
+    bot.send_message(message.chat.id,
+                     f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
+    bot.send_message(message.chat.id,
+                     f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
+    bot.send_message(message.chat.id,
+                     f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
+
 
 def get_correct_answers2():
     chat_id = [-1001294162183, -4087198265]
     for chat in chat_id:
+        trivia = load_trivia_data()
         bot.send_message(chat, f'А вот и правильные ответы:')
-        for i in range(0, len(list(today_questions.items()))):
+        for i in range(0, len(trivia)):
             if i >= 3:
                 break
-            bot.send_message(chat, f'Вопрос: {list(today_questions)[-1-i]} \nОтвет: {today_questions.get(list(today_questions)[-1-i])}')
+            question = trivia[-1 - i]['question']
+            answer = trivia[-1 - i]['correct_answer']
+            bot.send_message(chat, f'Вопрос: {question} \nОтвет: {answer}')
         bot.send_message(chat, f'Итого у игроков правильных ответов:')
-        bot.send_message(chat, f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
-        bot.send_message(chat, f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
-        bot.send_message(chat, f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
-        bot.send_message(chat, f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
+        bot.send_message(chat,
+                         f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
+        bot.send_message(chat,
+                         f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
+        bot.send_message(chat,
+                         f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
+        bot.send_message(chat,
+                         f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
+        clear_trivia_data()
 
 
 answered_questions = {}  # Keep track of which questions each user has answered
+
+
+def clear_trivia_data():
+    cursor.execute("DELETE FROM questions")
+    conn.commit()
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('answer'))
@@ -1741,6 +1772,7 @@ def answer_callback(call):
 def reset_answered_questions():
     global answered_questions
     answered_questions = {}
+
 
 def update_stock_prices():
     # Fetch the stock data
@@ -2117,7 +2149,6 @@ def otsos(message):
         save_data()
 
 
-
 @bot.callback_query_handler(func=lambda call: call.data.startswith("vor"))
 def vor_callback(call):
     bot.edit_message_reply_markup(
@@ -2151,7 +2182,10 @@ def vor_callback(call):
         pisunchik[player]['pisunchik_size'] += vor_number
         bot.send_message(call.message.chat.id, f"Вы украли {vor_number} см у Богдана...")
 
+
 punchline = ""
+
+
 @bot.message_handler(commands=['anekdot'])
 def dad_jokes(message):
     url = "https://dad-jokes.p.rapidapi.com/random/joke"
@@ -2171,8 +2205,6 @@ def dad_jokes(message):
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton('?', callback_data="punchline"))
     bot.send_message(message.chat.id, setup, reply_markup=markup)
-
-
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("punchline"))
@@ -2201,6 +2233,11 @@ def save_data():
             cursor.execute(query, values)
 
     # Commit changes to the database
+    conn.commit()
+
+
+def save_question(question, correct_answer):
+    cursor.execute("INSERT INTO questions VALUES (%s, %s)", (question, correct_answer))
     conn.commit()
 
 
@@ -2314,10 +2351,12 @@ def send_to_group_command(message):
     # Ask the user to send the message they want to forward
     bot.send_message(message.chat.id, "Please send the message you want to forward to the group chat.")
 
+
 @bot.message_handler(commands=['send2'])
 def send_to_group_command(message):
     # Ask the user to send the message they want to forward
     bot.send_message(message.chat.id, "Please send the message you want to forward to the second group chat.")
+
 
 @bot.message_handler(func=lambda message: f"Бот," in message.text)
 def handle_mention(message):
