@@ -2442,6 +2442,16 @@ def handle_mention(message):
         bot.send_message(message.chat.id, "Достаём инструменты ☭☭☭☭☭, всё починил, можно и поспать ZzzZZzZzZZZ")
     elif prompt == "расскажи анекдот":
         dad_jokes(message)
+    elif prompt == "расскажи анекдот про маму Юры":
+        bot.send_message(message.chat.id, "Нет.")
+    elif prompt == "расскажи анекдот про маму Богдана":
+        bot.send_message(message.chat.id, "Нет.")
+    elif prompt == "расскажи анекдот про маму Максима" or prompt == "расскажи анекдот про маму Макса" or prompt == "расскажи анекдот про маму максима" or prompt == "расскажи анекдот про маму макса":
+        bot.send_message(message.chat.id, "С радостью :)")
+        time.sleep(3)
+        bot.send_message(message.chat.id, "Мама Максима попросила его друга Юру помочь с ремонтом ванной. Юра согласился и начал разбираться с трубами.\nВ какой-то момент он спрашивает: — Мама Максима, а у вас есть гаечный ключ?\nНа что мама отвечает:— Нет, Юра, иди нахуй")
+    else:
+        bot.send_message(message.chat.id, "?")
 
 
 # Handler for messages mentioning the bot
