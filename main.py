@@ -1629,25 +1629,46 @@ def kazik(message):
 
 
 correct_answer = ''
+api_requests = ['9', '11', '15', '18', '19', '22', '23', '24', '30']
 
 
 @bot.message_handler(commands=['trivia'])
 def send_trivia_questions(message):
     chat_id = message.chat.id
     global correct_answer
+    number = random.randint(0, len(api_requests) - 1)
     while True:
         try:
-            response = requests.post('https://opentdb.com/api.php?amount=1&difficulty=easy')
+            response = requests.post(
+                f'https://opentdb.com/api.php?amount=1&category={api_requests[number]}&difficulty=easy&type=multiple')
             response_data = response.json()
             break
         except:
             pass
     question = response_data['results'][0]['question']
     answer_options = response_data['results'][0]['incorrect_answers'] + [response_data['results'][0]['correct_answer']]
-    random.shuffle(answer_options)
-    correct_answer = response_data['results'][0]['correct_answer']
     question = html.unescape(question)
+
+    # Get a funny answer based on the question
+    funny_answer = get_funny_answer(question, answer_options)
+
+    # Replace one of the answer options with the funny answer
+    index_to_replace = random.randint(0, len(answer_options) - 1)
+    answer_options[index_to_replace] = funny_answer
+
+    # Update the correct answer if it was replaced with a funny one
+    if index_to_replace == len(answer_options) - 1:
+        correct_answer = funny_answer
+    else:
+        correct_answer = response_data['results'][0]['correct_answer']
+
+    # Shuffle the answer options
+    random.shuffle(answer_options)
+
+    # Unescape HTML entities in answer options
     answer_options = [html.unescape(item) for item in answer_options]
+
+    # Unescape HTML entities in correct answer
     correct_answer = html.unescape(correct_answer)
 
     save_question(question, correct_answer)  # Сохраняем вопрос и ответ в базу данных
@@ -1657,29 +1678,46 @@ def send_trivia_questions(message):
         button = types.InlineKeyboardButton(text=f"{answer}", callback_data=f"answer_{answer}")
         markup.add(button)
     reset_answered_questions()
-    bot.send_message(chat_id,
-                     "Внимание вопрос!")
-    bot.send_message(chat_id,
-                     question,
-                     reply_markup=markup, parse_mode='html')
+    bot.send_message(chat_id, "Внимание вопрос!")
+    bot.send_message(chat_id, question, reply_markup=markup, parse_mode='html')
 
 
 def send_trivia_questions2():
     global correct_answer
     chat_id = [-1001294162183, -4087198265]
+    number = random.randint(0, len(api_requests) - 1)
     while True:
         try:
-            response = requests.post('https://opentdb.com/api.php?amount=1&difficulty=easy')
+            response = requests.post(
+                f'https://opentdb.com/api.php?amount=1&category={api_requests[number]}&difficulty=easy&type=multiple')
             response_data = response.json()
             break
         except:
             pass
     question = response_data['results'][0]['question']
     answer_options = response_data['results'][0]['incorrect_answers'] + [response_data['results'][0]['correct_answer']]
-    random.shuffle(answer_options)
-    correct_answer = response_data['results'][0]['correct_answer']
     question = html.unescape(question)
+
+    # Get a funny answer based on the question
+    funny_answer = get_funny_answer(question, answer_options)
+
+    # Replace one of the answer options with the funny answer
+    index_to_replace = random.randint(0, len(answer_options) - 1)
+    answer_options[index_to_replace] = funny_answer
+
+    # Update the correct answer if it was replaced with a funny one
+    if index_to_replace == len(answer_options) - 1:
+        correct_answer = funny_answer
+    else:
+        correct_answer = response_data['results'][0]['correct_answer']
+
+    # Shuffle the answer options
+    random.shuffle(answer_options)
+
+    # Unescape HTML entities in answer options
     answer_options = [html.unescape(item) for item in answer_options]
+
+    # Unescape HTML entities in correct answer
     correct_answer = html.unescape(correct_answer)
 
     save_question(question, correct_answer)  # Сохраняем вопрос и ответ в базу данных
@@ -1772,6 +1810,34 @@ def answer_callback(call):
 def reset_answered_questions():
     global answered_questions
     answered_questions = {}
+
+
+def get_funny_answer(question, answer_options):
+    try:
+        data = {
+            "model": "gpt-3.5-turbo",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You're tasked with generating a funny response to the question provided above, considering the given answers. Your goal is to come up with a witty and humorous response that would make someone chuckle. You must use black and sexist and unethical humor. Remember, your response should stand out and be entertaining. Don't use already existing answers. You must return the funny answer ONLY. Your answer must be one or two or three words long. You mustn't answer given question, just think of funny response to it."
+                },
+                {
+
+                    "role": "user",
+                    "content": f"{question} \n{answer_options}"
+                }
+            ],
+            "temperature": 0.7
+        }
+
+        response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers,
+                                 data=json.dumps(data))
+        response_data = response.json()
+        funny_answer = response_data['choices'][0]['message']['content']
+    except:
+        funny_answer = "Funny moment не будет(("
+    return funny_answer
+
 
 
 def update_stock_prices():
