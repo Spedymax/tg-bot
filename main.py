@@ -1617,13 +1617,10 @@ def kazik(message):
             pisunchik[player_id]['casino_usage_count'] += 1
 
         result = bot.send_dice(message.chat.id, emoji='🎰')
-        if result.dice.value in {64}:
+        if result.dice.value in {1, 22, 43, 64}:
             time.sleep(4)
             bot.send_message(message.chat.id, "ДЕКПОТ! Вы получаете 300 BTC!")
             pisunchik[player_id]['coins'] += 300
-        elif result.dice.value in {1, 22, 43}:
-            time.sleep(4)
-            bot.send_message(message.chat.id, "Сори, джекпот только для трёх семёрок((")
 
     save_data()
 
@@ -1851,8 +1848,14 @@ def update_stock_prices():
 
     for company, old_price in old_prices.items():
         if company == 'ATB':
-            # Randomly increase or decrease price by up to 10%
-            change_percent = random.uniform(-0.07, 0.14)
+            change_percent = random.uniform(-0.2, 0)
+            new_price = round(old_price * (1 + change_percent), 2)
+
+            # Update the new price in the database
+            update_query = "UPDATE stocks SET price = %s WHERE company_name = %s"
+            cursor.execute(update_query, (new_price, company))
+        if company == 'Valve':
+            change_percent = random.uniform(0, 0.14)
             new_price = round(old_price * (1 + change_percent), 2)
 
             # Update the new price in the database
