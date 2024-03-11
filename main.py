@@ -1,5 +1,3 @@
-import subprocess
-
 import telebot.apihelper
 import random
 from datetime import datetime, timedelta, timezone
@@ -60,8 +58,8 @@ def load_trivia_data():
     trivia = []
 
     for row in data:
-        question, correct_answer = row
-        trivia.append({'question': question, 'correct_answer': correct_answer})
+        question, corr_answer = row
+        trivia.append({'question': question, 'correct_answer': corr_answer})
 
     return trivia
 
@@ -131,12 +129,20 @@ admin_actions = {}
 xarakteristiks = ['Gold', 'Glowing', 'Titan', 'Invisible', 'Big Black', 'Hot']
 
 xarakteristiks_desc = {
-    'Gold': 'Ахуеть, у вас теперь золотой член! Ежедневно приносит по 1 BTC. Можно улучшить чтобы увеличить количество ежедневной прибыли на 3 BTC',
-    'Glowing': 'У вас член излучает свет!! Пока другие участники ослеплены вы можете каждую неделю незаметно красть у другого участника 2 см и прибавлять их себе. Можно улучшить чтобы красть на 2 см больше.',
-    'Titan': 'Теперь ваш член титановый, и пиздец тяжёлый :( Вы угрожаете админу, благодаря этому кулдаун /pisunchik уменьшен только для вас на 3%. Можно улучшить чтобы добавить уменьшение кулдауна на 3%',
-    'Invisible': 'Ваш член пропал!!! Вернее он теперь просто невидимый. Балгодаря этой уловке вы можете использовать комманду /roll абсолютно бесплатно с 3% шансом. Никто и не заметит :). Можно улучшить чтобы повысить шанс бесплатного прокрута на 3%',
-    'Big Black': 'Теперь ваш член просто огроменный чёрный хуй. Ваш член не может стать меньше чем 0 см. Можно улучшить чтобы увеличить порог минимального размера писюнчика на 3 см',
-    'Hot': 'У вас просто расскалённая лава между ног. Вы перегреваете магазинный апарат когда подходите к нему, так что теперь всё для вас на 5% дешевле. Можно улучшить чтобы получть дополнительные 3% скидки.'
+    'Gold': 'Ахуеть, у вас теперь золотой член! Ежедневно приносит по 1 BTC. Можно улучшить чтобы увеличить '
+            'количество ежедневной прибыли на 3 BTC',
+    'Glowing': 'У вас член излучает свет!! Пока другие участники ослеплены вы можете каждую неделю незаметно красть у '
+               'другого участника 2 см и прибавлять их себе. Можно улучшить чтобы красть на 2 см больше.',
+    'Titan': 'Теперь ваш член титановый, и пиздец тяжёлый :( Вы угрожаете админу, благодаря этому кулдаун /pisunchik '
+             'уменьшен только для вас на 3%. Можно улучшить чтобы добавить уменьшение кулдауна на 3%',
+    'Invisible': 'Ваш член пропал!!! Вернее он теперь просто невидимый. Балгодаря этой уловке вы можете использовать'
+                 'комманду /roll абсолютно бесплатно с 3% шансом. Никто и не заметит :). Можно улучшить чтобы '
+                 'повысить шанс'
+                 'бесплатного прокрута на 3%',
+    'Big Black': 'Теперь ваш член просто огроменный чёрный хуй. Ваш член не может стать меньше чем 0 см. Можно'
+                 'улучшить чтобы увеличить порог минимального размера писюнчика на 3 см',
+    'Hot': 'У вас просто расскалённая лава между ног. Вы перегреваете магазинный апарат когда подходите к нему,'
+           'так что теперь всё для вас на 5% дешевле. Можно улучшить чтобы получть дополнительные 3% скидки.'
 }
 
 statuetki_prices = {
@@ -174,23 +180,33 @@ shop_prices = {
 }
 
 item_desc = {
-    'kolczo_na_chlen': '{Пассивка} 20% шанс того что при использовании /pisunchik количество подученного BTC будет удвоено.',
+    'kolczo_na_chlen': '{Пассивка} 20% шанс того что при использовании /pisunchik количество подученного BTC будет'
+                       'удвоено.',
     'bdsm_kostumchik': '{Пассивка} 10% шанс того что при использовании /pisunchik вы получите +5 см к писюнчику',
 
     'kubik_seksa': '{Пассивка} "При использовании /roll, стоимость броска на 50 процентов дешевле',
-    'prezervativ': '{Пассивка} Если при использовании /pisunchik выпало отрицалеьное число то писюнчик не уменьшается. КД - 4 дня',
+    'prezervativ': '{Пассивка} Если при использовании /pisunchik выпало отрицалеьное число то писюнчик не '
+                   'уменьшается. КД - 4 дня',
 
-    'krystalnie_ballzzz': '{Активное} Показывает сколько выпадет при использовании /pisunchik в следующий раз\nИспользование: /krystalnie_ballzzz',
+    'krystalnie_ballzzz': '{Активное} Показывает сколько выпадет при использовании /pisunchik в следующий '
+                          'раз\nИспользование: /krystalnie_ballzzz',
     'smazka': '{Аксивное} Можно использовать /pisunchik еще раз, раз в неделю\nИспользование: /smazka',
     'poroshochek': '/poroshochek ???',
     'shaurma': 'Ну молодец купил шаурму и чё дальше? Схавать /shaurma',
     'diarea': 'Теперь вы не можете кидать гифки смайлика в очках :)))))',
 
-    'zelie_pisunchika': '{Съедобное} Моментально увеличивает писюнчик на 20 или -20 см. Шанс 50 на 50\nИспользование: /zelie_pisunchika',
-    'masturbator': '{Съедобное} Позволяет с честью пожертвовать размером своего писюнчика ради получения BTC. Чем большим размером пожертвовано, тем больше монет выиграно. 1 см = 4 BTC + 5 BTC за каждые 5 см.\nИспользование: /masturbator',
-    'pisunchik_potion_small': '{Съедобное} Моментально увеличивает писюнчик на 3 см\nИспользование: /pisunchik_potion_small',
-    'pisunchik_potion_medium': '{Съедобное} Моментально увеличивает писюнчик на 5 см\nИспользование: /pisunchik_potion_medium',
-    'pisunchik_potion_large': '{Съедобное} Моментально увеличивает писюнчик на 10 см\nИспользование: /pisunchik_potion_large'
+    'zelie_pisunchika': '{Съедобное} Моментально увеличивает писюнчик на 20 или -20 см. Шанс 50 на 50\nИспользование: '
+                        '/zelie_pisunchika',
+    'masturbator': '{Съедобное} Позволяет с честью пожертвовать размером своего писюнчика ради получения BTC. Чем '
+                   'большим размером пожертвовано, тем больше монет выиграно. 1 см = 4 BTC + 5 BTC за каждые 5 '
+                   'см.\nИспользование:'
+                   '/masturbator',
+    'pisunchik_potion_small': '{Съедобное} Моментально увеличивает писюнчик на 3 см\nИспользование: '
+                              '/pisunchik_potion_small',
+    'pisunchik_potion_medium': '{Съедобное} Моментально увеличивает писюнчик на 5 см\nИспользование: '
+                               '/pisunchik_potion_medium',
+    'pisunchik_potion_large': '{Съедобное} Моментально увеличивает писюнчик на 10 см\nИспользование: '
+                              '/pisunchik_potion_large'
 
 }
 
@@ -286,8 +302,8 @@ def handle_characteristic_upgrade(call):
 
     upgrade_cost = 100 * levels_to_upgrade  # Каждый уровень стоит 100 монет
 
-    if pisunchik[player_id][
-        'coins'] >= upgrade_cost and current_level + levels_to_upgrade <= 15:  # Проверка на максимальный уровень и достаточно средств
+    if pisunchik[player_id]['coins'] >= upgrade_cost and current_level + levels_to_upgrade <= 15:  # Проверка на
+        # максимальный уровень и достаточно средств
         pisunchik[player_id]['coins'] -= upgrade_cost
         new_level = current_level + levels_to_upgrade
         updated_characteristic = f"{characteristic_name}:{new_level}"
@@ -356,9 +372,12 @@ def get_recent_messages(message):
         "model": "gpt-3.5-turbo",
         "messages": [
             {"role": "system",
-             "content": "Ты бот анализатор. Тебе будут давать сообщения от пользователей, твоё задание сделать краткую сводку того о чем была речь в этих сообщениях. Разделяй каждую отдельную тему на абзацы"},
+             "content": "Ты бот анализатор. Тебе будут давать сообщения от пользователей, твоё задание сделать "
+                        "краткую сводку того о чем была речь в этих сообщениях. Разделяй каждую отдельную тему на "
+                        "абзацы"},
             {"role": "system",
-             "content": "Начинай своё сообщение с: За последние 12 часов речь шла о том что: *и потом перечень того о чём шла речь*"},
+             "content": "Начинай своё сообщение с: За последние 12 часов речь шла о том что: *и потом перечень того о "
+                        "чём шла речь*"},
             {"role": "user", "content": f"{converted_string}"},
         ],
         "temperature": 0.7
@@ -424,7 +443,9 @@ def process_name_step(message):
     }
     # Insert new player into the database
     cursor.execute(
-        "INSERT INTO pisunchik_data (player_id, player_name, pisunchik_size, coins, items, characteristics, statuetki, last_used, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, player_stocks, correct_answers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "INSERT INTO pisunchik_data (player_id, player_name, pisunchik_size, coins, items, characteristics, "
+        "statuetki, last_used, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, "
+        "player_stocks, correct_answers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (int(player_id), name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, 0, None, False, '{}',
          0))
     conn.commit()
@@ -442,21 +463,6 @@ def start_script(message):
         bot.reply_to(message, "Script started.")
     else:
         bot.reply_to(message, "Script is already running.")
-
-
-@bot.message_handler(commands=['stop_love'])
-def stop_script(message):
-    global script_process
-    if script_process is not None and script_process.poll() is None:
-        # Stop the script
-        script_process.terminate()
-        try:
-            script_process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            script_process.kill()
-        bot.reply_to(message, "Script stopped.")
-    else:
-        bot.reply_to(message, "Script is not running.")
 
 
 @bot.message_handler(commands=['global_leaderboard'])
@@ -1544,7 +1550,7 @@ def update_items(player_id, items, coins):
 
 
 def get_furry_images():
-    # Get the URL of the furry images website.
+    # Get the URL of the furry image website.
     image_urls = []
     for x in range(1, 9):
         url = "https://imgbin.com/free-png/furry-art/" + str(x)
@@ -1836,7 +1842,6 @@ def get_funny_answer(question, answer_options):
     return funny_answer
 
 
-
 def update_stock_prices():
     # Fetch the stock data
     query = "SELECT company_name, price FROM stocks"
@@ -1955,6 +1960,7 @@ def handle_company_selection(call):
 
 @bot.message_handler(func=lambda message: message.from_user.id in temp_user_data)
 def handle_quantity_selection(message):
+    global user_id
     try:
         quantity = message.text
         if not quantity.isdigit():
@@ -2043,6 +2049,7 @@ def handle_sell_company_selection(call):
 
 @bot.message_handler(func=lambda message: message.from_user.id in temp_user_sell_data)
 def handle_sell_quantity_selection(message):
+    global user_id
     try:
         quantity = message.text
         if not quantity.isdigit():
@@ -2446,13 +2453,19 @@ def handle_mention(message):
     elif prompt == "расскажи анекдот":
         dad_jokes(message)
     elif prompt == "расскажи анекдот про маму Юры":
-        bot.send_message(message.chat.id, "Нет.")
+        bot.send_message(message.chat.id, "Ну ладно")
+        with open('bezobidno.jpg', 'rb') as photo:
+            time.sleep(1)
+            bot.send_photo(message.chat.id, photo)
     elif prompt == "расскажи анекдот про маму Богдана":
         bot.send_message(message.chat.id, "Нет.")
     elif prompt == "расскажи анекдот про маму Максима" or prompt == "расскажи анекдот про маму Макса" or prompt == "расскажи анекдот про маму максима" or prompt == "расскажи анекдот про маму макса":
         bot.send_message(message.chat.id, "С радостью :)")
         time.sleep(3)
-        bot.send_message(message.chat.id, "Мама Максима попросила его друга Юру помочь с ремонтом ванной. Юра согласился и начал разбираться с трубами.\nВ какой-то момент он спрашивает: — Мама Максима, а у вас есть гаечный ключ?\nНа что мама отвечает:— Нет, Юра, иди нахуй")
+        bot.send_message(message.chat.id,
+                         "Мама Максима попросила его друга Юру помочь с ремонтом ванной. Юра согласился и начал "
+                         "разбираться с трубами.\nВ какой-то момент он спрашивает: — Мама Максима, а у вас есть "
+                         "гаечный ключ?\nНа что мама отвечает:— Нет, Юра, иди нахуй")
     else:
         bot.send_message(message.chat.id, "?")
 
@@ -2500,12 +2513,14 @@ emoji_pattern = re.compile("["
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_send_to_group_message(message):
     # Check if the user's message is a reply to the "sendtogroup" command
-    if message.reply_to_message and message.reply_to_message.text == "Please send the message you want to forward to the group chat.":
+    if message.reply_to_message and message.reply_to_message.text == ("Please send the message you want to forward to "
+                                                                      "the group chat."):
         # Forward the user's message to the group chat
         bot.send_message(-1001294162183, message.text)
         bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
 
-    if message.reply_to_message and message.reply_to_message.text == "Please send the message you want to forward to the second group chat.":
+    if message.reply_to_message and message.reply_to_message.text == ("Please send the message you want to forward to "
+                                                                      "the second group chat."):
         # Forward the user's message to the group chat
         bot.send_message(-4087198265, message.text)
         bot.send_message(message.chat.id, "Your message has been sent to the second group chat.")
