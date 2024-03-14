@@ -1632,7 +1632,7 @@ def kazik(message):
 
 
 correct_answer = ''
-api_requests = ['9', '11', '15', '18', '19', '22', '23', '24', '30']
+api_requests = ['general_knowledge', 'history', 'geography']
 
 
 @bot.message_handler(commands=['trivia'])
@@ -1642,14 +1642,14 @@ def send_trivia_questions(message):
     number = random.randint(0, len(api_requests) - 1)
     while True:
         try:
-            response = requests.post(
-                f'https://opentdb.com/api.php?amount=1&category={api_requests[number]}&difficulty=easy&type=multiple')
+            response = requests.get(
+                f'https://the-trivia-api.com/v2/questions?limit=1&categories={api_requests[number]}&difficulties=easy,medium')
             response_data = response.json()
             break
         except:
             pass
-    question = response_data['results'][0]['question']
-    answer_options = response_data['results'][0]['incorrect_answers'] + [response_data['results'][0]['correct_answer']]
+    question = response_data[0]['question']['text']
+    answer_options = response_data[0]['incorrectAnswers'] + [response_data[0]['correctAnswer']]
     question = html.unescape(question)
 
     # Get a funny answer based on the question
@@ -1663,7 +1663,7 @@ def send_trivia_questions(message):
     if index_to_replace == len(answer_options) - 1:
         correct_answer = funny_answer
     else:
-        correct_answer = response_data['results'][0]['correct_answer']
+        correct_answer = response_data[0]['correctAnswer']
 
     # Shuffle the answer options
     random.shuffle(answer_options)
@@ -1691,14 +1691,14 @@ def send_trivia_questions2():
     number = random.randint(0, len(api_requests) - 1)
     while True:
         try:
-            response = requests.post(
-                f'https://opentdb.com/api.php?amount=1&category={api_requests[number]}&difficulty=easy&type=multiple')
+            response = requests.get(
+                f'https://the-trivia-api.com/v2/questions?limit=1&categories={api_requests[number]}&difficulties=easy,medium')
             response_data = response.json()
             break
         except:
             pass
-    question = response_data['results'][0]['question']
-    answer_options = response_data['results'][0]['incorrect_answers'] + [response_data['results'][0]['correct_answer']]
+    question = response_data[0]['question']
+    answer_options = response_data[0]['incorrectAnswers'] + [response_data[0]['correctAnswer']]
     question = html.unescape(question)
 
     # Get a funny answer based on the question
@@ -1712,7 +1712,7 @@ def send_trivia_questions2():
     if index_to_replace == len(answer_options) - 1:
         correct_answer = funny_answer
     else:
-        correct_answer = response_data['results'][0]['correct_answer']
+        correct_answer = response_data[0]['correctAnswer']
 
     # Shuffle the answer options
     random.shuffle(answer_options)
