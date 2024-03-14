@@ -1859,7 +1859,7 @@ def update_stock_prices():
             # Update the new price in the database
             update_query = "UPDATE stocks SET price = %s WHERE company_name = %s"
             cursor.execute(update_query, (new_price, company))
-        if company == 'Valve':
+        elif company == 'Valve':
             change_percent = random.uniform(0, 0.14)
             new_price = round(old_price * (1 + change_percent), 2)
 
