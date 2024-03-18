@@ -1,21 +1,25 @@
-import telebot.apihelper
-import random
-from datetime import datetime, timedelta, timezone
-from telebot import types
-import time
+import html
+import json
 import os
+import random
+import re
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+from subprocess import Popen, PIPE
+
 import psycopg2
 import requests
-from bs4 import BeautifulSoup
-import threading
-import json
+import telebot.apihelper
 from openai import OpenAI
-import Crypto
 from openpyxl import load_workbook
-import re
-from subprocess import Popen, PIPE
-import html
-import BotFunctions.BotAnswer as BotAnswer
+from telebot import types
+
+import BotFunctions.BotAnswer as botAnswer
+import BotFunctions.Rofl as rofl
+import BotFunctions.main_functions as main
+import BotFunctions.trivia as trivia
+import Crypto
 
 # Global variable to keep track of the subprocess
 script_process = None
@@ -53,16 +57,7 @@ conn = psycopg2.connect(
 cursor = conn.cursor()
 
 
-def load_trivia_data():
-    cursor.execute("SELECT * FROM questions")  # Получаем все записи из таблицы
-    data = cursor.fetchall()
-    trivia = []
 
-    for row in data:
-        question, corr_answer = row
-        trivia.append({'question': question, 'correct_answer': corr_answer})
-
-    return trivia
 
 
 def load_data():
@@ -89,6 +84,12 @@ def load_data():
                 else:
                     last_used = column_value
                 player_dict['last_used'] = last_used
+            elif column_name == 'last_vor':
+                if column_value is None:
+                    last_used = datetime.min.replace(tzinfo=timezone.utc)
+                else:
+                    last_used = column_value
+                player_dict['last_vor'] = last_used
             elif column_name == 'characteristics':
                 # Convert the characteristics dictionary to a JSON string.
                 characteristics = json.dumps(column_value)
@@ -337,32 +338,10 @@ def torgovec(message):
         time.sleep(5)
 
 
-# proshaem_yuru = [
-#     'Юра, поздравляю!',
-#     'Ты прошёл все испытания, какими сложными они бы не были',
-#     'Когда рухнули акции...',
-#     'Когда ласково называли "хохликом"...',
-#     'Когда шутили про бабулю...',
-#     'Ты не сдался!',
-#     'В честь этого рыночная цена Обуховской туалетной бумаги взлетает до 75 BTC за штуку',
-#     'А так же, на некоторое время изменения цены Обуховской туалетной бумаги будут варьироваться от -7% до +14%',
-# ]
-# @bot.message_handler(commands=['podarok'])
-# def torgovec(message):
-#     for line in proshaem_yuru:
-#         bot.send_message(message.chat.id, line)
-#         time.sleep(2)
-
 
 @bot.message_handler(commands=['misha'])
-def misha(message):
-    bot.send_message(message.chat.id, 'Миша!')
-    time.sleep(3)
-    bot.send_message(message.chat.id, 'Миша привет!')
-    time.sleep(3)
-    bot.send_message(message.chat.id,
-                     'Мммииишааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааааа')
-
+def misha_wrapper(message):
+    rofl.misha(message, bot, time)
 
 @bot.message_handler(commands=['sho_tam_novogo'])
 def get_recent_messages(message):
@@ -436,6 +415,7 @@ def process_name_step(message):
         'player_stocks': [],
         'statuetki': [],
         'last_used': datetime.min.replace(tzinfo=timezone.utc),
+        'last_vor': datetime.min.replace(tzinfo=timezone.utc),
         'last_prezervativ': datetime.min.replace(tzinfo=timezone.utc),
         'casino_last_used': datetime.min.replace(tzinfo=timezone.utc),
         'casino_usage_count': 0,
@@ -445,9 +425,9 @@ def process_name_step(message):
     # Insert new player into the database
     cursor.execute(
         "INSERT INTO pisunchik_data (player_id, player_name, pisunchik_size, coins, items, characteristics, "
-        "statuetki, last_used, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, "
-        "player_stocks, correct_answers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        (int(player_id), name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, 0, None, False, '{}',
+        "statuetki, last_used, last_vor, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, "
+        "player_stocks, correct_answers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (int(player_id), name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, datetime.min, 0, None, False, '{}',
          0))
     conn.commit()
 
@@ -996,89 +976,6 @@ def show_items(message):
         bot.reply_to(message, "Вы не зарегистрированы как игрок")
 
 
-users_with_trivia_access = []
-
-
-@bot.message_handler(commands=['ya_grazhdanskiy'])
-def introducing_trivia(message):
-    strochki3 = [
-        "Сегодня вы проснулись в мире, пропитанном запахом гари и разрушений.",
-        "Вы были взволнованы, никак не могли понять, как вы оказались здесь.",
-        "Вокруг вас были развалины зданий, разбитые машины и крики отдалённых сражений, которые настойчиво проникали в ваши сновидения.",
-        "Решив выяснить, где вы находитесь, вы начали бродить по руинам, пытаясь вспомнить что-либо о происходящем.",
-        "Ваша одежда была запачкана пылью, а сердце билось так быстро, что вы чувствовали его в ушах.",
-        "Вдыхая запах гари и металла, вы продолжали идти, стараясь не думать о том, что может скрываться за следующим поворотом.",
-        "Внезапно вы услышали чей-то голос.",
-        "\"Эй, вы там! Подойдите сюда!\" - раздался приглушённый крик.",
-        "Вы остановились и оглянулись, пытаясь определить, откуда идет звук.",
-        "И тут вы увидели его - человека, стоящего в тени развалин.",
-        "Он махал вам рукой, приглашая присоединиться.",
-        "Не раздумывая, вы приблизились к нему.",
-        "\"Вы не из военных?\" - спросил он, когда вы оказались рядом.",
-        "Вы покачали головой, слишком ошеломленные, чтобы говорить.",
-        "Он улыбнулся и протянул руку.",
-        "\"Я Джо, я гражданский\" - представился он.",
-        "Вы стали беседовать, обмениваясь рассказами о том, как оказались здесь.",
-        "Джек рассказал вам, что он был гражданским, жившим в этом городе до войны.",
-        "Он рассказал вам о своей семье, о том, как они пытались выжить в этом аду.",
-        "Вы были поражены его силой духа и решимостью.",
-        "Вы стали друзьями, двигаясь вместе сквозь опустошенные улицы.",
-        "Но ваша радость была недолгой.",
-        "Внезапно, когда вы были в самом сердце разрушений, Джек обернулся к вам, его глаза смотрели на вас с неким холодным выражением.",
-        "\"Прости, друг, но мне нужно это сделать,\" - прошептал он, выхватив из-за пояса пистолет.",
-        "Вы не могли поверить своим глазам.",
-        "В мгновение ока все ваше доверие и вера в него исчезли.",
-        "Секунды стали вечностью, когда вы увидели, как он прицеливается прямо в ваше сердце.",
-        "Вы поняли, что это конец.",
-        "В этом мире разрушений и войны, вы были просто еще одной жертвой.",
-        "Пистолет выстрелил, и всё погрузилось в темноту.",
-        "Когда тьма поглотила вас, вы чувствовали, как будто погружаетесь в бездонную пропасть.",
-        "Но вместо того, чтобы погрузиться в вечную тьму, вы почувствовали легкость, словно плыли в невесомости.",
-        "Ваш разум замирал, а мир вокруг вас начал растворяться, словно картина, смывающаяся каплями дождя.",
-        "Когда вы снова открыли глаза, вы осознали, что лежите на кровати",
-        "Но что было настоящим, а что сном?",
-        "Внезапно ваш взгляд упал на фигуру человека, стоящего неподалеку.",
-        "Это был торговец, которого вы видели раньше.",
-        "Он улыбнулся вам, словно зная, что вы его заметили.",
-        "\"Давно не виделись,\" - проговорил торговец, приближаясь к вам.",
-        "\"У меня есть кое-что, что я хочу вам показать.\"",
-        "Ваш разум боролся с этой странной встречей.",
-        "Как это могло быть реальностью после всего, что вы только что пережили?",
-        "Но вы решили следовать за торговцем, ибо что-то в его голосе заставляло вас верить, что он знает ответы на ваши вопросы.",
-        "Когда вы зашли в его повозку он сказал:",
-        "\"Я недавно нашёл сборник вопросов на английском, думаю это будет хорошей мотивацией для вас\"",
-        "\"Я буду задавать вам по 3 вопроса каждый день. Ваша задача правильно ответить на 30 вопросов\"",
-        "\"Как только мои требования будут выполнены я дам вам подарок. Поверьте, он вам понравится\"",
-        "\"Начнём с разминочного вопроса\"",
-        "После этих слов он провалился под землю, как будто его тут никогда и не было",
-    ]
-
-    if message.from_user.id == YURA_ID:
-        if YURA_ID in users_with_trivia_access:
-            bot.send_message(message.chat.id, "Юрка, не балуйся :)")
-            return
-        else:
-            bot.restrict_chat_member(message.chat.id, message.from_user.id,
-                                     until_date=datetime.now() + timedelta(minutes=5), permissions=None)
-            bot.send_message(message.chat.id, "Пользователь Юра забанен на 5 минут пока идёт сюжет ^_^")
-            users_with_trivia_access.append(YURA_ID)
-            for line in strochki3:
-                time.sleep(2)
-                bot.send_message(message.chat.id, line)
-                time.sleep(3)
-
-            time.sleep(2)
-            send_trivia_questions2()
-    else:
-        for line in strochki3:
-            time.sleep(2)
-            bot.send_message(message.chat.id, line)
-            time.sleep(3)
-
-        time.sleep(2)
-        send_trivia_questions2()
-
-
 @bot.message_handler(commands=['statuetki'])
 def show_items(message):
     player_id = str(message.from_user.id)
@@ -1550,297 +1447,29 @@ def update_items(player_id, items, coins):
     conn.commit()
 
 
-def get_furry_images():
-    # Get the URL of the furry image website.
-    image_urls = []
-    for x in range(1, 9):
-        url = "https://imgbin.com/free-png/furry-art/" + str(x)
-        # Make a request to the website.
-        response = requests.get(url)
-
-        # Parse the response.
-        soup = BeautifulSoup(response.content, "html.parser")
-
-        # Find all the image links.
-        for x in range(1, 46):
-            # Find the image link by id
-            image_link = soup.find(id='listimg' + str(x))
-
-            if image_link:
-                # Extract the URL from the 'src' attribute of the 'img' tag
-
-                if 'data-src' in image_link.attrs:
-                    image_url = image_link['data-src']
-                    image_urls.append(image_url)
-
-    return image_urls
-
-
-image_urls2 = get_furry_images()
-print("Loaded")
-
-
 @bot.message_handler(commands=['furrypics'])
-def send_furry_pics(message):
-    random_selection = random.sample(image_urls2, 5)
-    for url in random_selection:
-        if url.endswith(('.jpg', '.jpeg', '.png')):
-            bot.send_photo(chat_id=message.chat.id, photo=url)
-        elif url.endswith(('.gif', '.gifv')):
-            bot.send_animation(chat_id=message.chat.id, animation=url)
-
-
-max_usage_per_day = 3
+def furry_wrapper(message):
+    rofl.send_furry_pics(message, random, bot)
 
 
 @bot.message_handler(commands=['kazik'])
-def kazik(message):
-    for i in range(1, 4):
-        player_id = str(message.from_user.id)
-
-        # Check if the user has exceeded the usage limit for today
-        if player_id in pisunchik:
-            last_usage_time = pisunchik[player_id]['casino_last_used']
-            current_time = datetime.now(timezone.utc)
-
-            # Calculate the time elapsed since the last usage
-            time_elapsed = current_time - last_usage_time
-
-            # If less than 24 hours have passed, and the usage limit is reached, deny access
-            if time_elapsed < timedelta(hours=24) and pisunchik[player_id]['casino_usage_count'] >= max_usage_per_day:
-                bot.send_message(message.chat.id,
-                                 f"Вы достигли лимита использования команды на сегодня.\n Времени осталось: {timedelta(days=1) - time_elapsed}")
-                return
-            elif time_elapsed >= timedelta(hours=24):
-                # If 24 hours have passed since the last usage, reset the usage count
-                pisunchik[player_id]['casino_usage_count'] = 0
-
-        # Update the last usage time and count for the user
-        if player_id not in pisunchik:
-            bot.send_message(message.chat.id, 'Вы не зарегистрированы как игрок')
-            return
-        else:
-            pisunchik[player_id]['casino_last_used'] = datetime.now(timezone.utc)
-            pisunchik[player_id]['casino_usage_count'] += 1
-
-        result = bot.send_dice(message.chat.id, emoji='🎰')
-        if result.dice.value in {1, 22, 43, 64}:
-            time.sleep(4)
-            bot.send_message(message.chat.id, "ДЕКПОТ! Вы получаете 300 BTC!")
-            pisunchik[player_id]['coins'] += 300
-
+def kazik_wrapper(message):
+    main.kazik(message, pisunchik, bot)
     save_data()
 
-
-correct_answer = ''
-api_requests = ['general_knowledge', 'history', 'geography']
-
-
 @bot.message_handler(commands=['trivia'])
-def send_trivia_questions(message):
-    chat_id = message.chat.id
-    global correct_answer
-    number = random.randint(0, len(api_requests) - 1)
-    while True:
-        try:
-            response = requests.get(
-                f'https://the-trivia-api.com/v2/questions?limit=1&categories={api_requests[number]}&difficulties=easy,medium')
-            response_data = response.json()
-            break
-        except:
-            pass
-    question = response_data[0]['question']['text']
-    answer_options = response_data[0]['incorrectAnswers'] + [response_data[0]['correctAnswer']]
-    question = html.unescape(question)
-
-    # Get a funny answer based on the question
-    funny_answer = get_funny_answer(question, answer_options)
-
-    # Replace one of the answer options with the funny answer
-    index_to_replace = random.randint(0, len(answer_options) - 1)
-    answer_options[index_to_replace] = funny_answer
-
-    # Update the correct answer if it was replaced with a funny one
-    if index_to_replace == len(answer_options) - 1:
-        correct_answer = funny_answer
-    else:
-        correct_answer = response_data[0]['correctAnswer']
-
-    # Shuffle the answer options
-    random.shuffle(answer_options)
-
-    # Unescape HTML entities in answer options
-    answer_options = [html.unescape(item) for item in answer_options]
-
-    # Unescape HTML entities in correct answer
-    correct_answer = html.unescape(correct_answer)
-
-    save_question(question, correct_answer)  # Сохраняем вопрос и ответ в базу данных
-
-    markup = types.InlineKeyboardMarkup()
-    for answer in answer_options:
-        button = types.InlineKeyboardButton(text=f"{answer}", callback_data=f"answer_{answer}")
-        markup.add(button)
-    reset_answered_questions()
-    bot.send_message(chat_id, "Внимание вопрос!")
-    bot.send_message(chat_id, question, reply_markup=markup, parse_mode='html')
-
-
-def send_trivia_questions2():
-    global correct_answer
-    chat_id = [-1001294162183, -4087198265]
-    number = random.randint(0, len(api_requests) - 1)
-    while True:
-        try:
-            response = requests.get(
-                f'https://the-trivia-api.com/v2/questions?limit=1&categories={api_requests[number]}&difficulties=easy,medium')
-            response_data = response.json()
-            break
-        except:
-            pass
-    question = response_data[0]['question']['text']
-    answer_options = response_data[0]['incorrectAnswers'] + [response_data[0]['correctAnswer']]
-    question = html.unescape(question)
-
-    # Get a funny answer based on the question
-    funny_answer = get_funny_answer(question, answer_options)
-
-    # Replace one of the answer options with the funny answer
-    index_to_replace = random.randint(0, len(answer_options) - 1)
-    answer_options[index_to_replace] = funny_answer
-
-    # Update the correct answer if it was replaced with a funny one
-    if index_to_replace == len(answer_options) - 1:
-        correct_answer = funny_answer
-    else:
-        correct_answer = response_data[0]['correctAnswer']
-
-    # Shuffle the answer options
-    random.shuffle(answer_options)
-
-    # Unescape HTML entities in answer options
-    answer_options = [html.unescape(item) for item in answer_options]
-
-    # Unescape HTML entities in correct answer
-    correct_answer = html.unescape(correct_answer)
-
-    save_question(question, correct_answer)  # Сохраняем вопрос и ответ в базу данных
-
-    markup = types.InlineKeyboardMarkup()
-    for answer in answer_options:
-        button = types.InlineKeyboardButton(text=f"{answer}", callback_data=f"answer_{answer}")
-        markup.add(button)
-    reset_answered_questions()
-    for chat in chat_id:
-        bot.send_message(chat,
-                         "Внимание вопрос!")
-        bot.send_message(chat,
-                         question,
-                         reply_markup=markup, parse_mode='html')
+def trivia_wrapper(message):
+    trivia.send_trivia_questions(message, random, bot, cursor, conn, headers)
 
 
 @bot.message_handler(commands=['correct_answers'])
-def get_correct_answers(message):
-    trivia = load_trivia_data()
-    bot.send_message(message.chat.id, f'А вот и правильные ответы:')
-    for i in range(0, len(trivia)):
-        question = trivia[-1 - i]['question']
-        answer = trivia[-1 - i]['correct_answer']
-        bot.send_message(message.chat.id, f'Вопрос: {question} \nОтвет: {answer}')
-    bot.send_message(message.chat.id, f'Итого у игроков правильных ответов:')
-    bot.send_message(message.chat.id,
-                     f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
-    bot.send_message(message.chat.id,
-                     f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
-    bot.send_message(message.chat.id,
-                     f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
-    bot.send_message(message.chat.id,
-                     f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
-
-
-def get_correct_answers2():
-    chat_id = [-1001294162183, -4087198265]
-    for chat in chat_id:
-        trivia = load_trivia_data()
-        bot.send_message(chat, f'А вот и правильные ответы:')
-        for i in range(0, len(trivia)):
-            if i >= 3:
-                break
-            question = trivia[-1 - i]['question']
-            answer = trivia[-1 - i]['correct_answer']
-            bot.send_message(chat, f'Вопрос: {question} \nОтвет: {answer}')
-        bot.send_message(chat, f'Итого у игроков правильных ответов:')
-        bot.send_message(chat,
-                         f'{pisunchik[str(MAX_ID)]["player_name"]} : {pisunchik[str(MAX_ID)]["correct_answers"]}')
-        bot.send_message(chat,
-                         f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
-        bot.send_message(chat,
-                         f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
-        bot.send_message(chat,
-                         f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
-        clear_trivia_data()
-
-
-answered_questions = {}  # Keep track of which questions each user has answered
-
-
-def clear_trivia_data():
-    cursor.execute("DELETE FROM questions")
-    conn.commit()
+def correct_answers_wrapper(message):
+    trivia.get_correct_answers(message, bot, pisunchik, cursor)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('answer'))
-def answer_callback(call):
-    global correct_answer
-    user_id = str(call.from_user.id)
-    answer = call.data.split('_')[1]
-
-    # Check if the user has already answered a question today
-    if user_id in answered_questions:
-        bot.send_message(call.message.chat.id, "Вы уже ответили на вопрос сегодня.")
-        return
-
-    if answer == correct_answer:
-        pisunchik[user_id]["correct_answers"] += 1
-
-    # Update the answered questions dictionary
-    answered_questions[user_id] = correct_answer
-
-    bot.send_message(call.message.chat.id, f'Игрок {pisunchik[user_id]["player_name"]} сделал свой выбор...')
-    save_data()
-
-
-# Function to reset answered questions after sending out questions for the day
-def reset_answered_questions():
-    global answered_questions
-    answered_questions = {}
-
-
-def get_funny_answer(question, answer_options):
-    try:
-        data = {
-            "model": "gpt-3.5-turbo",
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You're tasked with generating a funny response to the question provided above, considering the given answers. Your goal is to come up with a witty and humorous response that would make someone chuckle. You must use black and sexist and unethical humor. Remember, your response should stand out and be entertaining. Don't use already existing answers. You must return the funny answer ONLY. Your answer must be one or two or three words long. You mustn't answer given question, just think of funny response to it."
-                },
-                {
-
-                    "role": "user",
-                    "content": f"{question} \n{answer_options}"
-                }
-            ],
-            "temperature": 0.7
-        }
-
-        response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers,
-                                 data=json.dumps(data))
-        response_data = response.json()
-        funny_answer = response_data['choices'][0]['message']['content']
-    except:
-        funny_answer = "Funny moment не будет(("
-    return funny_answer
+def callback_answer(call):
+    trivia.answer_callback(call, bot, pisunchik, cursor, conn)
 
 
 def update_stock_prices():
@@ -2118,45 +1747,18 @@ def prosipaisya(message):
 
 
 @bot.message_handler(commands=['otsos'])
-def otsos(message):
-    chat_id = message.chat.id
-    user_id = str(message.from_user.id)
-
-    # Filter pisunchik to include only users in the current chat and exclude the user who triggered the command
-    local_players = {player_id: data for player_id, data in pisunchik.items() if
-                     bot.get_chat_member(chat_id, int(player_id)).status != 'left' and player_id != user_id}
-
-    markup = types.InlineKeyboardMarkup()
-    for player_id, data in local_players.items():
-        button = types.InlineKeyboardButton(text=f"{data['player_name']}", callback_data=f"otsos_{player_id}")
-        markup.add(button)
-
-    bot.send_message(chat_id,
-                     "Кому отсасываем?",
-                     reply_markup=markup, parse_mode='html')
+def otsos_wrapper(message):
+    rofl.otsos(message,pisunchik, bot)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('otsos'))
-def otsos_callback(call):
-    bot.edit_message_reply_markup(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        reply_markup=None
-    )
-    user_id = int(call.data.split('_')[1])  # Получаем ID пользователя из callback data
-    user_name = pisunchik[str(user_id)]['player_name']
-    bot.send_message(call.message.chat.id, f"Вы отсасываете пользователю {user_name}...")
-    time.sleep(3)
+def otsos_callback_wrapper(call):
+    rofl.otsos_callback(call, bot, pisunchik)
 
-    number = random.randint(1, 2)
-    if number == 1:
-        bot.send_message(call.message.chat.id, f"Вы отсосали пользователю {user_name}. У него член: Встал :)")
-    else:
-        bot.send_message(call.message.chat.id, f"Вы отсосали пользователю {user_name}. У него член: Не встал :(")
 
 
 @bot.message_handler(commands=['vor'])
-def otsos(message):
+def vor(message):
     player_id = str(message.from_user.id)
 
     existing_characteristic = pisunchik[player_id]['characteristics']
@@ -2174,16 +1776,12 @@ def otsos(message):
                     time_elapsed = current_time - last_usage_time
 
                     # If less than 24 hours have passed, and the usage limit is reached, deny access
-                    if time_elapsed < timedelta(days=7) and pisunchik[player_id][
-                        'last_vor'] >= max_usage_per_day:
+                    if time_elapsed < timedelta(days=7):
                         bot.send_message(message.chat.id,
                                          f"Вы достигли лимита использования команды на эту неделю.\n Времени осталось: {timedelta(days=7) - time_elapsed}")
                         return
-                    elif time_elapsed >= timedelta(hours=7):
-                        # If 24 hours have passed since the last usage, reset the usage count
-                        pisunchik[player_id]['last_vor'] = 0
                 exist = True
-                char_name, char_level = char_info.split(":")
+                pisunchik[player_id]['last_vor'] = datetime.now(timezone.utc)
 
                 if player_id == "742272644":
                     markup = types.InlineKeyboardMarkup()
@@ -2220,6 +1818,7 @@ def otsos(message):
                     bot.send_message(message.chat.id,
                                      f"<a href='tg://user?id={message.from_user.id}'>@{message.from_user.username}</a>, у кого крадём член?",
                                      reply_markup=markup, parse_mode='html')
+
                 break
         if not exist:
             bot.send_message(message.chat.id, "У вас нету нужной характеристики для писюничка :(")
@@ -2313,11 +1912,6 @@ def save_data():
     conn.commit()
 
 
-def save_question(question, correct_answer):
-    cursor.execute("INSERT INTO questions VALUES (%s, %s)", (question, correct_answer))
-    conn.commit()
-
-
 # Function to check if a user can use the /pisunchik command
 def can_use_pisunchik():
     while True:
@@ -2376,13 +1970,13 @@ def can_use_pisunchik():
         if curr_time.hour == 18 and curr_time.minute == 0:
             update_stock_prices()
         if curr_time.hour == 11 and curr_time.minute == 0:
-            send_trivia_questions2()
+            trivia.send_trivia_questions2(random, bot, cursor, conn, headers)
         if curr_time.hour == 16 and curr_time.minute == 0:
-            send_trivia_questions2()
+            trivia.send_trivia_questions2(random, bot, cursor, conn, headers)
         if curr_time.hour == 19 and curr_time.minute == 0:
-            send_trivia_questions2()
+            trivia.send_trivia_questions2(random, bot, cursor, conn, headers)
         if curr_time.hour == 22 and curr_time.minute == 0:
-            get_correct_answers2()
+            trivia.get_correct_answers2(bot, pisunchik, cursor)
         # if curr_time.hour == 12 and curr_time.minute == 0:
         #     bot.send_message(-1001294162183,
         #                      "Юра, вам был отправлен подарок. Нажмите /podarok чтобы открыть его...")
@@ -2437,7 +2031,7 @@ def send_to_group_command(message):
 
 @bot.message_handler(func=lambda message: f"Бот," in message.text)
 def bot_answer_wrapper(message):
-    BotAnswer.bot_answer(message, bot, time, dad_jokes)
+    botAnswer.bot_answer(message, bot, time, dad_jokes)
 
 
 # Handler for messages mentioning the bot
