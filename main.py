@@ -15,6 +15,7 @@ from openpyxl import load_workbook
 import re
 from subprocess import Popen, PIPE
 import html
+import BotFunctions.BotAnswer as BotAnswer
 
 # Global variable to keep track of the subprocess
 script_process = None
@@ -2435,39 +2436,8 @@ def send_to_group_command(message):
 
 
 @bot.message_handler(func=lambda message: f"Бот," in message.text)
-def handle_mention(message):
-    # Extract text following the bot's username
-    prompt = message.text.split("Бот,", 1)[1].strip()
-    if prompt == "отшлёпай Юру" or prompt == "отшлёпай юру":
-        bot.send_message(message.chat.id, "Юра отшлёпан :)")
-    elif prompt == "отшлёпай Нику" or prompt == "отшлёпай нику":
-        bot.send_message(message.chat.id, "Ника отшлёпана :)")
-    elif prompt == "отшлёпай Макса" or prompt == "отшлёпай макса" or prompt == "отшлёпай максима" or prompt == "отшлёпай Максима":
-        bot.send_message(message.chat.id, "Макса нельзя шлёпать :(")
-    elif prompt == "что-то жарко стало":
-        bot.send_message(message.chat.id, "Понял, включаю вентилятор 卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐卐...")
-        time.sleep(5)
-        bot.send_message(message.chat.id, "Чёт вентилятор сломался 卐卐卐卐卐卐, из-за грозы наверное ᛋᛋ")
-        time.sleep(5)
-        bot.send_message(message.chat.id, "Достаём инструменты ☭☭☭☭☭, всё починил, можно и поспать ZzzZZzZzZZZ")
-    elif prompt == "расскажи анекдот":
-        dad_jokes(message)
-    elif prompt == "расскажи анекдот про маму Юры":
-        bot.send_message(message.chat.id, "Ну ладно")
-        with open('bezobidno.jpg', 'rb') as photo:
-            time.sleep(1)
-            bot.send_photo(message.chat.id, photo)
-    elif prompt == "расскажи анекдот про маму Богдана":
-        bot.send_message(message.chat.id, "Нет.")
-    elif prompt == "расскажи анекдот про маму Максима" or prompt == "расскажи анекдот про маму Макса" or prompt == "расскажи анекдот про маму максима" or prompt == "расскажи анекдот про маму макса":
-        bot.send_message(message.chat.id, "С радостью :)")
-        time.sleep(3)
-        bot.send_message(message.chat.id,
-                         "Мама Максима попросила его друга Юру помочь с ремонтом ванной. Юра согласился и начал "
-                         "разбираться с трубами.\nВ какой-то момент он спрашивает: — Мама Максима, а у вас есть "
-                         "гаечный ключ?\nНа что мама отвечает:— Нет, Юра, иди нахуй")
-    else:
-        bot.send_message(message.chat.id, "?")
+def bot_answer_wrapper(message):
+    BotAnswer.bot_answer(message, bot, time, dad_jokes)
 
 
 # Handler for messages mentioning the bot
