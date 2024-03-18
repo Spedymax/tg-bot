@@ -1697,7 +1697,7 @@ def send_trivia_questions2():
             break
         except:
             pass
-    question = response_data[0]['question']
+    question = response_data[0]['question']['text']
     answer_options = response_data[0]['incorrectAnswers'] + [response_data[0]['correctAnswer']]
     question = html.unescape(question)
 
