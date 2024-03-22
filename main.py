@@ -1459,7 +1459,7 @@ def kazik_wrapper(message):
 
 @bot.message_handler(commands=['trivia'])
 def trivia_wrapper(message):
-    trivia.send_trivia_questions(message, random, bot, cursor, conn, headers)
+    trivia.send_trivia_questions(message.chat.id, bot, cursor, conn, headers)
 
 
 @bot.message_handler(commands=['correct_answers'])
@@ -1969,14 +1969,11 @@ def can_use_pisunchik():
             update_stock_prices()
         if curr_time.hour == 18 and curr_time.minute == 0:
             update_stock_prices()
-        if curr_time.hour == 11 and curr_time.minute == 0:
-            trivia.send_trivia_questions2(random, bot, cursor, conn, headers)
-        if curr_time.hour == 16 and curr_time.minute == 0:
-            trivia.send_trivia_questions2(random, bot, cursor, conn, headers)
-        if curr_time.hour == 19 and curr_time.minute == 0:
-            trivia.send_trivia_questions2(random, bot, cursor, conn, headers)
+        if curr_time.hour in [9, 16, 19] and curr_time.minute == 41:
+            for chat_id in [-1001294162183]:  # Replace with your chat IDs
+                trivia.send_trivia_questions(chat_id, bot, cursor, conn, headers)
         if curr_time.hour == 22 and curr_time.minute == 0:
-            trivia.get_correct_answers2(bot, pisunchik, cursor)
+            trivia.get_correct_answers2(bot, pisunchik, cursor, conn)
         # if curr_time.hour == 12 and curr_time.minute == 0:
         #     bot.send_message(-1001294162183,
         #                      "Юра, вам был отправлен подарок. Нажмите /podarok чтобы открыть его...")
