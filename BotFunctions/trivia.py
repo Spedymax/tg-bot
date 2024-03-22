@@ -2,8 +2,11 @@ import requests
 import html
 from telebot import types
 import json
+import random
+from datetime import datetime, timedelta, timezone
 
-correct_answer = ''
+API_URL = "https://the-trivia-api.com/v2/questions"
+DIFFICULTIES = ["easy", "medium"]  # You can add "hard" if desired
 api_requests = ['general_knowledge', 'history', 'geography']
 YURA_ID = 742272644
 MAX_ID = 741542965
@@ -12,113 +15,53 @@ NIKA_ID = 1085180226
 VIKA_ID = 1561630034
 
 
-def send_trivia_questions(message, random, bot, cursor, conn, headers):
-    chat_id = message.chat.id
-    global correct_answer
-    number = random.randint(0, len(api_requests) - 1)
-    while True:
-        try:
-            response = requests.get(
-                f'https://the-trivia-api.com/v2/questions?limit=1&categories={api_requests[number]}&difficulties=easy,medium')
-            response_data = response.json()
-            break
-        except:
-            pass
-    question = response_data[0]['question']['text']
-    bot.send_message(MAX_ID, response_data[0]['correctAnswer'])
-    answer_options = response_data[0]['incorrectAnswers'] + [response_data[0]['correctAnswer']]
-    question = html.unescape(question)
+# Function to fetch trivia questions from the API
+def fetch_trivia_questions(num_questions=5, difficulty=None, category=None):
+    params = {"limit": num_questions}
+    if difficulty:
+        params["difficulties"] = difficulty
+    if category:
+        params["categories"] = category
 
-    # Get a funny answer based on the question
-    funny_answer = get_funny_answer(question, answer_options, headers)
-
-    # Replace one of the answer options with the funny answer
-    index_to_replace = random.randint(0, len(answer_options) - 1)
-    answer_options[index_to_replace] = funny_answer
-
-    # Update the correct answer if it was replaced with a funny one
-    if index_to_replace == len(answer_options) - 1:
-        correct_answer = funny_answer
-    else:
-        correct_answer = response_data[0]['correctAnswer']
-
-    # Shuffle the answer options
-    random.shuffle(answer_options)
-
-    # Unescape HTML entities in answer options
-    answer_options = [html.unescape(item) for item in answer_options]
-
-    # Unescape HTML entities in correct answer
-    correct_answer = html.unescape(correct_answer)
-
-    save_question(question, correct_answer, cursor, conn)  # Сохраняем вопрос и ответ в базу данных
-
-    markup = types.InlineKeyboardMarkup()
-    for answer in answer_options:
-        button = types.InlineKeyboardButton(text=f"{answer}", callback_data=f"answer_{answer}")
-        markup.add(button)
-    reset_answered_questions()
-    bot.send_message(chat_id, "Внимание вопрос!")
-    bot.send_message(chat_id, question, reply_markup=markup, parse_mode='html')
+    try:
+        response = requests.get(API_URL, params=params)
+        response.raise_for_status()  # Raise an exception for error status codes
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching trivia questions: {e}")
+        return None
 
 
-def send_trivia_questions2(random, bot, cursor, conn, headers):
-    global correct_answer
-    chat_id = [-1001294162183, -4087198265]
-    number = random.randint(0, len(api_requests) - 1)
-    while True:
-        try:
-            response = requests.get(
-                f'https://the-trivia-api.com/v2/questions?limit=1&categories={api_requests[number]}&difficulties=easy,medium')
-            response_data = response.json()
-            break
-        except:
-            pass
-    question = response_data[0]['question']['text']
-    answer_options = response_data[0]['incorrectAnswers'] + [response_data[0]['correctAnswer']]
-    question = html.unescape(question)
+# Function to send trivia questions to a chat
+def send_trivia_questions(chat_id, bot, cursor, conn, headers):
+    # Fetch multiple questions and store them locally
+    questions_data = fetch_trivia_questions(num_questions=1)  # Fetch 3 questions
+    if not questions_data:
+        bot.send_message(chat_id, "Sorry, there was an error fetching trivia questions.")
+        return
 
-    # Get a funny answer based on the question
-    funny_answer = get_funny_answer(question, answer_options, headers)
+    for question_data in questions_data:
+        question = html.unescape(question_data["question"]["text"])
+        correct_answer = html.unescape(question_data["correctAnswer"])
+        answer_options = [correct_answer] + question_data["incorrectAnswers"]
 
-    # Replace one of the answer options with the funny answer
-    index_to_replace = random.randint(0, len(answer_options) - 1)
-    answer_options[index_to_replace] = funny_answer
+        funny_answer = get_funny_answer(question, answer_options, headers)
+        answer_options.append(funny_answer)
 
-    # Update the correct answer if it was replaced with a funny one
-    if index_to_replace == len(answer_options) - 1:
-        correct_answer = funny_answer
-    else:
-        correct_answer = response_data[0]['correctAnswer']
+        random.shuffle(answer_options)
 
-    # Shuffle the answer options
-    random.shuffle(answer_options)
+        save_question_with_options(question, correct_answer, answer_options, cursor, conn)
 
-    # Unescape HTML entities in answer options
-    answer_options = [html.unescape(item) for item in answer_options]
+        markup = types.InlineKeyboardMarkup()
+        for answer in answer_options:
+            button = types.InlineKeyboardButton(text=answer, callback_data=f"answer_{answer}")
+            markup.add(button)
 
-    # Unescape HTML entities in correct answer
-    correct_answer = html.unescape(correct_answer)
-
-    save_question(question, correct_answer, cursor, conn)  # Сохраняем вопрос и ответ в базу данных
-
-    markup = types.InlineKeyboardMarkup()
-    for answer in answer_options:
-        button = types.InlineKeyboardButton(text=f"{answer}", callback_data=f"answer_{answer}")
-        markup.add(button)
-    reset_answered_questions()
-    for chat in chat_id:
-        bot.send_message(chat,
-                         "Внимание вопрос!")
-        bot.send_message(chat,
-                         question,
-                         reply_markup=markup, parse_mode='html')
+        bot.send_message(chat_id, "Внимание вопрос!")
+        bot.send_message(chat_id, question, reply_markup=markup, parse_mode='html')
 
 
-# Function to reset answered questions after sending out questions for the day
-def reset_answered_questions():
-    global answered_questions
-    answered_questions = {}
+
 
 
 def get_funny_answer(question, answer_options, headers):
@@ -148,9 +91,18 @@ def get_funny_answer(question, answer_options, headers):
     return funny_answer
 
 
-def save_question(question, correct_answer, cursor, conn):
-    cursor.execute("INSERT INTO questions VALUES (%s, %s)", (question, correct_answer))
+def save_question_with_options(question, correct_answer, answer_options, cursor, conn):
+    # Convert answer_options to a string representation (e.g., using json.dumps)
+    answer_options_str = json.dumps(answer_options)
+
+    cursor.execute("INSERT INTO questions (question, correct_answer, answer_options) VALUES (%s, %s, %s)",
+                   (question, correct_answer, answer_options_str))
     conn.commit()
+
+
+def has_answered_question(user_id, question, cursor):
+    cursor.execute("SELECT * FROM answered_questions WHERE user_id = %s AND question = %s", (user_id, question))
+    return cursor.fetchone() is not None
 
 
 def get_correct_answers(message, bot, pisunchik, cursor):
@@ -171,8 +123,8 @@ def get_correct_answers(message, bot, pisunchik, cursor):
                      f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
 
 
-def get_correct_answers2(bot, pisunchik, cursor):
-    chat_id = [-1001294162183, -4087198265]
+def get_correct_answers2(bot, pisunchik, cursor, conn):
+    chat_id = [-1001294162183]
     for chat in chat_id:
         trivia = load_trivia_data(cursor)
         bot.send_message(chat, f'А вот и правильные ответы:')
@@ -191,7 +143,7 @@ def get_correct_answers2(bot, pisunchik, cursor):
                          f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
         bot.send_message(chat,
                          f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
-        clear_trivia_data()
+        clear_trivia_data(cursor, conn)
 
 
 answered_questions = {}  # Keep track of which questions each user has answered
@@ -199,6 +151,7 @@ answered_questions = {}  # Keep track of which questions each user has answered
 
 def clear_trivia_data(cursor, conn):
     cursor.execute("DELETE FROM questions")
+    cursor.execute("DELETE FROM answered_questions")
     conn.commit()
 
 
@@ -215,13 +168,20 @@ def load_trivia_data(cursor):
 
 
 def answer_callback(call, bot, pisunchik, cursor, conn):
-    global correct_answer
     user_id = str(call.from_user.id)
     answer = call.data.split('_')[1]
+    question = call.message.text
 
-    # Check if the user has already answered a question today
-    if user_id in answered_questions:
-        bot.send_message(call.message.chat.id, "Вы уже ответили на вопрос сегодня.")
+    cursor.execute("SELECT correct_answer FROM questions WHERE question = %s", (question,))
+    result = cursor.fetchone()
+    if result:
+        correct_answer = result[0]  # Extract the correct answer from the result tuple
+    else:
+        bot.send_message(call.message.chat.id, "Error: Question not found in the database.")
+        return
+
+    if has_answered_question(user_id, question, cursor):
+        bot.send_message(call.message.chat.id, "Вы уже ответили на этот вопрос.")
         return
 
     if answer == correct_answer:
@@ -231,6 +191,8 @@ def answer_callback(call, bot, pisunchik, cursor, conn):
     answered_questions[user_id] = correct_answer
 
     bot.send_message(call.message.chat.id, f'Игрок {pisunchik[user_id]["player_name"]} сделал свой выбор...')
+    cursor.execute("INSERT INTO answered_questions (user_id, question) VALUES (%s, %s)", (user_id, question))
+    conn.commit()
     save_data(cursor, pisunchik, conn)
 
 
