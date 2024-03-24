@@ -161,7 +161,7 @@ def load_trivia_data(cursor):
     trivia = []
 
     for row in data:
-        question, corr_answer = row
+        question, corr_answer, answer_options = row
         trivia.append({'question': question, 'correct_answer': corr_answer})
 
     return trivia

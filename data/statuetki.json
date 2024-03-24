@@ -1,0 +1,16 @@
+{
+  "prices": 
+  {
+    "Pudginio": 50,
+    "Ryadovoi Rudgers": 100,
+    "Polkovnik Buchantos": 150,
+    "General Chin-Choppa": 200
+  },
+  "description":
+  {
+    "Pudginio": "Вы чувстуете огромную силу, которая переполняет ваше тело",
+    "Ryadovoi Rudgers": "Вы чувстуете невероятную ловкость, в ваших руках",
+    "Polkovnik Buchantos": "Вы чувстуете потрясающий интелект в вашей голове",
+    "General Chin-Choppa": "Самая обычная статуэтка :)"
+}
+}
