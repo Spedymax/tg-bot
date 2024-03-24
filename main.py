@@ -7,37 +7,32 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from subprocess import Popen, PIPE
+from telebot.types import LabeledPrice
 
 import psycopg2
 import requests
 import telebot.apihelper
-from openai import OpenAI
-from openpyxl import load_workbook
+
 from telebot import types
 
 import BotFunctions.BotAnswer as botAnswer
 import BotFunctions.Rofl as rofl
 import BotFunctions.main_functions as main
 import BotFunctions.trivia as trivia
-import Crypto
+from BotFunctions.cryptography import client
+
+with open('data/statuetki.json', 'r', encoding='utf-8') as f:
+    statuetki = json.load(f)
+with open('data/shop.json', 'r', encoding='utf-8') as f:
+    shop = json.load(f)
+with open('data/char.json', 'r', encoding='utf-8') as f:
+    char = json.load(f)
+with open('data/plot.json', 'r', encoding='utf-8') as f:
+    plot = json.load(f)
 
 # Global variable to keep track of the subprocess
 script_process = None
 
-encrypted_file = 'encrypted.xlsx'  # Replace with path for the encrypted file
-decrypted_file = 'decrypted.xlsx'  # Replace with path for the decrypted file
-
-Crypto.decrypt_file(encrypted_file, decrypted_file)
-
-workbook = load_workbook(filename='decrypted.xlsx')
-sheet = workbook.active  # Assumes you want the active sheet
-
-# Read the value from cell A1
-a1_value = sheet['A1'].value
-
-client = OpenAI(
-    api_key=f'{a1_value}'
-)
 client.models.list()
 
 headers = {
@@ -55,9 +50,6 @@ conn = psycopg2.connect(
 
 # Create a cursor for executing SQL queries
 cursor = conn.cursor()
-
-
-
 
 
 def load_data():
@@ -124,99 +116,25 @@ BODYA_ID = 855951767
 NIKA_ID = 1085180226
 VIKA_ID = 1561630034
 # List of admin user IDs
-admin_ids = [741542965]
+admin_ids = [MAX_ID]
 # Dictionary to keep track of admin actions
 admin_actions = {}
 
-xarakteristiks = ['Gold', 'Glowing', 'Titan', 'Invisible', 'Big Black', 'Hot']
+xarakteristiks_desc = char['description']
 
-xarakteristiks_desc = {
-    'Gold': 'Ахуеть, у вас теперь золотой член! Ежедневно приносит по 1 BTC. Можно улучшить чтобы увеличить '
-            'количество ежедневной прибыли на 3 BTC',
-    'Glowing': 'У вас член излучает свет!! Пока другие участники ослеплены вы можете каждую неделю незаметно красть у '
-               'другого участника 2 см и прибавлять их себе. Можно улучшить чтобы красть на 2 см больше.',
-    'Titan': 'Теперь ваш член титановый, и пиздец тяжёлый :( Вы угрожаете админу, благодаря этому кулдаун /pisunchik '
-             'уменьшен только для вас на 3%. Можно улучшить чтобы добавить уменьшение кулдауна на 3%',
-    'Invisible': 'Ваш член пропал!!! Вернее он теперь просто невидимый. Балгодаря этой уловке вы можете использовать'
-                 'комманду /roll абсолютно бесплатно с 3% шансом. Никто и не заметит :). Можно улучшить чтобы '
-                 'повысить шанс'
-                 'бесплатного прокрута на 3%',
-    'Big Black': 'Теперь ваш член просто огроменный чёрный хуй. Ваш член не может стать меньше чем 0 см. Можно'
-                 'улучшить чтобы увеличить порог минимального размера писюнчика на 3 см',
-    'Hot': 'У вас просто расскалённая лава между ног. Вы перегреваете магазинный апарат когда подходите к нему,'
-           'так что теперь всё для вас на 5% дешевле. Можно улучшить чтобы получть дополнительные 3% скидки.'
-}
+statuetki_prices = statuetki['prices']
 
-statuetki_prices = {
-    'Pudginio': 50,
-    'Ryadovoi Rudgers': 100,
-    'Polkovnik Buchantos': 150,
-    'General Chin-Choppa': 200
-}
+statuetki_desc = statuetki['description']
 
-statuetki_desc = {
-    'Pudginio': 'Вы чувстуете огромную силу, которая переполняет ваше тело',
-    'Ryadovoi Rudgers': 'Вы чувстуете невероятную ловкость, в ваших руках',
-    'Polkovnik Buchantos': 'Вы чувстуете потрясающий интелект в вашей голове',
-    'General Chin-Choppa': 'Самая обычная статуэтка :)'
-}
+shop_prices = shop['prices']
 
-shop_prices = {
-    'kolczo_na_chlen': 75,
-    'bdsm_kostumchik': 85,
-
-    'kubik_seksa': 30,
-    'prezervativ': 120,
-
-    'krystalnie_ballzzz': 10,
-    'smazka': 100,
-
-    'zelie_pisunchika': 20,
-    'masturbator': 20,
-
-    'pisunchik_potion_small': 10,
-    'pisunchik_potion_medium': 15,
-    'pisunchik_potion_large': 20,
-    'shaurma': 150,
-
-}
-
-item_desc = {
-    'kolczo_na_chlen': '{Пассивка} 20% шанс того что при использовании /pisunchik количество подученного BTC будет'
-                       'удвоено.',
-    'bdsm_kostumchik': '{Пассивка} 10% шанс того что при использовании /pisunchik вы получите +5 см к писюнчику',
-
-    'kubik_seksa': '{Пассивка} "При использовании /roll, стоимость броска на 50 процентов дешевле',
-    'prezervativ': '{Пассивка} Если при использовании /pisunchik выпало отрицалеьное число то писюнчик не '
-                   'уменьшается. КД - 4 дня',
-
-    'krystalnie_ballzzz': '{Активное} Показывает сколько выпадет при использовании /pisunchik в следующий '
-                          'раз\nИспользование: /krystalnie_ballzzz',
-    'smazka': '{Аксивное} Можно использовать /pisunchik еще раз, раз в неделю\nИспользование: /smazka',
-    'poroshochek': '/poroshochek ???',
-    'shaurma': 'Ну молодец купил шаурму и чё дальше? Схавать /shaurma',
-    'diarea': 'Теперь вы не можете кидать гифки смайлика в очках :)))))',
-
-    'zelie_pisunchika': '{Съедобное} Моментально увеличивает писюнчик на 20 или -20 см. Шанс 50 на 50\nИспользование: '
-                        '/zelie_pisunchika',
-    'masturbator': '{Съедобное} Позволяет с честью пожертвовать размером своего писюнчика ради получения BTC. Чем '
-                   'большим размером пожертвовано, тем больше монет выиграно. 1 см = 4 BTC + 5 BTC за каждые 5 '
-                   'см.\nИспользование:'
-                   '/masturbator',
-    'pisunchik_potion_small': '{Съедобное} Моментально увеличивает писюнчик на 3 см\nИспользование: '
-                              '/pisunchik_potion_small',
-    'pisunchik_potion_medium': '{Съедобное} Моментально увеличивает писюнчик на 5 см\nИспользование: '
-                               '/pisunchik_potion_medium',
-    'pisunchik_potion_large': '{Съедобное} Моментально увеличивает писюнчик на 10 см\nИспользование: '
-                              '/pisunchik_potion_large'
-
-}
+item_desc = shop['description']
 
 
 @bot.message_handler(commands=['giveChar'])
 def add_characteristic(message):
     player_id = str(message.from_user.id)
-    characteristic = random.choice(list(xarakteristiks))
+    characteristic = random.choice(list(xarakteristiks_desc.items()))[0]
 
     if player_id in pisunchik:
         existing_characteristic = pisunchik[player_id]['characteristics']
@@ -226,7 +144,7 @@ def add_characteristic(message):
                 # Check if the characteristic is already in the player's characteristics
                 characteristic_name = characteristic.split(":")[0]
                 if any(char.startswith(characteristic_name + ":") for char in existing_characteristic):
-                    characteristic = random.choice(list(xarakteristiks))
+                    characteristic = random.choice(list(xarakteristiks_desc.items()))[0]
                     n += 1
                 else:
                     # Append the characteristic to the player's characteristics with a random level
@@ -249,6 +167,72 @@ def add_characteristic(message):
     save_data()
 
 
+@bot.message_handler(commands=['pay'])
+def pay(message):
+    prices = [LabeledPrice("Test", amount=100)]
+    bot.send_invoice(message.chat.id, '2$', 'Купите 2$ всего за 1$!!! Невероятная акция!', 'two_dollars', '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
+        need_email=True,)
+    bot.send_invoice(message.chat.id, 'Kradoklad nudes', 'ОЧЕНЬ ГОРЯЧИЕ ФОТОЧКИ БОТА!', 'hot_bot',
+                     '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
+                     need_email=True, photo_url='https://i.imgur.com/4WvR9nP.png', photo_height=512,  # !=0/None or picture won't be shown
+                     photo_width=512,
+                     photo_size=512,)
+    bot.send_invoice(message.chat.id, 'BrawlStart Megabox', 'Ты еблан? Мегабоксов уже как год нету в бравлике', 'megabox',
+                     '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
+                     need_email=True, )
+    bot.send_invoice(message.chat.id, 'Shaurma Vkusnaya', 'Шаурма с сулугуні у шаурмиста на космонавтов! Вкуснее и дешевле не бывает', 'shaurma',
+                     '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
+                     need_email=True, )
+    bot.send_invoice(message.chat.id, 'Trent Taunt',
+                     'Насмешка на трента', 'trent',
+                     '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
+                     need_email=True, photo_url='https://i.imgur.com/MNONNqQ.jpeg', photo_height=512,  # !=0/None or picture won't be shown
+                     photo_width=512,
+                     photo_size=512,)
+    bot.send_invoice(message.chat.id, 'Naked BULL Photos UNCENSORED',
+                     'CLICK NOW! WATCH NOW!', 'hot_bull',
+                     '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
+                     need_email=True, photo_url='https://i.imgur.com/RHJczWI.png', photo_height=512,
+                     # !=0/None or picture won't be shown
+                     photo_width=512,
+                     photo_size=512, )
+
+@bot.pre_checkout_query_handler(func=lambda query: True)
+def checkout(pre_checkout_query):
+    bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True,
+                                  error_message="Что-то пошло не так:( Попробуйте ещё раз")
+@bot.message_handler(content_types=['successful_payment'])
+def got_payment(message):
+    player_id = str(message.from_user.id)
+    payload = message.successful_payment.invoice_payload
+    if payload == 'two_dollars':
+        pisunchik[player_id]['coins'] += 2
+        bot.send_message(message.chat.id,
+                         'Ураааааа! Спасибо за оплату! 2 доллара, что равно 0.0000061 BTC уже на вашем балансе:)',
+                         parse_mode='Markdown')
+    elif payload == 'hot_bot':
+        bot.send_message(message.chat.id,
+                         'Ураааааа! Спасибо за оплату! А вот и фоточки:)',
+                         parse_mode='Markdown')
+        bot.send_photo(message.chat.id, 'https://i.imgur.com/3HKy3PM.png', has_spoiler=True)
+    elif payload == 'megabox':
+        bot.send_message(message.chat.id,
+                         'Ураааааа! Спасибо за оплату! Ваш мегабокс уже ждёт вас! Проверяйте!',
+                         parse_mode='Markdown')
+    elif payload == 'shaurma':
+        bot.send_message(message.chat.id,
+                         'Ураааааа! Спасибо за оплату! Ваша шаурма уже в пути, ожидайте ёё в 2034 году :)',
+                         parse_mode='Markdown')
+    elif payload == 'trent':
+        bot.send_message(message.chat.id,
+                         'Ураааааа! Спасибо за оплату! Нашмешка на трента только что была добавлена в ваш инвентарь! Проверяйте!',
+                         parse_mode='Markdown')
+    elif payload == 'hot_bull':
+        bot.send_message(message.chat.id,
+                         'Больной ублюдок',
+                         parse_mode='Markdown')
+        bot.send_photo(message.chat.id, 'https://i.ibb.co/ZgPCLCj/thumbnail-2fb6d148b5a978d62e3a937fae0319af.jpg', has_spoiler=True)
+    save_data()
 @bot.message_handler(commands=['upgrade_char'])
 def upgrade_characteristic(message):
     player_id = str(message.from_user.id)
@@ -321,27 +305,17 @@ def handle_characteristic_upgrade(call):
     save_data()
 
 
-strochki = [
-    'Вы видите вдалеке Торговца с караваном.',
-    'Подходя ближе, вы замечаете, что это статный мужчина в белом пальто с черными, как бездна очками.',
-    'Он подносит руку к голове, снимая огромную шляпу, и делает маленький поклон в вашу сторону:',
-    '"Здравствуйте, путники, приятно видеть живых людей на этом бескрайнем клочке земли"',
-    '"Я побуду здесь некоторое время, переведу дух, а вы пока можете изучить мой товар" *подмигивает*',
-    '"Прошу, не стейсняйтесь" /statuetkiShop',
-]
-
-
 @bot.message_handler(commands=['torgovec'])
 def torgovec(message):
-    for line in strochki:
+    for line in plot['strochki']:
         bot.send_message(message.chat.id, line)
         time.sleep(5)
-
 
 
 @bot.message_handler(commands=['misha'])
 def misha_wrapper(message):
     rofl.misha(message, bot, time)
+
 
 @bot.message_handler(commands=['sho_tam_novogo'])
 def get_recent_messages(message):
@@ -427,7 +401,8 @@ def process_name_step(message):
         "INSERT INTO pisunchik_data (player_id, player_name, pisunchik_size, coins, items, characteristics, "
         "statuetki, last_used, last_vor, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, "
         "player_stocks, correct_answers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        (int(player_id), name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, datetime.min, 0, None, False, '{}',
+        (int(player_id), name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, datetime.min, 0, None,
+         False, '{}',
          0))
     conn.commit()
 
@@ -1020,36 +995,8 @@ def show_items(message):
             pisunchik[player_id]['statuetki'].remove('Ryadovoi Rudgers')
             pisunchik[player_id]['statuetki'].remove('Polkovnik Buchantos')
             pisunchik[player_id]['statuetki'].remove('General Chin-Choppa')
-            strochki2 = [
-                'Вы замечаете что на вас пристально смотрит торговец',
-                '"О, я вижу вы собрали все 4 статуэтки"',
-                '"Насколько я знаю мне нужно сделать вот это", сказал загадочный торговец, копошась в своём рюкзаке',
-                'Он достал из неё маленький флакончик с фиолетовым содержимым.',
-                '"Пожулуйста, покажите ваши статуэтки"',
-                'Вы вынимаете их и раскаладываете на стол.',
-                'Торговец капает фиолетовую жидкость на каждую из статуэток',
-                '"Смотрите внимательнее, сейчас произойдёт нечто", произносит он и отходит на 3 метра назад.',
-                '...',
-                '.....',
-                '"*Ничего не происходит*(кроме того что юра так и не поменял обосранные штаны после шаурмы)"',
-                '"Хммм, что же могло пойти не так, я всё делал по инструкции"',
-                'Вы подходите к стутэткам и осматриваете их со всех сторон, но ничего необычного не замечаете. Только надписи - Капрал, Генерал, которые вы уже видели',
-                'Попробовав расставить их в порядке возрастания ранга, вы замечаете что первая статуэтка начинает мерцать',
-                'Вскоре уже все статуэтки синхронно излучают свет с одинаковой частотой, всё ускоряясь и ускоряясь.',
-                'Вас ослепляет яркий свет и вы лишь краем глаза успеваете заметить как статуэтки сливаються в одну большую золотую статуэтку',
-                'И надпись на небе "ПУДЖИНИО-ФАМОЗА"',
-                'Статуэтка стремительно летит к вам, но под странным углом, как будто-бы она хочет...',
-                'ОНА ОТКУСИЛА ВАМ ЧЛЕН!!!!',
-                'А...',
-                'Совсем не больно...',
-                'Золотая фигура взлетает в небо и начинает вертеться с огромной скоростью',
-                'Опять яркая вспышка!',
-                'Статуэтка пропадает, а ваш член снова на месте.',
-                '*Поздравляю вы разблокировали новую характеристику для вашего члена*',
-                '*Посмотреть какую характеристику вы получили можно испозовав команду /characteristics*',
-            ]
 
-            for line in strochki2:
+            for line in plot['strochki2']:
                 time.sleep(5)
                 bot.send_message(message.chat.id, line)
 
@@ -1457,6 +1404,7 @@ def kazik_wrapper(message):
     main.kazik(message, pisunchik, bot)
     save_data()
 
+
 @bot.message_handler(commands=['trivia'])
 def trivia_wrapper(message):
     trivia.send_trivia_questions(message.chat.id, bot, cursor, conn, headers)
@@ -1748,13 +1696,12 @@ def prosipaisya(message):
 
 @bot.message_handler(commands=['otsos'])
 def otsos_wrapper(message):
-    rofl.otsos(message,pisunchik, bot)
+    rofl.otsos(message, pisunchik, bot)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('otsos'))
 def otsos_callback_wrapper(call):
     rofl.otsos_callback(call, bot, pisunchik)
-
 
 
 @bot.message_handler(commands=['vor'])
@@ -2123,22 +2070,7 @@ def handle_send_to_group_message(message):
             """, (delete_count,))
         conn.commit()
 
-
-# @bot.message_handler(content_types=['animation'])
-# def handle_message(message):
-#     if message.from_user.id == 742272644:
-#         if message.content_type == 'animation':
-#             time.sleep(2)
-#             bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 5 минут)")
-#             time.sleep(2)
-#             bot.send_message(message.chat.id, "Пока-пока 🤓")
-#             time.sleep(2)
-#             bot.restrict_chat_member(message.chat.id, message.from_user.id,
-#                                      until_date=datetime.now() + timedelta(minutes=5), permissions=None)
-
-
 bot.polling()
 # 741542965
-# -4087198265 Багфикс с Никой
 # -1001294162183 Чатик с пацанами
 # -1001857844029 joke chat
