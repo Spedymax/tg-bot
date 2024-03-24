@@ -1916,7 +1916,7 @@ def can_use_pisunchik():
             update_stock_prices()
         if curr_time.hour == 18 and curr_time.minute == 0:
             update_stock_prices()
-        if curr_time.hour in [9, 16, 19] and curr_time.minute == 41:
+        if curr_time.hour in [11, 16, 19] and curr_time.minute == 0:
             for chat_id in [-1001294162183]:  # Replace with your chat IDs
                 trivia.send_trivia_questions(chat_id, bot, cursor, conn, headers)
         if curr_time.hour == 22 and curr_time.minute == 0:
