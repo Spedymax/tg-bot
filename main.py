@@ -167,28 +167,37 @@ def add_characteristic(message):
     save_data()
 
 
+global_message = ''
+
+
 @bot.message_handler(commands=['pay'])
 def pay(message):
+    global global_message
     prices = [LabeledPrice("Test", amount=100)]
-    bot.send_invoice(message.chat.id, '2$', 'Купите 2$ всего за 1$!!! Невероятная акция!', 'two_dollars', '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
-        need_email=True,)
-    bot.send_invoice(message.chat.id, 'Kradoklad nudes', 'ОЧЕНЬ ГОРЯЧИЕ ФОТОЧКИ БОТА!', 'hot_bot',
-                     '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
-                     need_email=True, photo_url='https://i.imgur.com/4WvR9nP.png', photo_height=512,  # !=0/None or picture won't be shown
-                     photo_width=512,
-                     photo_size=512,)
-    bot.send_invoice(message.chat.id, 'BrawlStart Megabox', 'Ты еблан? Мегабоксов уже как год нету в бравлике', 'megabox',
+    bot.send_invoice(message.chat.id, '2$', 'Купите 2$ всего за 1$!!! Невероятная акция!', 'two_dollars',
                      '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
                      need_email=True, )
-    bot.send_invoice(message.chat.id, 'Shaurma Vkusnaya', 'Шаурма с сулугуні у шаурмиста на космонавтов! Вкуснее и дешевле не бывает', 'shaurma',
+    bot.send_invoice(message.chat.id, 'Kradoklad nudes', 'ОЧЕНЬ ГОРЯЧИЕ ФОТОЧКИ БОТА!', 'hot_bot',
+                     '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
+                     need_email=True, photo_url='https://i.imgur.com/4WvR9nP.png', photo_height=512,
+                     # !=0/None or picture won't be shown
+                     photo_width=512,
+                     photo_size=512, )
+    bot.send_invoice(message.chat.id, 'BrawlStart Megabox', 'Ты еблан? Мегабоксов уже как год нету в бравлике',
+                     'megabox',
+                     '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
+                     need_email=True, )
+    bot.send_invoice(message.chat.id, 'Shaurma Vkusnaya',
+                     'Шаурма с сулугуні у шаурмиста на космонавтов! Вкуснее и дешевле не бывает', 'shaurma',
                      '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
                      need_email=True, )
     bot.send_invoice(message.chat.id, 'Trent Taunt',
                      'Насмешка на трента', 'trent',
                      '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
-                     need_email=True, photo_url='https://i.imgur.com/MNONNqQ.jpeg', photo_height=512,  # !=0/None or picture won't be shown
+                     need_email=True, photo_url='https://i.imgur.com/MNONNqQ.jpeg', photo_height=512,
+                     # !=0/None or picture won't be shown
                      photo_width=512,
-                     photo_size=512,)
+                     photo_size=512, )
     bot.send_invoice(message.chat.id, 'Naked BULL Photos UNCENSORED',
                      'CLICK NOW! WATCH NOW!', 'hot_bull',
                      '284685063:TEST:MmNmYjMzMTFmMGMw', 'usd', prices, need_name=True,
@@ -196,43 +205,51 @@ def pay(message):
                      # !=0/None or picture won't be shown
                      photo_width=512,
                      photo_size=512, )
+    global_message = message
+
 
 @bot.pre_checkout_query_handler(func=lambda query: True)
 def checkout(pre_checkout_query):
     bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True,
                                   error_message="Что-то пошло не так:( Попробуйте ещё раз")
+
+
 @bot.message_handler(content_types=['successful_payment'])
 def got_payment(message):
+    global global_message
     player_id = str(message.from_user.id)
     payload = message.successful_payment.invoice_payload
     if payload == 'two_dollars':
         pisunchik[player_id]['coins'] += 2
-        bot.send_message(message.chat.id,
+        bot.send_message(global_message.chat.id,
                          'Ураааааа! Спасибо за оплату! 2 доллара, что равно 0.0000061 BTC уже на вашем балансе:)',
                          parse_mode='Markdown')
     elif payload == 'hot_bot':
-        bot.send_message(message.chat.id,
+        bot.send_message(global_message.chat.id,
                          'Ураааааа! Спасибо за оплату! А вот и фоточки:)',
                          parse_mode='Markdown')
         bot.send_photo(message.chat.id, 'https://i.imgur.com/3HKy3PM.png', has_spoiler=True)
     elif payload == 'megabox':
-        bot.send_message(message.chat.id,
+        bot.send_message(global_message.chat.id,
                          'Ураааааа! Спасибо за оплату! Ваш мегабокс уже ждёт вас! Проверяйте!',
                          parse_mode='Markdown')
     elif payload == 'shaurma':
-        bot.send_message(message.chat.id,
+        bot.send_message(global_message.chat.id,
                          'Ураааааа! Спасибо за оплату! Ваша шаурма уже в пути, ожидайте ёё в 2034 году :)',
                          parse_mode='Markdown')
     elif payload == 'trent':
-        bot.send_message(message.chat.id,
+        bot.send_message(global_message.chat.id,
                          'Ураааааа! Спасибо за оплату! Нашмешка на трента только что была добавлена в ваш инвентарь! Проверяйте!',
                          parse_mode='Markdown')
     elif payload == 'hot_bull':
-        bot.send_message(message.chat.id,
+        bot.send_message(global_message.chat.id,
                          'Больной ублюдок',
                          parse_mode='Markdown')
-        bot.send_photo(message.chat.id, 'https://i.ibb.co/ZgPCLCj/thumbnail-2fb6d148b5a978d62e3a937fae0319af.jpg', has_spoiler=True)
+        bot.send_photo(message.chat.id, 'https://i.ibb.co/ZgPCLCj/thumbnail-2fb6d148b5a978d62e3a937fae0319af.jpg',
+                       has_spoiler=True)
     save_data()
+
+
 @bot.message_handler(commands=['upgrade_char'])
 def upgrade_characteristic(message):
     player_id = str(message.from_user.id)
@@ -371,16 +388,54 @@ def start_game(message):
     else:
         # New player: ask for name and add to database
         bot.reply_to(message, "Добро пожаловать! Напишите ваше имя:")
-        bot.register_next_step_handler(message, process_name_step)
+        bot.register_next_step_handler(message, ask_where_found)
 
 
-def process_name_step(message):
+new_name = ''
+new_user_id = ''
+
+def ask_where_found(message):
+    global new_name
+    global new_user_id
+    new_name = message.text.strip()
+    new_user_id = message.from_user.id
+    bot.send_message(message.chat.id, "Расскажите как вы нашли этого бота?")
+    bot.register_next_step_handler(message, process_approval_step)
+
+
+def process_approval_step(message):
+    how_found = message.text.strip()
+    global new_name
+    bot.send_message(message.chat.id, "Ваш запрос на регистрацию отправлен на рассмотрение. Пожалуйста, подождите одобрения.")
+    bot.send_message(MAX_ID, f"Новый игрок {new_name}, она нашёл бота так: {how_found}")
+    approval_markup = types.InlineKeyboardMarkup()
+    approve_button = types.InlineKeyboardButton(text="Одобрить", callback_data="registration_approve")
+    reject_button = types.InlineKeyboardButton(text="Отклонить", callback_data="registration_reject")
+    approval_markup.row(approve_button, reject_button)
+    bot.send_message(MAX_ID, f"Одобрить его регистрацию?",
+                     reply_markup=approval_markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("registration"))
+def registration_callback(call):
+    global new_user_id
+    call1 = call.data.split("_", 1)  # Split the callback data into action and player
+    call2 = call1[1]
+    global new_name
+    if call2 == "approve":
+        approve_registration(call.message)
+    elif call2 == "reject":
+        bot.send_message(call.message.chat.id, f"Регистрация пользователя {new_name} отклонена.")
+        bot.send_message(new_user_id, f"Регистрация пользователя {new_name} отклонена.")
+        new_name = ''  # Reset new_name variable
+
+def approve_registration(message):
+    global new_user_id
     player_id = str(message.from_user.id)
-    name = message.text.strip()
+
 
     # Add new player to database and initialize data
     pisunchik[player_id] = {
-        'player_name': name,
+        'player_name': new_name,
         'pisunchik_size': 0,
         'coins': 0,
         'correct_answers': 0,
@@ -401,12 +456,12 @@ def process_name_step(message):
         "INSERT INTO pisunchik_data (player_id, player_name, pisunchik_size, coins, items, characteristics, "
         "statuetki, last_used, last_vor, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, "
         "player_stocks, correct_answers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        (int(player_id), name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, datetime.min, 0, None,
+        (int(player_id), new_name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, datetime.min, 0, None,
          False, '{}',
          0))
     conn.commit()
 
-    bot.reply_to(message, f"Приятной игры, {name}! Вы зарегистрированы как новый игрок!")
+    bot.send_message(new_user_id, f"Приятной игры, {new_name}! Вы зарегистрированы как новый игрок!")
     save_data()
 
 
@@ -1884,14 +1939,9 @@ def can_use_pisunchik():
             if time_difference >= timedelta(hours=cooldown):
                 # Update the last_used timestamp in the database
                 if not pisunchik[player]['notified']:
-                    if pisunchik[player]['player_id'] == 1085180226:
-                        bot.send_message(1085180226,
-                                         f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
-                                         parse_mode='html')
-                    else:
-                        bot.send_message(-1001294162183,
-                                         f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
-                                         parse_mode='html')
+                    bot.send_message(-1001294162183,
+                                     f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
+                                     parse_mode='html')
                     pisunchik[player]['notified'] = True
                     save_data()
         curr_time = datetime.now(timezone.utc)
@@ -2069,6 +2119,7 @@ def handle_send_to_group_message(message):
                 )
             """, (delete_count,))
         conn.commit()
+
 
 bot.polling()
 # 741542965
