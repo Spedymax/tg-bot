@@ -394,6 +394,7 @@ def start_game(message):
 new_name = ''
 new_user_id = ''
 
+
 def ask_where_found(message):
     global new_name
     global new_user_id
@@ -406,7 +407,8 @@ def ask_where_found(message):
 def process_approval_step(message):
     how_found = message.text.strip()
     global new_name
-    bot.send_message(message.chat.id, "Ваш запрос на регистрацию отправлен на рассмотрение. Пожалуйста, подождите одобрения.")
+    bot.send_message(message.chat.id,
+                     "Ваш запрос на регистрацию отправлен на рассмотрение. Пожалуйста, подождите одобрения.")
     bot.send_message(MAX_ID, f"Новый игрок {new_name}, она нашёл бота так: {how_found}")
     approval_markup = types.InlineKeyboardMarkup()
     approve_button = types.InlineKeyboardButton(text="Одобрить", callback_data="registration_approve")
@@ -414,6 +416,7 @@ def process_approval_step(message):
     approval_markup.row(approve_button, reject_button)
     bot.send_message(MAX_ID, f"Одобрить его регистрацию?",
                      reply_markup=approval_markup)
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("registration"))
 def registration_callback(call):
@@ -428,10 +431,10 @@ def registration_callback(call):
         bot.send_message(new_user_id, f"Регистрация пользователя {new_name} отклонена.")
         new_name = ''  # Reset new_name variable
 
+
 def approve_registration(message):
     global new_user_id
     player_id = str(message.from_user.id)
-
 
     # Add new player to database and initialize data
     pisunchik[player_id] = {
@@ -456,7 +459,8 @@ def approve_registration(message):
         "INSERT INTO pisunchik_data (player_id, player_name, pisunchik_size, coins, items, characteristics, "
         "statuetki, last_used, last_vor, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, "
         "player_stocks, correct_answers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        (int(player_id), new_name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, datetime.min, 0, None,
+        (int(player_id), new_name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, datetime.min, 0,
+         None,
          False, '{}',
          0))
     conn.commit()
