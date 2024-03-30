@@ -6,8 +6,8 @@ import random
 from datetime import datetime, timedelta, timezone
 
 API_URL = "https://the-trivia-api.com/v2/questions"
-DIFFICULTIES = ["easy", "medium"]  # You can add "hard" if desired
-api_requests = ['general_knowledge', 'history', 'geography']
+DIFFICULTIES = 'easy'
+api_requests = 'general_knowledge, history, geography'
 YURA_ID = 742272644
 MAX_ID = 741542965
 BODYA_ID = 855951767
@@ -17,16 +17,13 @@ VIKA_ID = 1561630034
 
 # Function to fetch trivia questions from the API
 # Revised function to fetch trivia questions and ensure they are not already in the database
-def fetch_trivia_questions(cursor, num_questions=1, difficulty=None, category=None):
+def fetch_trivia_questions(cursor, difficulty, category, num_questions=1):
     fetched_questions = 0
     questions_data = []
 
     while fetched_questions < num_questions:
-        params = {"limit": num_questions - fetched_questions}  # Adjust limit based on needed questions
-        if difficulty:
-            params["difficulties"] = difficulty
-        if category:
-            params["categories"] = category
+        params = {"limit": num_questions - fetched_questions, "difficulties": difficulty,
+                  "categories": category}  # Adjust limit based on needed questions
 
         try:
             response = requests.get(API_URL, params=params)
@@ -54,7 +51,7 @@ def fetch_trivia_questions(cursor, num_questions=1, difficulty=None, category=No
 # Function to send trivia questions to a chat
 def send_trivia_questions(chat_id, bot, cursor, conn, headers):
     # Fetch multiple questions and store them locally
-    questions_data = fetch_trivia_questions(num_questions=1)  # Fetch 3 questions
+    questions_data = fetch_trivia_questions(cursor, difficulty=DIFFICULTIES, category=api_requests)  # Fetch 3 questions
     if not questions_data:
         bot.send_message(chat_id, "Sorry, there was an error fetching trivia questions.")
         return
