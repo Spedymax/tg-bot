@@ -16,20 +16,39 @@ VIKA_ID = 1561630034
 
 
 # Function to fetch trivia questions from the API
-def fetch_trivia_questions(num_questions=5, difficulty=None, category=None):
-    params = {"limit": num_questions}
-    if difficulty:
-        params["difficulties"] = difficulty
-    if category:
-        params["categories"] = category
+# Revised function to fetch trivia questions and ensure they are not already in the database
+def fetch_trivia_questions(cursor, num_questions=1, difficulty=None, category=None):
+    fetched_questions = 0
+    questions_data = []
 
-    try:
-        response = requests.get(API_URL, params=params)
-        response.raise_for_status()  # Raise an exception for error status codes
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching trivia questions: {e}")
-        return None
+    while fetched_questions < num_questions:
+        params = {"limit": num_questions - fetched_questions}  # Adjust limit based on needed questions
+        if difficulty:
+            params["difficulties"] = difficulty
+        if category:
+            params["categories"] = category
+
+        try:
+            response = requests.get(API_URL, params=params)
+            response.raise_for_status()  # Raise an exception for error status codes
+            response_data = response.json()
+
+            for question_data in response_data:
+                question_text = html.unescape(question_data["question"]["text"])
+
+                # Check if question already exists in the database
+                cursor.execute("SELECT 1 FROM questions WHERE question = %s", (question_text,))
+                if cursor.fetchone() is None:  # If question not found in the database, use it
+                    questions_data.append(question_data)
+                    fetched_questions += 1
+                    if fetched_questions >= num_questions:
+                        break  # Exit loop if enough new questions have been found
+
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching trivia questions: {e}")
+            break  # Exit the loop in case of an API error
+
+    return questions_data
 
 
 # Function to send trivia questions to a chat
