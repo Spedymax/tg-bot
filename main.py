@@ -468,6 +468,14 @@ def approve_registration(message):
     bot.send_message(new_user_id, f"Приятной игры, {new_name}! Вы зарегистрированы как новый игрок!")
     save_data()
 
+is_echoing = False
+
+@bot.message_handler(commands=['povtor'])
+def start_echoing(message):
+    global is_echoing
+    is_echoing = True
+    bot.reply_to(message, "Echo mode is ON. Type 'stop' to stop echoing.")
+
 
 @bot.message_handler(commands=['start_love'])
 def start_script(message):
@@ -2074,6 +2082,18 @@ emoji_pattern = re.compile("["
 # Handle user messages for sending a message to the group
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_send_to_group_message(message):
+    global is_echoing
+    # If the flag is True and the message is not 'stop', echo the message.
+    if is_echoing:
+        if message.text.strip().lower() == 'харе':
+            is_echoing = False
+            bot.send_message(message.chat.id, "Повтор выключен")
+        if message.text.strip().lower() == 'я гей':
+            bot.send_message(message.chat.id, "ты гей")
+        if message.text.strip().lower() == 'я пидор':
+            bot.send_message(message.chat.id, "ты пидор")
+        else:
+            bot.send_message(message.chat.id, message.text)
     # Check if the user's message is a reply to the "sendtogroup" command
     if message.reply_to_message and message.reply_to_message.text == ("Please send the message you want to forward to "
                                                                       "the group chat."):
