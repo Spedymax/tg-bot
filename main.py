@@ -2088,9 +2088,9 @@ def handle_send_to_group_message(message):
         if message.text.strip().lower() == 'харе':
             is_echoing = False
             bot.send_message(message.chat.id, "Повтор выключен")
-        if message.text.strip().lower() == 'я гей':
+        elif message.text.strip().lower() == 'я гей':
             bot.send_message(message.chat.id, "ты гей")
-        if message.text.strip().lower() == 'я пидор':
+        elif message.text.strip().lower() == 'я пидор':
             bot.send_message(message.chat.id, "ты пидор")
         else:
             bot.send_message(message.chat.id, message.text)
