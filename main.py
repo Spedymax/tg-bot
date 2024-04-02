@@ -474,7 +474,7 @@ is_echoing = False
 def start_echoing(message):
     global is_echoing
     is_echoing = True
-    bot.reply_to(message, "Echo mode is ON. Type 'stop' to stop echoing.")
+    bot.reply_to(message, "Чё надо?")
 
 
 @bot.message_handler(commands=['start_love'])
