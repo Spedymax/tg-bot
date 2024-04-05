@@ -1970,9 +1970,9 @@ def can_use_pisunchik():
                             pisunchik[player]['coins'] += int(income)
                             bot.send_message(-1001294162183,
                                              f"{pisunchik[player]['player_name']}, ваш золотой член принёс сегодня прибыль в размере {int(income)} BTC")
-        if curr_time.hour in [9, 14, 18] and curr_time.minute == 0:
+        if curr_time.hour in [8, 13, 17] and curr_time.minute == 0:
             update_stock_prices()
-        if curr_time.hour in [11, 16, 19] and curr_time.minute == 0:
+        if curr_time.hour in [10, 15, 18] and curr_time.minute == 0:
             for chat_id in [-1001294162183]:  # Replace with your chat IDs
                 trivia.send_trivia_questions(chat_id, bot, cursor, conn, headers)
         if curr_time.hour == 22 and curr_time.minute == 0:
