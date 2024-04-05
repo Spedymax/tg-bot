@@ -344,11 +344,9 @@ def get_recent_messages(message):
         "messages": [
             {"role": "system",
              "content": "Ты бот анализатор. Тебе будут давать сообщения от пользователей, твоё задание сделать "
-                        "краткую сводку того о чем была речь в этих сообщениях. Разделяй каждую отдельную тему на "
-                        "абзацы"},
-            {"role": "system",
-             "content": "Начинай своё сообщение с: За последние 12 часов речь шла о том что: *и потом перечень того о "
-                        "чём шла речь*"},
+                        "сводку того о чем была речь в этих сообщениях. Ты должен разделять каждую отдельную тему на "
+                        "абзацы. Начинай своё сообщение с: За последние 12 часов речь шла о том что: *и потом "
+                        "перечень того о чём шла речь*"},
             {"role": "user", "content": f"{converted_string}"},
         ],
         "temperature": 0.7
@@ -2131,9 +2129,9 @@ def handle_send_to_group_message(message):
     message_count = cursor.fetchone()[0]
 
     # If message count is greater than 150, delete the oldest ones
-    if message_count > 150:
+    if message_count > 300:
         # Find out how many messages to delete to get back to 150
-        delete_count = message_count - 150
+        delete_count = message_count - 300
         cursor.execute("""
                 DELETE FROM messages 
                 WHERE id IN (
