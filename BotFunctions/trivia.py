@@ -17,7 +17,7 @@ VIKA_ID = 1561630034
 
 # Function to fetch trivia questions from the API
 # Revised function to fetch trivia questions and ensure they are not already in the database
-def fetch_trivia_questions(cursor, difficulty, category, num_questions=1):
+def fetch_trivia_questions(cursor, difficulty, category):
     fetched_questions = 0
     questions_data = []
 
@@ -35,8 +35,11 @@ def fetch_trivia_questions(cursor, difficulty, category, num_questions=1):
 
                 # Check if question already exists in the database
                 cursor.execute("SELECT 1 FROM questions WHERE question = %s", (question_text,))
-                if cursor.fetchone() is not None:
-                        break
+                if cursor.fetchone() is None:
+                    questions_data = response_data
+                    break
+            if cursor.fetchone() is None:
+                break
 
         except requests.exceptions.RequestException as e:
             print(f"Error fetching trivia questions: {e}")
