@@ -6,7 +6,7 @@ import random
 from datetime import datetime, timedelta, timezone
 
 API_URL = "https://the-trivia-api.com/v2/questions"
-DIFFICULTIES = 'easy'
+DIFFICULTIES = 'medium'
 api_requests = 'general_knowledge, history, geography'
 YURA_ID = 742272644
 MAX_ID = 741542965
@@ -21,8 +21,8 @@ def fetch_trivia_questions(cursor, difficulty, category, num_questions=1):
     fetched_questions = 0
     questions_data = []
 
-    while fetched_questions < num_questions:
-        params = {"limit": num_questions - fetched_questions, "difficulties": difficulty,
+    while True:
+        params = {"limit": 1, "difficulties": difficulty,
                   "categories": category}  # Adjust limit based on needed questions
 
         try:
@@ -35,11 +35,8 @@ def fetch_trivia_questions(cursor, difficulty, category, num_questions=1):
 
                 # Check if question already exists in the database
                 cursor.execute("SELECT 1 FROM questions WHERE question = %s", (question_text,))
-                if cursor.fetchone() is None:  # If question not found in the database, use it
-                    questions_data.append(question_data)
-                    fetched_questions += 1
-                    if fetched_questions >= num_questions:
-                        break  # Exit loop if enough new questions have been found
+                if cursor.fetchone() is not None:
+                        break
 
         except requests.exceptions.RequestException as e:
             print(f"Error fetching trivia questions: {e}")
