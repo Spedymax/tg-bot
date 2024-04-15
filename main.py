@@ -465,7 +465,9 @@ def approve_registration(message):
     bot.send_message(new_user_id, f"Приятной игры, {new_name}! Вы зарегистрированы как новый игрок!")
     save_data()
 
+
 is_echoing = False
+
 
 @bot.message_handler(commands=['povtor'])
 def start_echoing(message):
@@ -1478,32 +1480,15 @@ def trivia_wrapper(message):
 def correct_answers_wrapper(message):
     trivia.get_correct_answers(message, bot, pisunchik, cursor)
 
-temp_allin_user_data = {}
-@bot.message_handler(commands=['all_in'])
-def all_in(message):
-    bot.send_message(message.chat.id, 'Специальное предложение только сегодня, поставь любую сумму и проеби её или выиграй 4х, шанс 50/50, поехалииииииии')
-    temp_allin_user_data[message.from_user.id] = {'1': 1}
 
 
-@bot.message_handler(func=lambda message: message.from_user.id in temp_allin_user_data)
-def handle_quantity_selection(message):
-    quantity = message.text
-    if not quantity.isdigit():
-        bot.reply_to(message, "Введи норм число, клоун).")
-        return
-    bot.send_message(message.chat.id, 'Ладно, последний депчик')
-    time.sleep(3)
-    bot.send_message(message.chat.id, '...')
-    time.sleep(4)
-    quantity = int(quantity)
-    user = str(message.from_user.id)
-    random_number = random.randint(0, 1)
-    if random_number == 1:
-        pisunchik[user]['coins'] += quantity*3
+
+@bot.message_handler(commands=['peremoga'])
+def peremoga(message):
+    i = 0
+    while i != 10:
         bot.send_message(message.chat.id, 'ПЕРЕМОГА БУДЕ ЛЮЮЮЮЮЮЮДИИИИИИИИ!!!!!')
-    else:
-        pisunchik[user]['coins'] -= quantity
-        bot.send_message(message.chat.id, 'проебали((')
+        i = i + 1
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('answer'))
