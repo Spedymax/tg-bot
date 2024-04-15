@@ -1486,7 +1486,7 @@ def correct_answers_wrapper(message):
 @bot.message_handler(commands=['peremoga'])
 def peremoga(message):
     i = 0
-    while i != 10:
+    while i != 5:
         bot.send_message(message.chat.id, 'ПЕРЕМОГА БУДЕ ЛЮЮЮЮЮЮЮДИИИИИИИИ!!!!!')
         i = i + 1
 
