@@ -1490,6 +1490,13 @@ def peremoga(message):
         bot.send_message(message.chat.id, 'ПЕРЕМОГА БУДЕ ЛЮЮЮЮЮЮЮДИИИИИИИИ!!!!!')
         i = i + 1
 
+@bot.message_handler(commands=['zrada'])
+def peremoga(message):
+    i = 0
+    while i != 5:
+        bot.send_message(message.chat.id, 'ЗРАДАААА😭😭😭😭')
+        i = i + 1
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('answer'))
 def callback_answer(call):
