@@ -135,8 +135,6 @@ def get_correct_answers(message, bot, pisunchik, cursor):
                      f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
     bot.send_message(message.chat.id,
                      f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
-    bot.send_message(message.chat.id,
-                     f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
 
 
 def get_correct_answers2(bot, pisunchik, cursor, conn):
@@ -157,8 +155,6 @@ def get_correct_answers2(bot, pisunchik, cursor, conn):
                          f'{pisunchik[str(YURA_ID)]["player_name"]} : {pisunchik[str(YURA_ID)]["correct_answers"]}')
         bot.send_message(chat,
                          f'{pisunchik[str(BODYA_ID)]["player_name"]} : {pisunchik[str(BODYA_ID)]["correct_answers"]}')
-        bot.send_message(chat,
-                         f'{pisunchik[str(NIKA_ID)]["player_name"]} : {pisunchik[str(NIKA_ID)]["correct_answers"]}')
         clear_trivia_data(cursor, conn)
 
 
