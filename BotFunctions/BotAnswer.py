@@ -15,6 +15,7 @@ def bot_answer(message, bot, time, dad_jokes):
         "расскажи анекдот про маму Богдана": "Нет.",
         "расскажи анекдот про маму Максима": "Шутка",
         "накажи Богдана": "Наказание",
+        "давай ещё разок": "Наказание2",
     }
 
     # Извлекаем текст после упоминания бота
@@ -32,6 +33,12 @@ def bot_answer(message, bot, time, dad_jokes):
             bot.send_message(message.chat.id, "Отсылаю 9999 каринок фурри в личку Богдану :)")
             for i in range(1, 15):
                 send_furry_pics(random, bot)
+                print(f'Отправлено: {i}')
+        elif prompt == "давай ещё разок":
+            bot.send_message(message.chat.id, "Отсылаю ещё 9999 каринок фурри в личку Богдану :)")
+            for i in range(1, 15):
+                send_furry_pics(random, bot)
+                print(f'Отправлено: {i}')
         elif prompt == "расскажи анекдот про маму Юры":
             bot.send_message(message.chat.id, "Ну ладно")
             with open('bezobidno.jpg', 'rb') as photo:
