@@ -162,7 +162,6 @@ answered_questions = {}  # Keep track of which questions each user has answered
 
 
 def clear_trivia_data(cursor, conn):
-    cursor.execute("DELETE FROM questions")
     cursor.execute("DELETE FROM answered_questions")
     conn.commit()
 
