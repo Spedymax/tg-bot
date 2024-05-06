@@ -7,7 +7,6 @@ import time
 from datetime import datetime, timedelta, timezone
 from subprocess import Popen, PIPE
 from telebot.types import LabeledPrice
-from line_profiler_pycharm import profile
 
 import psycopg2
 import requests
@@ -1499,7 +1498,6 @@ def peremoga(message):
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('answer'))
-@profile
 def callback_answer(call):
     trivia.answer_callback(call, bot, pisunchik, cursor)
 
