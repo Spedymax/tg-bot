@@ -16,7 +16,7 @@ def misha(message, bot, time):
 def get_furry_images():
     # Get the URL of the furry image website.
     image_urls = []
-    for x in range(1, 9):
+    for x in range(1, 3):
         url = "https://imgbin.com/free-png/furry-art/" + str(x)
         # Make a request to the website.
         response = requests.get(url)
@@ -25,7 +25,7 @@ def get_furry_images():
         soup = BeautifulSoup(response.content, "html.parser")
 
         # Find all the image links.
-        for x in range(1, 46):
+        for x in range(1, 10):
             # Find the image link by id
             image_link = soup.find(id='listimg' + str(x))
 
