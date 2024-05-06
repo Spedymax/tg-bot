@@ -3,7 +3,6 @@ import html
 from telebot import types
 import json
 from datetime import datetime, timezone
-from line_profiler_pycharm import profile
 
 API_URL = "https://the-trivia-api.com/v2/questions"
 DIFFICULTY = 'medium'
@@ -18,7 +17,6 @@ PLAYER_IDS = {
 }
 
 
-@profile
 def fetch_trivia_questions(difficulty, categories, cursor, headers):
     while True:
         params = {"limit": 1, "difficulties": difficulty, "categories": categories}
@@ -33,13 +31,11 @@ def fetch_trivia_questions(difficulty, categories, cursor, headers):
             return None
 
 
-@profile
 def is_question_in_database(question, cursor):
     cursor.execute("SELECT 1 FROM questions WHERE question = %s", (question['text'],))
     return cursor.fetchone() is not None
 
 
-@profile
 def send_trivia_questions(chat_id, bot, cursor, conn, headers):
     question_data = fetch_trivia_questions(DIFFICULTY, CATEGORIES, cursor, headers)
     if question_data is None:
@@ -57,7 +53,6 @@ def send_trivia_questions(chat_id, bot, cursor, conn, headers):
     save_question_to_database(question_text, correct_answer, answer_options, cursor, conn)
 
 
-@profile
 def get_funny_answer(question, answer_options, headers):
     try:
         data = {"model": "gpt-3.5-turbo", "messages": [{
@@ -79,7 +74,6 @@ def get_funny_answer(question, answer_options, headers):
         return "No funny answer available."
 
 
-@profile
 def save_question_to_database(question, correct_answer, answer_options, cursor, conn):
     answer_options_str = json.dumps(answer_options)
     current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -89,7 +83,6 @@ def save_question_to_database(question, correct_answer, answer_options, cursor, 
     conn.commit()
 
 
-@profile
 def send_question_with_options(chat_id, bot, question, answer_options):
     markup = types.InlineKeyboardMarkup()
     for answer in answer_options:
@@ -99,13 +92,11 @@ def send_question_with_options(chat_id, bot, question, answer_options):
     bot.send_message(chat_id, question, reply_markup=markup, parse_mode='html')
 
 
-@profile
 def clear_trivia_data(cursor):
     cursor.execute("DELETE FROM answered_questions")
     cursor.connection.commit()
 
 
-@profile
 def load_trivia_data(cursor):
     cursor.execute("SELECT * FROM questions ORDER BY date_added DESC")
     return [{
@@ -115,7 +106,6 @@ def load_trivia_data(cursor):
     } for row in cursor.fetchall()]
 
 
-@profile
 def get_correct_answers(message, bot, pisunchik, cursor):
     trivia = load_trivia_data(cursor)
     chat_id = message.chat.id
@@ -124,12 +114,10 @@ def get_correct_answers(message, bot, pisunchik, cursor):
     display_player_scores(bot, chat_id, pisunchik)
 
 
-@profile
 def send_correct_answers_header(bot, chat_id):
     bot.send_message(chat_id, f'Here are the correct answers for {TODAY}:')
 
 
-@profile
 def display_answers(bot, chat_id, trivia, cursor, pisunchik):
     for trivia_entry in reversed(trivia):  # iterate backwards to show newest first
         question, answer, date = trivia_entry['question'], trivia_entry['correct_answer'], trivia_entry['date_added']
@@ -137,21 +125,18 @@ def display_answers(bot, chat_id, trivia, cursor, pisunchik):
             bot.send_message(chat_id, f'Question: {question} \nAnswer: {answer}\nDate: {date}')
 
 
-@profile
 def display_player_scores(bot, chat_id, pisunchik):
     bot.send_message(chat_id, 'Total correct answers:')
     for player_id, stats in pisunchik.items():
         bot.send_message(chat_id, f'{stats["player_name"]} : {stats["correct_answers"]}')
 
 
-@profile
 def has_answered_question(user_id, question, cursor):
     cursor.execute("SELECT 1 FROM answered_questions WHERE user_id = %s AND question = %s AND date_added = %s",
                    (user_id, question, TODAY))
     return cursor.fetchone() is not None
 
 
-@profile
 def answer_callback(call, bot, player_stats, cursor):
     user_id = str(call.from_user.id)
     answer = call.data.split('_')[1]
@@ -174,7 +159,6 @@ def answer_callback(call, bot, player_stats, cursor):
     save_player_stats(cursor, player_stats)
 
 
-@profile
 def save_player_stats(cursor, player_stats):
     cursor.execute("DELETE FROM pisunchik_data")
     for player_id, stats in player_stats.items():
