@@ -1,9 +1,7 @@
-import requests
-from bs4 import BeautifulSoup
 import random
 
 
-def bot_answer(message, bot, time, dad_jokes):
+def bot_answer(message, bot, time, dad_jokes, image_urls2):
     # Словарь команд и их описаний
     commands = {
         "отшлёпай Юру": "Юра отшлёпан :)",
@@ -32,12 +30,12 @@ def bot_answer(message, bot, time, dad_jokes):
         elif prompt == "накажи Богдана":
             bot.send_message(message.chat.id, "Отсылаю 9999 каринок фурри в личку Богдану :)")
             for i in range(1, 15):
-                send_furry_pics(random, bot)
+                send_furry_pics(random, bot, image_urls2)
                 print(f'Отправлено: {i}')
         elif prompt == "давай ещё разок":
             bot.send_message(message.chat.id, "Отсылаю ещё 9999 каринок фурри в личку Богдану :)")
             for i in range(1, 15):
-                send_furry_pics(random, bot)
+                send_furry_pics(random, bot, image_urls2)
                 print(f'Отправлено: {i}')
         elif prompt == "расскажи анекдот про маму Юры":
             bot.send_message(message.chat.id, "Ну ладно")
@@ -62,34 +60,7 @@ def bot_answer(message, bot, time, dad_jokes):
     else:
         bot.send_message(message.chat.id, "?")
 
-def get_furry_images():
-    # Get the URL of the furry image website.
-    image_urls = []
-    for x in range(1, 18):
-        url = "https://imgbin.com/free-png/furry-art/" + str(x)
-        # Make a request to the website.
-        response = requests.get(url)
-
-        # Parse the response.
-        soup = BeautifulSoup(response.content, "html.parser")
-
-        # Find all the image links.
-        for x in range(1, 46):
-            # Find the image link by id
-            image_link = soup.find(id='listimg' + str(x))
-
-            if image_link:
-                # Extract the URL from the 'src' attribute of the 'img' tag
-
-                if 'data-src' in image_link.attrs:
-                    image_url = image_link['data-src']
-                    image_urls.append(image_url)
-
-    return image_urls
-
-
-image_urls2 = get_furry_images()
-def send_furry_pics(random, bot):
+def send_furry_pics(random, bot, image_urls2):
     random_selection = random.sample(image_urls2, 5)
     for url in random_selection:
         if url.endswith(('.jpg', '.jpeg', '.png')):
