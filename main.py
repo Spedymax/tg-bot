@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from subprocess import Popen, PIPE
 from telebot.types import LabeledPrice
+from line_profiler_pycharm import profile
 
 import psycopg2
 import requests
@@ -1459,10 +1460,10 @@ def update_items(player_id, items, coins):
     cursor.execute(query2, (coins, player_id))
     conn.commit()
 
-
 @bot.message_handler(commands=['furrypics'])
 def furry_wrapper(message):
     rofl.send_furry_pics(message, random, bot)
+
 
 
 @bot.message_handler(commands=['kazik'])
@@ -1488,6 +1489,7 @@ def peremoga(message):
         bot.send_message(message.chat.id, 'ПЕРЕМОГА БУДЕ ЛЮЮЮЮЮЮЮДИИИИИИИИ!!!!!')
         i = i + 1
 
+
 @bot.message_handler(commands=['zrada'])
 def peremoga(message):
     i = 0
@@ -1497,8 +1499,9 @@ def peremoga(message):
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('answer'))
+@profile
 def callback_answer(call):
-    trivia.answer_callback(call, bot, pisunchik, cursor, conn)
+    trivia.answer_callback(call, bot, pisunchik, cursor)
 
 
 def update_stock_prices():
@@ -1574,7 +1577,7 @@ def current_stocks(message):
 
 
 @bot.message_handler(commands=['my_stocks'])
-def myStocks(message):
+def mystocks(message):
     player_id = str(message.from_user.id)
     if player_id in pisunchik:
         stocks_text = "Ваши акции:\n"
@@ -1992,7 +1995,7 @@ def can_use_pisunchik():
             for chat_id in [-1001294162183]:  # Replace with your chat IDs
                 trivia.send_trivia_questions(chat_id, bot, cursor, conn, headers)
         if curr_time.hour == 22 and curr_time.minute == 0:
-            trivia.get_correct_answers2(bot, pisunchik, cursor, conn)
+            trivia.display_correct_answers(bot, pisunchik, cursor, conn)
         # if curr_time.hour == 12 and curr_time.minute == 0:
         #     bot.send_message(-1001294162183,
         #                      "Юра, вам был отправлен подарок. Нажмите /podarok чтобы открыть его...")
@@ -2047,7 +2050,8 @@ def send_to_group_command(message):
 
 @bot.message_handler(func=lambda message: f"Бот," in message.text)
 def bot_answer_wrapper(message):
-    botAnswer.bot_answer(message, bot, time, dad_jokes)
+    image_urls = rofl.get_furry_images()
+    botAnswer.bot_answer(message, bot, time, dad_jokes, image_urls)
 
 
 # Handler for messages mentioning the bot
@@ -2092,67 +2096,71 @@ emoji_pattern = re.compile("["
 # Handle user messages for sending a message to the group
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_send_to_group_message(message):
-    global is_echoing
-    # If the flag is True and the message is not 'stop', echo the message.
-    if is_echoing:
-        if message.text.strip().lower() == 'харе':
-            is_echoing = False
-            bot.send_message(message.chat.id, "Повтор выключен")
-        elif message.text.strip().lower() == 'я гей':
-            bot.send_message(message.chat.id, "ты гей")
-        elif message.text.strip().lower() == 'я пидор':
-            bot.send_message(message.chat.id, "ты пидор")
-        else:
-            bot.send_message(message.chat.id, message.text)
-    # Check if the user's message is a reply to the "sendtogroup" command
-    if message.reply_to_message and message.reply_to_message.text == ("Please send the message you want to forward to "
-                                                                      "the group chat."):
-        # Forward the user's message to the group chat
-        bot.send_message(-1001294162183, message.text)
-        bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
+    try:
+        global is_echoing
+        # If the flag is True and the message is not 'stop', echo the message.
+        if is_echoing:
+            if message.text.strip().lower() == 'харе':
+                is_echoing = False
+                bot.send_message(message.chat.id, "Повтор выключен")
+            elif message.text.strip().lower() == 'я гей':
+                bot.send_message(message.chat.id, "ты гей")
+            elif message.text.strip().lower() == 'я пидор':
+                bot.send_message(message.chat.id, "ты пидор")
+            else:
+                bot.send_message(message.chat.id, message.text)
+        # Check if the user's message is a reply to the "sendtogroup" command
+        if message.reply_to_message and message.reply_to_message.text == ("Please send the message you want to forward to "
+                                                                          "the group chat."):
+            # Forward the user's message to the group chat
+            bot.send_message(-1001294162183, message.text)
+            bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
 
-    if message.reply_to_message and message.reply_to_message.text == ("Please send the message you want to forward to "
-                                                                      "the second group chat."):
-        # Forward the user's message to the group chat
-        bot.send_message(-4087198265, message.text)
-        bot.send_message(message.chat.id, "Your message has been sent to the second group chat.")
-    # if message.from_user.id == 742272644:
-    #     if emoji_pattern.search(message.text):
-    #         bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 15 минут)")
-    #         bot.send_message(message.chat.id, "Пока-пока 🤓")
-    #         time.sleep(2)
-    #         bot.restrict_chat_member(message.chat.id, message.from_user.id,
-    #                                  until_date=datetime.now() + timedelta(minutes=15), permissions=None)
-    user_id = message.from_user.id
-    message_text = message.text
-    timestamp = datetime.fromtimestamp(message.date)
-    name = get_player_name(str(user_id))
+        if message.reply_to_message and message.reply_to_message.text == ("Please send the message you want to forward to "
+                                                                          "the second group chat."):
+            # Forward the user's message to the group chat
+            bot.send_message(-4087198265, message.text)
+            bot.send_message(message.chat.id, "Your message has been sent to the second group chat.")
+        # if message.from_user.id == 742272644:
+        #     if emoji_pattern.search(message.text):
+        #         bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 15 минут)")
+        #         bot.send_message(message.chat.id, "Пока-пока 🤓")
+        #         time.sleep(2)
+        #         bot.restrict_chat_member(message.chat.id, message.from_user.id,
+        #                                  until_date=datetime.now() + timedelta(minutes=15), permissions=None)
+        user_id = message.from_user.id
+        message_text = message.text
+        timestamp = datetime.fromtimestamp(message.date)
+        name = get_player_name(str(user_id))
 
-    # Insert message into the database
-    cursor.execute("INSERT INTO messages (user_id, message_text, timestamp, name) VALUES (%s, %s, %s, %s)",
-                   (user_id, message_text, timestamp, name))
-    conn.commit()
-    some_hours_ago = datetime.utcnow() - timedelta(hours=12)
-    # Delete messages older than 12 hours
-    cursor.execute("DELETE FROM messages WHERE timestamp < %s", (some_hours_ago,))
-    conn.commit()
-    # Check total count of messages
-    cursor.execute("SELECT COUNT(*) FROM messages")
-    message_count = cursor.fetchone()[0]
-
-    # If message count is greater than 150, delete the oldest ones
-    if message_count > 300:
-        # Find out how many messages to delete to get back to 150
-        delete_count = message_count - 300
-        cursor.execute("""
-                DELETE FROM messages 
-                WHERE id IN (
-                    SELECT id FROM messages 
-                    ORDER BY timestamp ASC 
-                    LIMIT %s
-                )
-            """, (delete_count,))
+        # Insert message into the database
+        cursor.execute("INSERT INTO messages (user_id, message_text, timestamp, name) VALUES (%s, %s, %s, %s)",
+                       (user_id, message_text, timestamp, name))
         conn.commit()
+
+        some_hours_ago = datetime.utcnow() - timedelta(hours=12)
+        # Delete messages older than 12 hours
+        cursor.execute("DELETE FROM messages WHERE timestamp < %s", (some_hours_ago,))
+        conn.commit()
+
+        # Check total count of messages
+        cursor.execute("SELECT COUNT(*) FROM messages")
+        result = cursor.fetchone()
+        if result:
+            message_count = result[0]
+            if message_count > 300:
+                delete_count = message_count - 300
+                cursor.execute("""
+                                DELETE FROM messages 
+                                WHERE id IN (
+                                    SELECT id FROM messages 
+                                    ORDER BY timestamp ASC 
+                                    LIMIT %s
+                                )
+                            """, (delete_count,))
+                conn.commit()
+    except psycopg2.DatabaseError as e:
+        print("Database error:", e)
 
 
 bot.polling()
