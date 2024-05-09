@@ -106,9 +106,12 @@ def load_trivia_data(cursor):
     } for row in cursor.fetchall()]
 
 
-def get_correct_answers(message, bot, pisunchik, cursor):
+def get_correct_answers(bot, pisunchik, cursor, message = False,):
     trivia = load_trivia_data(cursor)
-    chat_id = message.chat.id
+    if message is False:
+        chat_id = -1001294162183
+    else:
+        chat_id = message.chat.id
     send_correct_answers_header(bot, chat_id)
     display_answers(bot, chat_id, trivia, cursor, pisunchik)
     display_player_scores(bot, chat_id, pisunchik)
