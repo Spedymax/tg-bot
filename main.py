@@ -467,6 +467,7 @@ def approve_registration(message):
 
 
 is_echoing = False
+otmechai = False
 
 
 @bot.message_handler(commands=['povtor'])
@@ -474,6 +475,16 @@ def start_echoing(message):
     global is_echoing
     is_echoing = True
     bot.reply_to(message, "Чё надо?")
+
+@bot.message_handler(commands=['otmechai'])
+def start_echoing():
+    global otmechai
+    otmechai = True
+
+@bot.message_handler(commands=['ne_otmechai'])
+def start_echoing():
+    global otmechai
+    otmechai = False
 
 
 @bot.message_handler(commands=['start_love'])
@@ -1993,7 +2004,7 @@ def can_use_pisunchik():
             for chat_id in [-1001294162183]:  # Replace with your chat IDs
                 trivia.send_trivia_questions(chat_id, bot, cursor, conn, headers)
         if curr_time.hour == 22 and curr_time.minute == 0:
-            trivia.display_correct_answers(bot, pisunchik, cursor, conn)
+            trivia.get_correct_answers(bot, pisunchik, cursor)
         # if curr_time.hour == 12 and curr_time.minute == 0:
         #     bot.send_message(-1001294162183,
         #                      "Юра, вам был отправлен подарок. Нажмите /podarok чтобы открыть его...")
@@ -2096,7 +2107,11 @@ emoji_pattern = re.compile("["
 def handle_send_to_group_message(message):
     try:
         global is_echoing
+        global otmechai
         # If the flag is True and the message is not 'stop', echo the message.
+        if otmechai:
+            bot.send_message(-1001294162183, f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>")
+
         if is_echoing:
             if message.text.strip().lower() == 'харе':
                 is_echoing = False
