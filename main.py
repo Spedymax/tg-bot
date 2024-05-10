@@ -476,13 +476,15 @@ def start_echoing(message):
     is_echoing = True
     bot.reply_to(message, "Чё надо?")
 
+
 @bot.message_handler(commands=['otmechai'])
-def start_echoing():
+def start_echoing(message):
     global otmechai
     otmechai = True
 
+
 @bot.message_handler(commands=['ne_otmechai'])
-def start_echoing():
+def start_echoing(message):
     global otmechai
     otmechai = False
 
@@ -1470,10 +1472,10 @@ def update_items(player_id, items, coins):
     cursor.execute(query2, (coins, player_id))
     conn.commit()
 
+
 @bot.message_handler(commands=['furrypics'])
 def furry_wrapper(message):
     rofl.send_furry_pics(message, random, bot)
-
 
 
 @bot.message_handler(commands=['kazik'])
@@ -2108,10 +2110,8 @@ def handle_send_to_group_message(message):
     try:
         global is_echoing
         global otmechai
-        # If the flag is True and the message is not 'stop', echo the message.
         if otmechai:
-            bot.send_message(-1001294162183, f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>")
-
+            bot.send_message(-1001294162183, f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>", parse_mode='html')
         if is_echoing:
             if message.text.strip().lower() == 'харе':
                 is_echoing = False
@@ -2123,14 +2123,16 @@ def handle_send_to_group_message(message):
             else:
                 bot.send_message(message.chat.id, message.text)
         # Check if the user's message is a reply to the "sendtogroup" command
-        if message.reply_to_message and message.reply_to_message.text == ("Please send the message you want to forward to "
-                                                                          "the group chat."):
+        if message.reply_to_message and message.reply_to_message.text == (
+        "Please send the message you want to forward to "
+        "the group chat."):
             # Forward the user's message to the group chat
             bot.send_message(-1001294162183, message.text)
             bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
 
-        if message.reply_to_message and message.reply_to_message.text == ("Please send the message you want to forward to "
-                                                                          "the second group chat."):
+        if message.reply_to_message and message.reply_to_message.text == (
+        "Please send the message you want to forward to "
+        "the second group chat."):
             # Forward the user's message to the group chat
             bot.send_message(-4087198265, message.text)
             bot.send_message(message.chat.id, "Your message has been sent to the second group chat.")
