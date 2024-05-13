@@ -16,7 +16,6 @@ PLAYER_IDS = {
     'BODYA': 855951767
 }
 
-
 def fetch_trivia_questions(difficulty, categories, cursor, headers):
     while True:
         params = {"limit": 1, "difficulties": difficulty, "categories": categories}
@@ -24,6 +23,11 @@ def fetch_trivia_questions(difficulty, categories, cursor, headers):
             response = requests.get(API_URL, params=params, headers=headers)
             response.raise_for_status()
             question_data = response.json()[0]
+
+            # Check if the question contains the word "NATO"
+            if "NATO" in question_data['question']:
+                continue
+
             if not is_question_in_database(question_data['question'], cursor):
                 return question_data
         except requests.exceptions.RequestException as e:
