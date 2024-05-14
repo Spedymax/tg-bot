@@ -25,7 +25,7 @@ def fetch_trivia_questions(difficulty, categories, cursor, headers):
             question_data = response.json()[0]
 
             # Check if the question contains the word "NATO"
-            if "NATO" in question_data['question']:
+            if "NATO" in question_data["question"]["text"]:
                 continue
 
             if not is_question_in_database(question_data['question'], cursor):
