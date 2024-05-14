@@ -1,3 +1,5 @@
+import random
+
 import requests
 import html
 from telebot import types
@@ -52,7 +54,8 @@ def send_trivia_questions(chat_id, bot, cursor, conn, headers):
 
     funny_answer = get_funny_answer(question_text, answer_options, headers)
     answer_options.append(funny_answer)
-    answer_options.shuffle()
+    # Shuffle the answer options
+    random.shuffle(answer_options)
     send_question_with_options(chat_id, bot, question_text, answer_options)
 
     save_question_to_database(question_text, correct_answer, answer_options, cursor, conn)
