@@ -2005,7 +2005,7 @@ def can_use_pisunchik():
         if curr_time.hour in [10, 15, 18] and curr_time.minute == 0:
             for chat_id in [-1001294162183]:  # Replace with your chat IDs
                 trivia.send_trivia_questions(chat_id, bot, cursor, conn, headers)
-        if curr_time.hour == 21 and curr_time.minute == 59:
+        if curr_time.hour == 21 and curr_time.minute == 50:
             trivia.get_correct_answers(bot, pisunchik, cursor)
         # if curr_time.hour == 12 and curr_time.minute == 0:
         #     bot.send_message(-1001294162183,
