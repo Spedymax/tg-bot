@@ -1,43 +1,27 @@
 import json
 import os
 import random
-import re
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from subprocess import Popen, PIPE
-from telebot.types import LabeledPrice
 
 import psycopg2
 import requests
 import telebot.apihelper
-
 from telebot import types
+from telebot.types import LabeledPrice
 
 import BotFunctions.BotAnswer as botAnswer
 import BotFunctions.Rofl as rofl
 import BotFunctions.main_functions as main
 import BotFunctions.trivia as trivia
+import BotFunctions.helpers as helper
+import BotFunctions.stocks as stocks
 from BotFunctions.cryptography import client
 
-with open('data/statuetki.json', 'r', encoding='utf-8') as f:
-    statuetki = json.load(f)
-with open('data/shop.json', 'r', encoding='utf-8') as f:
-    shop = json.load(f)
-with open('data/char.json', 'r', encoding='utf-8') as f:
-    char = json.load(f)
-with open('data/plot.json', 'r', encoding='utf-8') as f:
-    plot = json.load(f)
+bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
 
-# Global variable to keep track of the subprocess
-script_process = None
-
-client.models.list()
-
-headers = {
-    'Content-Type': 'application/json',
-    'Authorization': f'Bearer {client.api_key}',
-}
 # Establish a database connection
 conn = psycopg2.connect(
     database="d7c917hcd5cueq",
@@ -50,6 +34,37 @@ conn = psycopg2.connect(
 # Create a cursor for executing SQL queries
 cursor = conn.cursor()
 
+# Global variable to keep track of the subprocess
+script_process = None
+discount = 0
+punchline = ""
+new_name = ''
+new_user_id = ''
+temp_user_data = {}
+temp_user_sell_data = {}
+admin_actions = {}
+global_message = None
+
+def load_json_file(file_path):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+char = load_json_file('data/char.json')
+plot = load_json_file('data/plot.json')
+shop = load_json_file('data/shop.json')
+statuetki = load_json_file('data/statuetki.json')
+
+bot = telebot.TeleBot(bot_token)
+print("Bot started")
+
+# Player IDs
+YURA_ID = 742272644
+MAX_ID = 741542965
+BODYA_ID = 855951767
+NIKA_ID = 1085180226
+VIKA_ID = 1561630034
+# List of admin user IDs
+admin_ids = [MAX_ID]
 
 def load_data():
     cursor.execute("SELECT * FROM pisunchik_data")  # Select all columns
@@ -104,20 +119,14 @@ def load_data():
 # Initialize pisunchik data
 pisunchik = load_data()
 
-bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
-bot = telebot.TeleBot(bot_token)
-print("Bot started")
+client.models.list()
 
-# Player IDs
-YURA_ID = 742272644
-MAX_ID = 741542965
-BODYA_ID = 855951767
-NIKA_ID = 1085180226
-VIKA_ID = 1561630034
-# List of admin user IDs
-admin_ids = [MAX_ID]
+headers = {
+    'Content-Type': 'application/json',
+    'Authorization': f'Bearer {client.api_key}',
+}
+
 # Dictionary to keep track of admin actions
-admin_actions = {}
 
 xarakteristiks_desc = char['description']
 
@@ -166,7 +175,6 @@ def add_characteristic(message):
     save_data()
 
 
-global_message = ''
 
 
 @bot.message_handler(commands=['pay'])
@@ -213,6 +221,7 @@ def checkout(pre_checkout_query):
                                   error_message="Что-то пошло не так:( Попробуйте ещё раз")
 
 
+# noinspection PyUnresolvedReferences
 @bot.message_handler(content_types=['successful_payment'])
 def got_payment(message):
     global global_message
@@ -386,10 +395,6 @@ def start_game(message):
         # New player: ask for name and add to database
         bot.reply_to(message, "Добро пожаловать! Напишите ваше имя:")
         bot.register_next_step_handler(message, ask_where_found)
-
-
-new_name = ''
-new_user_id = ''
 
 
 def ask_where_found(message):
@@ -614,15 +619,13 @@ def admin_panel(message):
 player_name2 = ""
 
 
-def get_player_name(player):
-    global player_name2
-    if player == '741542965':
-        player_name2 = "Максим"
-    elif player == '742272644':
-        player_name2 = "Юра"
-    elif player == '855951767':
-        player_name2 = "Богдан"
-    return player_name2
+def get_player_name(player_id):
+    names = {
+        '741542965': "Максим",
+        '742272644': "Юра",
+        '855951767': "Богдан"
+    }
+    return names.get(player_id, "")
 
 
 # Handle admin panel callbacks
@@ -1193,9 +1196,6 @@ def cancel_purchase(call):
     bot.send_message(call.message.chat.id, "Покупка отменена")
 
 
-discount = 0
-
-
 # Function to display available items in the shop
 def display_shop_items(message):
     player_id = str(message.from_user.id)
@@ -1210,7 +1210,7 @@ def display_shop_items(message):
                 char_name, char_level = char_info.split(":")
                 int_level = int(char_level)
                 discount = 5 + ((int_level - 1) * 3)
-                bot.send_message(-1001294162183, 'Магазинный автомат плавится...')
+                helper.send_message_to_group(bot, 'Магазинный автомат плавится...')
                 time.sleep(3)
                 shop_items = "\n".join(
                     [f"{item}: {int(price * (100 - discount) / 100)} coins" for item, price in shop_prices.items()])
@@ -1514,272 +1514,45 @@ def peremoga(message):
 def callback_answer(call):
     trivia.answer_callback(call, bot, pisunchik, cursor)
 
-
-def update_stock_prices():
-    # Fetch the stock data
-    query = "SELECT company_name, price FROM stocks"
-    cursor.execute(query)
-    stock_data = cursor.fetchall()
-
-    # Store old prices in a dictionary for comparison
-    old_prices = {company: price for company, price in stock_data}
-
-    for company, old_price in old_prices.items():
-        # if company == 'Valve':
-        #     change_percent = random.uniform(-0.2, 0)
-        #     new_price = round(old_price * (1 + change_percent), 2)
-        #
-        #     # Update the new price in the database
-        #     update_query = "UPDATE stocks SET price = %s WHERE company_name = %s"
-        #     cursor.execute(update_query, (new_price, company))
-        # elif company == 'ATB':
-        #     change_percent = random.uniform(0, 0.14)
-        #     new_price = round(old_price * (1 + change_percent), 2)
-        #
-        #     # Update the new price in the database
-        #     update_query = "UPDATE stocks SET price = %s WHERE company_name = %s"
-        #     cursor.execute(update_query, (new_price, company))
-        # else:
-        # Randomly increase or decrease price by up to 10%
-        change_percent = random.uniform(-0.9, 0.9)
-        new_price = round(old_price * (1 + change_percent), 2)
-
-        # Update the new price in the database
-        update_query = "UPDATE stocks SET price = %s WHERE company_name = %s"
-        cursor.execute(update_query, (new_price, company))
-
-    # Fetch updated stock data
-    cursor.execute(query)
-    updated_stock_data = cursor.fetchall()
-
-    # Format the message
-    stock_message = "Акции компаний на данный момент:\n\n"
-    for company, new_price in updated_stock_data:
-        old_price = old_prices[company]
-        change = ((new_price - old_price) / old_price) * 100
-        arrow = '⬆️' if change > 0 else '⬇️'
-        stock_message += f"{company}: {new_price} BTC ({abs(change):.2f}% {arrow})\n"
-
-    # Send the message
-    bot.send_message(-1001294162183, stock_message)
-    bot.send_message(-1001294162183,
-                     "Чтобы купить акции используйте /buy_stocks \nЧтобы посмотреть свои акции используйте /my_stocks. \nЧтобы посмотреть стоимость акций на данный момент используйте /current_stocks")
-
-
 @bot.message_handler(commands=['stocks_update'])
-def stocks_update(message):
-    if message.from_user.id in admin_ids:
-        update_stock_prices()
-    else:
-        bot.send_message(message.chat.id, "Вы не админ((((((((((((")
-
+def stocks_wrapper(message):
+    stocks.stocks_update(message, bot, admin_ids, cursor, helper)
 
 @bot.message_handler(commands=['current_stocks'])
-def current_stocks(message):
-    query = "SELECT * FROM stocks"
-    cursor.execute(query)
-    stock_data = cursor.fetchall()
-    stock_message = "Акции компаний на данный момент:\n\n"
-    for company, price in stock_data:
-        stock_message += f"{company}: {price} BTC\n"
-
-    # Send the message
-    bot.reply_to(message, stock_message)
-
+def current_stocks_wrapper(message):
+    stocks.current_stocks(message, cursor, bot)
 
 @bot.message_handler(commands=['my_stocks'])
-def mystocks(message):
-    player_id = str(message.from_user.id)
-    if player_id in pisunchik:
-        stocks_text = "Ваши акции:\n"
-        existing_stoks = pisunchik[player_id]['player_stocks']
-        for player_stocks in existing_stoks:
-            company_name, quantity = player_stocks.split(":")
-            cursor.execute("SELECT price FROM stocks WHERE company_name = %s", (company_name,))
-            result = cursor.fetchone()
-            if not result:
-                bot.reply_to(message, f"Company {company_name} not found.")
-                return
-            quantity = int(quantity)
-            stock_price = result[0]
-            total_cost = stock_price * quantity
-            stocks_text += f"Компания {company_name}, кол-во акций: {quantity}  \n Цена ваших активов компании {company_name}: {total_cost}\n"
-        bot.reply_to(message, stocks_text)
-    else:
-        bot.reply_to(message, "Вы не зарегистрированы как игрок, используйте /start")
-
-
-temp_user_data = {}
-temp_user_sell_data = {}
-
+def my_stocks_wrapper(message):
+    stocks.my_stocks(message, pisunchik, cursor, bot)
 
 @bot.message_handler(commands=['buy_stocks'])
-def buy_stocks(message):
-    markup = types.InlineKeyboardMarkup()
-    # Assuming you have a list of companies
-    companies = ['ATB', 'Rockstar', 'Google', 'Apple', 'Valve', 'Obuhov toilet paper']
-    for company in companies:
-        markup.add(types.InlineKeyboardButton(company, callback_data=f"buy_stocks_{company}"))
-    bot.send_message(message.chat.id, "Выберите компанию акции которой хотите купить:", reply_markup=markup)
+def buy_stocks_wrapper(message):
+    stocks.buy_stocks(message, bot)
 
+@bot.message_handler(commands=['buy_stocks'])
+def buy_stocks_wrapper(message):
+    stocks.buy_stocks(message, bot)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('buy_stocks_'))
-def handle_company_selection(call):
-    company = call.data.split('_')[2]
-    temp_user_data[call.from_user.id] = {'company': company}
-    msg = f"Сколько акций компании {company} вы хотите купить?"
-    bot.send_message(call.message.chat.id, msg)
-
+def handle_company_selection_wrapper(call):
+    stocks.handle_company_selection(call, bot, temp_user_data)
 
 @bot.message_handler(func=lambda message: message.from_user.id in temp_user_data)
 def handle_quantity_selection(message):
-    global user_id
-    try:
-        quantity = message.text
-        if not quantity.isdigit():
-            bot.reply_to(message, "Введи норм число, клоун).")
-            return
-
-        quantity = int(quantity)
-        user_id = message.from_user.id
-        company = temp_user_data[user_id]['company']
-
-        # Fetch stock price from the database
-        cursor.execute("SELECT price FROM stocks WHERE company_name = %s", (company,))
-        result = cursor.fetchone()
-        if not result:
-            bot.reply_to(message, f"Company {company} not found.")
-            return
-
-        stock_price = result[0]
-        total_cost = stock_price * quantity
-        player_id = str(user_id)
-        # Check if the user has enough coins
-        if pisunchik[player_id]['coins'] < total_cost:
-            bot.reply_to(message, f"Недостаточно BTC для покупки. Надо {total_cost} BTC")
-            return
-
-        # Deduct the total cost from the user's coins
-        pisunchik[player_id]['coins'] -= total_cost
-
-        # Check if user already owns stocks of this company
-        stock_found = False
-        for i, stock in enumerate(pisunchik[player_id]['player_stocks']):
-            if stock.startswith(company):
-                current_quantity = int(stock.split(':')[1])
-                new_quantity = current_quantity + quantity
-                pisunchik[player_id]['player_stocks'][i] = f"{company}:{new_quantity}"
-                stock_found = True
-                break
-
-        if not stock_found:
-            # Add the new stocks to the player's holdings
-            new_stock = f"{company}:{quantity}"
-            pisunchik[player_id]['player_stocks'].append(new_stock)
-
-        # Update the player's data in the database
-        # Example: UPDATE players SET coins = coins - total_cost, player_stocks = new_stock WHERE player_id = user_id
-        cursor.execute("UPDATE pisunchik_data SET coins = %s, player_stocks = %s WHERE player_id = %s",
-                       (pisunchik[player_id]['coins'], pisunchik[player_id]['player_stocks'], user_id))
-        conn.commit()
-
-        # Inform the user
-        bot.reply_to(message, f"Мои поздравления! Вы купили вот столько акций: {quantity}, компании {company}.")
-        save_data()
-    except Exception as e:
-        bot.reply_to(message, f"An error occurred: {str(e)}")
-    finally:
-        # Clear the temporary data
-        if user_id in temp_user_data:
-            del temp_user_data[user_id]
-
+    stocks.handle_quantity_selection(message, bot, cursor, temp_user_data, pisunchik, conn, save_data)
 
 @bot.message_handler(commands=['sell_stocks'])
 def sell_stocks(message):
-    markup = types.InlineKeyboardMarkup()
-    player_id = str(message.from_user.id)
-
-    if player_id not in pisunchik or not pisunchik[player_id]['player_stocks']:
-        bot.send_message(message.chat.id, "Ты бомж, у тебя вообще нету акций.")
-        return
-
-    # List the companies the user has stocks in
-    owned_stocks = set(stock.split(':')[0] for stock in pisunchik[player_id]['player_stocks'])
-    for company in owned_stocks:
-        markup.add(types.InlineKeyboardButton(company, callback_data=f"sell_stocks_{company}"))
-    bot.send_message(message.chat.id, "Выберите свою компанию:", reply_markup=markup)
-
+    stocks.sell_stocks(message, bot, pisunchik)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('sell_stocks_'))
 def handle_sell_company_selection(call):
-    company = call.data.split('_')[2]
-    # Store the selected company in a temporary structure (or user session)
-    temp_user_sell_data[call.from_user.id] = {'company_to_sell': company}
-    msg = f"Сколько акций компании {company} вы хотите продать?"
-    bot.send_message(call.message.chat.id, msg)
-    # Next, the user will send a message with the quantity, which you'll handle in a different function
-
+    stocks.handle_sell_company_selection(call, bot, temp_user_sell_data)
 
 @bot.message_handler(func=lambda message: message.from_user.id in temp_user_sell_data)
 def handle_sell_quantity_selection(message):
-    global user_id
-    try:
-        quantity = message.text
-        if not quantity.isdigit():
-            bot.reply_to(message, "Введи просто число, клоун)")
-            return
-
-        quantity = int(quantity)
-        user_id = message.from_user.id
-        company = temp_user_sell_data[user_id]['company_to_sell']
-        player_id = str(user_id)
-
-        # Check if the user owns enough stocks of the company
-        for i, stock in enumerate(pisunchik[player_id]['player_stocks']):
-            if stock.startswith(company):
-                current_quantity = int(stock.split(':')[1])
-                if quantity > current_quantity:
-                    bot.reply_to(message, f"У вас нет столько акций. У вас {current_quantity} акций.")
-                    return
-
-                # Update the quantity or remove the stock entry if quantity becomes zero
-                if quantity < current_quantity:
-                    new_quantity = current_quantity - quantity
-                    pisunchik[player_id]['player_stocks'][i] = f"{company}:{new_quantity}"
-                else:
-                    pisunchik[player_id]['player_stocks'].pop(i)
-                # Calculate the amount earned from selling the stocks
-                # Fetch current stock price from the database
-                cursor.execute("SELECT price FROM stocks WHERE company_name = %s", (company,))
-                result = cursor.fetchone()
-                if not result:
-                    bot.reply_to(message, f"Company {company} not found.")
-                    return
-                current_price = result[0]
-                total_earned = current_price * quantity
-
-                # Update player's coins
-                pisunchik[player_id]['coins'] += total_earned
-
-                # Update the player's data in the database
-                cursor.execute("UPDATE pisunchik_data SET coins = %s, player_stocks = %s WHERE player_id = %s",
-                               (pisunchik[player_id]['coins'], pisunchik[player_id]['player_stocks'], user_id))
-                conn.commit()
-
-                bot.reply_to(message,
-                             f"Вы успешно продали {quantity} акций компании {company}.\n И вы заработали: {total_earned}")
-                save_data()
-
-                break
-        else:
-            bot.reply_to(message, f"You do not own any stocks of {company}.")
-    except Exception as e:
-        bot.reply_to(message, f"An error occurred: {str(e)}")
-    finally:
-        # Clear the temporary data
-        if user_id in temp_user_sell_data:
-            del temp_user_sell_data[user_id]
-
+    stocks.handle_sell_quantity_selection(message, bot, cursor, temp_user_sell_data, pisunchik, conn, save_data)
 
 @bot.message_handler(commands=['prosipaisya'])
 def prosipaisya(message):
@@ -1901,7 +1674,6 @@ def vor_callback(call):
         bot.send_message(call.message.chat.id, f"Вы украли {vor_number} см у Богдана...")
 
 
-punchline = ""
 
 
 @bot.message_handler(commands=['anekdot'])
@@ -1979,7 +1751,7 @@ def can_use_pisunchik():
             if time_difference >= timedelta(hours=cooldown):
                 # Update the last_used timestamp in the database
                 if not pisunchik[player]['notified']:
-                    bot.send_message(-1001294162183,
+                    helper.send_message_to_group(bot,
                                      f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
                                      parse_mode='html')
                     pisunchik[player]['notified'] = True
@@ -1998,24 +1770,15 @@ def can_use_pisunchik():
                             int_level = int(char_level)
                             income = 2 + ((int_level - 1) * 1.5)
                             pisunchik[player]['coins'] += int(income)
-                            bot.send_message(-1001294162183,
+                            helper.send_message_to_group(bot,
                                              f"{pisunchik[player]['player_name']}, ваш золотой член принёс сегодня прибыль в размере {int(income)} BTC")
         if curr_time.hour in [8, 13, 17] and curr_time.minute == 0:
-            update_stock_prices()
+            stocks.update_stock_prices(cursor, bot, helper)
         if curr_time.hour in [10, 15, 18] and curr_time.minute == 0:
             for chat_id in [-1001294162183]:  # Replace with your chat IDs
                 trivia.send_trivia_questions(chat_id, bot, cursor, conn, headers)
         if curr_time.hour == 21 and curr_time.minute == 50:
             trivia.get_correct_answers(bot, pisunchik, cursor)
-        # if curr_time.hour == 12 and curr_time.minute == 0:
-        #     bot.send_message(-1001294162183,
-        #                      "Юра, вам был отправлен подарок. Нажмите /podarok чтобы открыть его...")
-        # if curr_time.hour == 6 and curr_time.minute == 0:
-        #     for i in range(1, 5):
-        #         bot.send_message(-1001294162183,
-        #                          'Хохлик, просыпайся)')
-        # with open('Napominalka.wav', 'rb') as audio_file:
-        #     bot.send_audio(-1001294162183, audio_file)
         for player in pisunchik:
             existing_characteristic = pisunchik[player]['characteristics']
             # Check if the characteristic is already in the player's characteristics
@@ -2031,7 +1794,7 @@ def can_use_pisunchik():
                         if pisunchik[player]['pisunchik_size'] < min_pisunchik:
                             pisunchik[player]['pisunchik_size'] = min_pisunchik
                             save_data()
-                            bot.send_message(-1001294162183,
+                            helper.send_message_to_group(bot,
                                              f"{player_name}, ваш член менее {min_pisunchik} сантиметров :( Но, не переживайте благодаря вашей Big Black характеристике ваш член снова стал {min_pisunchik} см")
 
         time.sleep(59)  # Sleep for 1 minute (adjust as needed)
@@ -2093,17 +1856,6 @@ def handle_mention(message):
             bot.send_message(message.chat.id, "Нормальное что-то попроси :(")
 
 
-# Regular expression pattern for emojis
-emoji_pattern = re.compile("["
-                           u"\U0001F600-\U0001F64F"  # emoticons
-                           u"\U0001F300-\U0001F5FF"  # symbols & pictographs
-                           u"\U0001F680-\U0001F6FF"  # transport & map symbols
-                           u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-                           u"\U00002702-\U000027B0"
-                           u"\U000024C2-\U0001F251"
-                           "]+", flags=re.UNICODE)
-
-
 # Handle user messages for sending a message to the group
 @bot.message_handler(func=lambda message: True, content_types=['text'])
 def handle_send_to_group_message(message):
@@ -2111,7 +1863,7 @@ def handle_send_to_group_message(message):
         global is_echoing
         global otmechai
         if otmechai:
-            bot.send_message(-1001294162183, f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>", parse_mode='html')
+            helper.send_message_to_group(bot, f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>", parse_mode='html')
         if is_echoing:
             if message.text.strip().lower() == 'харе':
                 is_echoing = False
@@ -2127,22 +1879,8 @@ def handle_send_to_group_message(message):
         "Please send the message you want to forward to "
         "the group chat."):
             # Forward the user's message to the group chat
-            bot.send_message(-1001294162183, message.text)
+            helper.send_message_to_group(bot, message.text)
             bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
-
-        if message.reply_to_message and message.reply_to_message.text == (
-        "Please send the message you want to forward to "
-        "the second group chat."):
-            # Forward the user's message to the group chat
-            bot.send_message(-4087198265, message.text)
-            bot.send_message(message.chat.id, "Your message has been sent to the second group chat.")
-        # if message.from_user.id == 742272644:
-        #     if emoji_pattern.search(message.text):
-        #         bot.send_message(message.chat.id, "Ойой, ты добаловался, наказан на 15 минут)")
-        #         bot.send_message(message.chat.id, "Пока-пока 🤓")
-        #         time.sleep(2)
-        #         bot.restrict_chat_member(message.chat.id, message.from_user.id,
-        #                                  until_date=datetime.now() + timedelta(minutes=15), permissions=None)
         user_id = message.from_user.id
         message_text = message.text
         timestamp = datetime.fromtimestamp(message.date)
@@ -2179,6 +1917,4 @@ def handle_send_to_group_message(message):
 
 
 bot.polling()
-# 741542965
 # -1001294162183 Чатик с пацанами
-# -1001857844029 joke chat

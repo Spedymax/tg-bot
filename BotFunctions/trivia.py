@@ -43,7 +43,8 @@ def is_question_in_database(question, cursor):
 
 
 def send_trivia_questions(chat_id, bot, cursor, conn, headers):
-    question_data = fetch_trivia_questions(DIFFICULTY, CATEGORIES, cursor, headers)
+    category = random.choice(CATEGORIES.split(','))
+    question_data = fetch_trivia_questions(DIFFICULTY, category, cursor, headers)
     if question_data is None:
         bot.send_message(chat_id, "Sorry, there was an error fetching trivia questions.")
         return
