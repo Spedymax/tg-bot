@@ -11,8 +11,8 @@ def update_stock_prices(cursor, bot, helper):
     old_prices = {company: price for company, price in stock_data}
 
     for company, old_price in old_prices.items():
-        change_percent = random.uniform(-0.9, 0.9)
-        new_price = round(old_price * (1 + change_percent), 2)
+        change_percent = random.uniform(0.1, 1.9)
+        new_price = round(old_price * change_percent, 2)
 
         # Update the new price in the database
         update_query = "UPDATE stocks SET price = %s WHERE company_name = %s"
