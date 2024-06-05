@@ -6,9 +6,9 @@ from telebot import types
 import json
 from datetime import datetime, timezone
 
-API_URL = "https://the-trivia-api.com/v2/questions"
+API_URL = "https://api.api-ninjas.com/v1/trivia"
 DIFFICULTY = 'medium'
-CATEGORIES = 'general_knowledge, history, geography'
+CATEGORIES = 'general,entertainment,geography'
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
 # Player IDs
@@ -18,17 +18,14 @@ PLAYER_IDS = {
     'BODYA': 855951767
 }
 
-def fetch_trivia_questions(difficulty, categories, cursor, headers):
+
+def fetch_trivia_questions(categories, cursor, headers):
     while True:
-        params = {"limit": 1, "difficulties": difficulty, "categories": categories}
+        params = {"category": categories}
         try:
             response = requests.get(API_URL, params=params, headers=headers)
             response.raise_for_status()
             question_data = response.json()[0]
-
-            # Check if the question contains the word "NATO"
-            if "NATO" in question_data["question"]["text"]:
-                continue
 
             if not is_question_in_database(question_data['question'], cursor):
                 return question_data
@@ -38,23 +35,28 @@ def fetch_trivia_questions(difficulty, categories, cursor, headers):
 
 
 def is_question_in_database(question, cursor):
-    cursor.execute("SELECT 1 FROM questions WHERE question = %s", (question['text'],))
+    cursor.execute("SELECT 1 FROM questions WHERE question = %s", (question,))
     return cursor.fetchone() is not None
+
+
+headers2 = {
+    "X-Api-Key": "hjvcRr/5dpubsuksJXy8jA==qMIPk0DacEoy2XjI"
+}
 
 
 def send_trivia_questions(chat_id, bot, cursor, conn, headers):
     category = random.choice(CATEGORIES.split(','))
-    question_data = fetch_trivia_questions(DIFFICULTY, category, cursor, headers)
+    question_data = fetch_trivia_questions(category, cursor, headers2)
     if question_data is None:
         bot.send_message(chat_id, "Sorry, there was an error fetching trivia questions.")
         return
 
-    question_text = html.unescape(question_data["question"]["text"])
-    correct_answer = html.unescape(question_data["correctAnswer"])
-    answer_options = [correct_answer] + question_data["incorrectAnswers"]
+    question_text = html.unescape(question_data["question"])
+    correct_answer = html.unescape(question_data["answer"])
 
-    funny_answer = get_funny_answer(question_text, answer_options, headers)
-    answer_options.append(funny_answer)
+    funny_answer = get_funny_answer(question_text, correct_answer, headers)
+    split_answers = funny_answer.split(",")
+    answer_options = [correct_answer, split_answers[0], split_answers[1], split_answers[2]]
     # Shuffle the answer options
     random.shuffle(answer_options)
     send_question_with_options(chat_id, bot, question_text, answer_options)
@@ -66,13 +68,10 @@ def get_funny_answer(question, answer_options, headers):
     try:
         data = {"model": "gpt-3.5-turbo", "messages": [{
             "role": "system",
-            "content": "You're tasked with generating a funny response to the question provided above, "
-                       "considering the given answers. Your goal is to come up with a witty and humorous "
-                       "response that would make someone chuckle. You must use black and sexist and unethical "
-                       "humor. Remember, your response should stand out and be entertaining. Don't use "
-                       "already existing answers. You must return the funny answer ONLY. Your answer must be "
-                       "one or two or three words long. You mustn't answer given question, just think of "
-                       "funny response to it."
+            "content": "You're tasked with generating a wrong responses only to the question provided above, "
+                       "considering the given answer. Your goal is to come up with 3 wrong answers."
+                       "Please separate your response answers with comma. Your answer must look like this: {"
+                       "wrong_answer},{wrong_answer},{wrong_answer}"
         },
             {"role": "user", "content": f"{question} \n{answer_options}"}],
                 "temperature": 0.7}
@@ -115,7 +114,7 @@ def load_trivia_data(cursor):
     } for row in cursor.fetchall()]
 
 
-def get_correct_answers(bot, pisunchik, cursor, message = False,):
+def get_correct_answers(bot, pisunchik, cursor, message=False, ):
     trivia = load_trivia_data(cursor)
     if message is False:
         chat_id = -1001294162183
