@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 API_URL = "https://api.api-ninjas.com/v1/trivia"
 DIFFICULTY = 'medium'
-CATEGORIES = 'general,entertainment,geography'
+CATEGORIES = 'general,entertainment,geography,mathematics,language'
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
 # Player IDs
