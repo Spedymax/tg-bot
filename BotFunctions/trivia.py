@@ -70,8 +70,8 @@ def get_funny_answer(question, answer_options, headers):
             "role": "system",
             "content": "You're tasked with generating a wrong responses only to the question provided above, "
                        "considering the given answer. Your goal is to come up with 3 wrong answers."
-                       "Please separate your response answers with comma. Your answer must look like this: {"
-                       "wrong_answer},{wrong_answer},{wrong_answer}"
+                       "Please separate your response answers with comma. Your answer must look like this: "
+                       "wrong_answer,wrong_answer,wrong_answer"
         },
             {"role": "user", "content": f"{question} \n{answer_options}"}],
                 "temperature": 0.7}
