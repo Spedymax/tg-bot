@@ -45,23 +45,27 @@ headers2 = {
 
 
 def send_trivia_questions(chat_id, bot, cursor, conn, headers):
-    category = random.choice(CATEGORIES.split(','))
-    question_data = fetch_trivia_questions(category, cursor, headers2)
-    if question_data is None:
-        bot.send_message(chat_id, "Sorry, there was an error fetching trivia questions.")
-        return
+    try:
+        category = random.choice(CATEGORIES.split(','))
+        question_data = fetch_trivia_questions(category, cursor, headers2)
+        if question_data is None:
+            bot.send_message(chat_id, "Sorry, there was an error fetching trivia questions.")
+            return
 
-    question_text = html.unescape(question_data["question"])
-    correct_answer = html.unescape(question_data["answer"])
+        question_text = html.unescape(question_data["question"])
+        correct_answer = html.unescape(question_data["answer"])
 
-    funny_answer = get_funny_answer(question_text, correct_answer, headers)
-    split_answers = funny_answer.split(",")
-    answer_options = [correct_answer, split_answers[0], split_answers[1], split_answers[2]]
-    # Shuffle the answer options
-    random.shuffle(answer_options)
-    send_question_with_options(chat_id, bot, question_text, answer_options)
+        funny_answer = get_funny_answer(question_text, correct_answer, headers)
+        split_answers = funny_answer.split(",")
+        answer_options = [correct_answer, split_answers[0], split_answers[1], split_answers[2]]
+        # Shuffle the answer options
+        random.shuffle(answer_options)
+        send_question_with_options(chat_id, bot, question_text, answer_options)
 
-    save_question_to_database(question_text, correct_answer, answer_options, cursor, conn)
+        save_question_to_database(question_text, correct_answer, answer_options, cursor, conn)
+    except Exception:
+        bot.send_message(-1001294162183, 'Error while fetching trivia.')
+
 
 
 def get_funny_answer(question, answer_options, headers):
