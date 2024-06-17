@@ -11,9 +11,11 @@ def update_stock_prices(cursor, bot, helper):
     old_prices = {company: price for company, price in stock_data}
 
     for company, old_price in old_prices.items():
-        # Randomly increase or decrease price by up to 10%
-        change_percent = random.uniform(-0.2, 0.2)
+        # Randomly increase or decrease price by up to 20%
+        change_percent = random.uniform(-0.1, 0.4)
         new_price = round(old_price * (1 + change_percent), 2)
+        if new_price == 0.0:
+            new_price = 1
 
         # Update the new price in the database
         update_query = "UPDATE stocks SET price = %s WHERE company_name = %s"
@@ -27,6 +29,8 @@ def update_stock_prices(cursor, bot, helper):
     stock_message = "Акции компаний на данный момент:\n\n"
     for company, new_price in updated_stock_data:
         old_price = old_prices[company]
+        if old_price == 0.0:
+            old_price = 1
         change = ((new_price - old_price) / old_price) * 100
         arrow = '⬆️' if change > 0 else '⬇️'
         stock_message += f"{company}: {new_price} BTC ({abs(change):.2f}% {arrow})\n"
