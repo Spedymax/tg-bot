@@ -70,7 +70,7 @@ def send_trivia_questions(chat_id, bot, cursor, conn, headers):
 
 def get_funny_answer(question, answer_options, headers):
     try:
-        data = {"model": "gpt-3.5-turbo", "messages": [{
+        data = {"model": "gpt-4o", "messages": [{
             "role": "system",
             "content": "You're tasked with generating a wrong responses only to the question provided above, "
                        "considering the given answer. Your goal is to come up with 3 wrong answers."
