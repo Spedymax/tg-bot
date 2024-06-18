@@ -348,7 +348,7 @@ def get_recent_messages(message):
     cursor.execute("SELECT name, message_text FROM messages")
     converted_string = '\n'.join(f'{name}: {phrase}' for name, phrase in cursor.fetchall())
     data = {
-        "model": "gpt-3.5-turbo",
+        "model": "gpt-4o",
         "messages": [
             {"role": "system",
              "content": "Ты бот анализатор. Тебе будут давать сообщения от пользователей, твоё задание сделать "
@@ -1837,7 +1837,7 @@ def handle_mention(message):
         bot.send_message(message.chat.id, "Подождите, обрабатываю запрос...")
         try:
             data = {
-                "model": "gpt-3.5-turbo",
+                "model": "gpt-4o",
                 "messages": [
                     {
 
