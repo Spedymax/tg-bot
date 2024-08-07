@@ -1491,7 +1491,7 @@ def trivia_wrapper(message):
 
 @bot.message_handler(commands=['correct_answers'])
 def correct_answers_wrapper(message):
-    trivia.get_correct_answers(message, bot, pisunchik, cursor)
+    trivia.get_correct_answers(bot, pisunchik, cursor, message)
 
 
 @bot.message_handler(commands=['peremoga'])
@@ -1770,12 +1770,12 @@ def can_use_pisunchik():
                             int_level = int(char_level)
                             income = 2 + ((int_level - 1) * 1.5)
                             pisunchik[player]['coins'] += int(income)
-                            helper.send_message_to_group(bot,
-                                             f"{pisunchik[player]['player_name']}, ваш золотой член принёс сегодня прибыль в размере {int(income)} BTC")
-        if curr_time.hour in [8, 13, 17] and curr_time.minute == 0:
-            stocks.update_stock_prices(cursor, bot, helper)
+                            # helper.send_message_to_group(bot,
+                            #                  f"{pisunchik[player]['player_name']}, ваш золотой член принёс сегодня прибыль в размере {int(income)} BTC")
+        # if curr_time.hour in [8, 13, 17] and curr_time.minute == 0:
+        #     stocks.update_stock_prices(cursor, bot, helper)
         if curr_time.hour in [10, 15, 18] and curr_time.minute == 0:
-            for chat_id in [-1001294162183]:  # Replace with your chat IDs
+            for chat_id in [-1001294162183]:
                 trivia.send_trivia_questions(chat_id, bot, cursor, conn, headers)
         if curr_time.hour == 21 and curr_time.minute == 50:
             trivia.get_correct_answers(bot, pisunchik, cursor)
