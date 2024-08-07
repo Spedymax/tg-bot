@@ -1,8 +1,8 @@
 import time
 from datetime import datetime, timedelta, timezone
-max_usage_per_day = 3
+max_usage_per_day = 5
 def kazik(message, pisunchik, bot):
-    for i in range(1, 4):
+    for i in range(0, 5):
         player_id = str(message.from_user.id)
 
         # Check if the user has exceeded the usage limit for today

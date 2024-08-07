@@ -18,6 +18,9 @@ PLAYER_IDS = {
     'BODYA': 855951767
 }
 
+question_messages = {}
+original_questions = {}
+
 
 def fetch_trivia_questions(categories, cursor, headers):
     while True:
@@ -60,12 +63,11 @@ def send_trivia_questions(chat_id, bot, cursor, conn, headers):
         answer_options = [correct_answer, split_answers[0], split_answers[1], split_answers[2]]
         # Shuffle the answer options
         random.shuffle(answer_options)
-        send_question_with_options(chat_id, bot, question_text, answer_options)
+        send_question_with_options(chat_id, bot, question_text, answer_options, cursor)
 
         save_question_to_database(question_text, correct_answer, answer_options, cursor, conn)
     except Exception:
         bot.send_message(-1001294162183, 'Error while fetching trivia.')
-
 
 
 def get_funny_answer(question, answer_options, headers):
@@ -95,13 +97,18 @@ def save_question_to_database(question, correct_answer, answer_options, cursor, 
     conn.commit()
 
 
-def send_question_with_options(chat_id, bot, question, answer_options):
+def send_question_with_options(chat_id, bot, question, answer_options, cursor):
     markup = types.InlineKeyboardMarkup()
     for answer in answer_options:
         button = types.InlineKeyboardButton(text=answer, callback_data=f"answer_{answer}")
         markup.add(button)
-    bot.send_message(chat_id, "Внимание вопрос!", parse_mode='html')
-    bot.send_message(chat_id, question, reply_markup=markup, parse_mode='html')
+
+    msg = bot.send_message(chat_id, "Внимание вопрос!", parse_mode='html')
+    question_msg = bot.send_message(chat_id, question, reply_markup=markup, parse_mode='html')
+
+    # Сохранение оригинального вопроса и пустых ответов в базу данных
+    question_messages[question_msg.message_id] = {"text": question, "players_responses": {}}
+    save_question_state(question_msg.message_id, question, {}, cursor)
 
 
 def clear_trivia_data(cursor):
@@ -118,7 +125,25 @@ def load_trivia_data(cursor):
     } for row in cursor.fetchall()]
 
 
-def get_correct_answers(bot, pisunchik, cursor, message=False, ):
+def save_question_state(message_id, question, players_responses, cursor):
+    cursor.execute("""
+        INSERT INTO question_state (message_id, original_question, players_responses)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (message_id) DO UPDATE 
+        SET players_responses = EXCLUDED.players_responses
+    """, (message_id, question, json.dumps(players_responses)))  # Здесь мы сохраняем players_responses как JSON строку
+    cursor.connection.commit()
+
+
+def load_question_state(cursor):
+    cursor.execute("SELECT message_id, original_question, players_responses FROM question_state")
+    question_states = cursor.fetchall()
+    # Мы предполагаем, что players_responses в базе данных хранится как строка, поэтому применяем json.loads()
+    return {row[0]: {"text": row[1], "players_responses": json.loads(row[2])} for row in question_states if
+            isinstance(row[2], str)}
+
+
+def get_correct_answers(bot, pisunchik, cursor, message=False):
     trivia = load_trivia_data(cursor)
     if message is False:
         chat_id = -1001294162183
@@ -154,24 +179,61 @@ def has_answered_question(user_id, question, cursor):
 
 def answer_callback(call, bot, player_stats, cursor):
     user_id = str(call.from_user.id)
+    player_name = player_stats[user_id]["player_name"]
     answer = call.data.split('_')[1]
-    cursor.execute("SELECT correct_answer FROM questions WHERE question = %s", (call.message.text,))
+    question_id = call.message.message_id
+
+    cursor.execute("SELECT original_question, players_responses FROM question_state WHERE message_id = %s",
+                   (question_id,))
     result = cursor.fetchone()
+
+    if not result:
+        bot.send_message(call.message.chat.id, "Error: Original question not found.")
+        return
+
+    original_question, players_responses = result[0], result[1]
+
+    # Проверяем, является ли players_responses уже словарем или нужно преобразовать из строки JSON
+    if isinstance(players_responses, str):
+        players_responses = json.loads(players_responses)
+
+    cursor.execute("SELECT correct_answer FROM questions WHERE question = %s", (original_question,))
+    result = cursor.fetchone()
+
     if not result:
         bot.send_message(call.message.chat.id, "Error: Question not found in the database.")
         return
-    if has_answered_question(user_id, call.message.text, cursor):
+
+    if has_answered_question(user_id, original_question, cursor):
         bot.send_message(call.message.chat.id, "Ты уже ответил.")
         return
-    if answer == result[0]:
+
+    correct_answer = result[0]
+
+    if answer == correct_answer:
         player_stats[user_id]["correct_answers"] += 1
-        bot.send_message(call.message.chat.id, f'{player_stats[user_id]["player_name"]} угадал(лаки)')
+        emoji = "✅"
     else:
-        bot.send_message(call.message.chat.id, f'{player_stats[user_id]["player_name"]} ошибся(анлак)')
+        emoji = "❌"
+
+    players_responses[player_name] = emoji
+
+    updated_text = original_question + "\n\n" + \
+                   "\n".join([f"{player} {response}" for player, response in players_responses.items()])
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=question_id, text=updated_text,
+                          reply_markup=call.message.reply_markup, parse_mode='html')
+
+    save_question_state(question_id, original_question, players_responses, cursor)
+
     cursor.execute("INSERT INTO answered_questions (user_id, question, date_added) VALUES (%s, %s, %s)",
-                   (user_id, call.message.text, TODAY))
+                   (user_id, original_question, TODAY))
     cursor.connection.commit()
     save_player_stats(cursor, player_stats)
+
+
+def load_all_questions_state(cursor):
+    global question_messages
+    question_messages = load_question_state(cursor)
 
 
 def save_player_stats(cursor, player_stats):
