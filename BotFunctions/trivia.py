@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 API_URL = "https://api.api-ninjas.com/v1/trivia"
 DIFFICULTY = 'medium'
-CATEGORIES = 'general,entertainment,geography,mathematics,language'
+CATEGORIES = 'general,entertainment,geography,mathematics,sciencenature,fooddrink,peopleplaces'
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
 # Player IDs
@@ -76,7 +76,9 @@ def get_funny_answer(question, answer_options, headers):
             "role": "system",
             "content": "You're tasked with generating a wrong responses only to the question provided above, "
                        "considering the given answer. Your goal is to come up with 3 wrong answers."
-                       "Please separate your response answers with comma. Your answer must look like this: "
+                       "Please separate your response answers with comma. Be aware with the capital letters, "
+                       "if the correct answer starts from big letter you must write other answers starting from big "
+                       "letter too. Your answer must look like this:"
                        "wrong_answer,wrong_answer,wrong_answer"
         },
             {"role": "user", "content": f"{question} \n{answer_options}"}],
