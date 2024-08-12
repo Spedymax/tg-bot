@@ -385,12 +385,15 @@ def imagine(message):
 
 @bot.message_handler(commands=['start'])
 def start_game(message):
+    global new_user_id
+    pisunchik = load_data()
     player_id = str(message.from_user.id)
+    new_user_id = message.from_user.id
     if player_id in pisunchik:
         # Existing player: display current pisunchik and coins
         pisunchik_size = pisunchik[player_id]['pisunchik_size']
         coins = pisunchik[player_id]['coins']
-        bot.reply_to(message, f"Your pisunchik: {pisunchik_size} cm\nYou have {coins} coins!")
+        bot.reply_to(message, f"Your pisunchik: {pisunchik_size} cm\nYou have {coins} coins!\n Use /pisunchik to gain cm")
     else:
         # New player: ask for name and add to database
         bot.reply_to(message, "Добро пожаловать! Напишите ваше имя:")
@@ -399,9 +402,7 @@ def start_game(message):
 
 def ask_where_found(message):
     global new_name
-    global new_user_id
     new_name = message.text.strip()
-    new_user_id = message.from_user.id
     bot.send_message(message.chat.id, "Расскажите как вы нашли этого бота?")
     bot.register_next_step_handler(message, process_approval_step)
 
@@ -436,7 +437,7 @@ def registration_callback(call):
 
 def approve_registration(message):
     global new_user_id
-    player_id = str(message.from_user.id)
+    player_id = new_user_id
 
     # Add new player to database and initialize data
     pisunchik[player_id] = {
