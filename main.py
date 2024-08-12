@@ -393,7 +393,7 @@ def start_game(message):
         # Existing player: display current pisunchik and coins
         pisunchik_size = pisunchik[player_id]['pisunchik_size']
         coins = pisunchik[player_id]['coins']
-        bot.reply_to(message, f"Your pisunchik: {pisunchik_size} cm\nYou have {coins} coins!\n Use /pisunchik to gain cm")
+        bot.reply_to(message, f"Your pisunchik: {pisunchik_size} cm\nYou have {coins} coins!\nUse /pisunchik to gain cm")
     else:
         # New player: ask for name and add to database
         bot.reply_to(message, "Добро пожаловать! Напишите ваше имя:")
