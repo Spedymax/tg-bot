@@ -23,7 +23,7 @@ original_questions = {}
 
 
 def fetch_trivia_questions(categories, cursor, headers):
-    while True:
+    for i in range(50):
         params = {"category": categories}
         try:
             response = requests.get(API_URL, params=params, headers=headers)
