@@ -1773,13 +1773,13 @@ def can_use_pisunchik():
                             pisunchik[player]['coins'] += int(income)
                             # helper.send_message_to_group(bot,
                             #                  f"{pisunchik[player]['player_name']}, ваш золотой член принёс сегодня прибыль в размере {int(income)} BTC")
-        # if curr_time.hour in [8, 13, 17] and curr_time.minute == 0:
-        #     stocks.update_stock_prices(cursor, bot, helper)
-        # if curr_time.hour in [10, 15, 18] and curr_time.minute == 0:
-        #     for chat_id in [-1001294162183]:
-        #         trivia.send_trivia_questions(chat_id, bot, cursor, conn, headers)
-        # if curr_time.hour == 21 and curr_time.minute == 50:
-        #     trivia.get_correct_answers(bot, pisunchik, cursor)
+        if curr_time.hour in [8, 13, 17] and curr_time.minute == 0:
+            stocks.update_stock_prices(cursor, bot, helper)
+        if curr_time.hour in [10, 15, 18] and curr_time.minute == 0:
+            for chat_id in [-1001294162183]:
+                trivia.send_trivia_questions(chat_id, bot, cursor, conn, headers)
+        if curr_time.hour == 21 and curr_time.minute == 50:
+            trivia.get_correct_answers(bot, pisunchik, cursor)
         for player in pisunchik:
             existing_characteristic = pisunchik[player]['characteristics']
             # Check if the characteristic is already in the player's characteristics
