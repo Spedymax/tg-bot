@@ -31,6 +31,9 @@ def bot_answer(message, bot, time, dad_jokes, image_urls2):
             dad_jokes(message)
         elif prompt == "накажи Богдана":
             bot.send_message(message.chat.id, "Отсылаю 9999 каринок фурри в личку Богдану :)")
+            for i in range(1, 15):
+                send_furry_pics(random, bot, image_urls2)
+                print(f'Отправлено: {i}')
         elif prompt == "как правильно ухаживать за ребёнком?":
             bot.send_message(message.chat.id, "1.Спускаем кровь \n Чтобы мясо не испортилось, спускают кровь. Делают это "
                                    "следующим образом: кладут ребёнка на правый бок так, чтобы голова оказалась ниже "
@@ -66,9 +69,6 @@ def bot_answer(message, bot, time, dad_jokes, image_urls2):
                                    "форму и цвет всех внутренних органов. Если заметите что-то подозрительное, "
                                    "то лучше не употреблять такое мясо в пищу. Не забудьте сдать мясо на проверку, "
                                    "вдруг ментам понравиться :)")
-            for i in range(1, 15):
-                send_furry_pics(random, bot, image_urls2)
-                print(f'Отправлено: {i}')
         elif prompt == "давай ещё разок":
             bot.send_message(message.chat.id, "Отсылаю ещё 9999 каринок фурри в личку Богдану :)")
             for i in range(1, 15):
