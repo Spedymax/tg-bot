@@ -17,7 +17,6 @@ def bot_answer(message, bot, time, dad_jokes, image_urls2):
         "давай ещё разок": "Наказание2",
         "как правильно ухаживать за ребёнком?": "Уход за ребёнком",
     }
-
     # Извлекаем текст после упоминания бота
     prompt = message.text.split("Бот,", 1)[1].strip()
 
