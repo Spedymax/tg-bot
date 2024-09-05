@@ -1895,7 +1895,7 @@ def handle_send_to_group_message(message):
                 "Please send the message you want to forward to "
                 "the second group chat."):
             # Forward the user's message to the group chat
-            helper.send_message_to_group(bot, message.text)
+            helper.send_message_to_group2(bot, message.text)
             bot.send_message(message.chat.id, "Your message has been sent to the second group chat.")
         user_id = message.from_user.id
         message_text = message.text
