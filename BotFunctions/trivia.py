@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 API_URL = "https://api.api-ninjas.com/v1/trivia"
 DIFFICULTY = 'medium'
-CATEGORIES = 'general,entertainment,geography,mathematics,sciencenature,fooddrink,peopleplaces'
+CATEGORIES = 'general,entertainment,geography,sciencenature,fooddrink,peopleplaces'
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
 # Player IDs
@@ -57,6 +57,7 @@ def send_trivia_questions(chat_id, bot, cursor, conn, headers):
 
         question_text = html.unescape(question_data["question"])
         correct_answer = html.unescape(question_data["answer"])
+        print(correct_answer)
 
         funny_answer = get_funny_answer(question_text, correct_answer, headers)
         split_answers = funny_answer.split(",")
@@ -151,6 +152,7 @@ def get_correct_answers(bot, pisunchik, cursor, message=False):
         chat_id = -1001294162183
     else:
         chat_id = message.chat.id
+
     send_correct_answers_header(bot, chat_id)
     display_answers(bot, chat_id, trivia, cursor, pisunchik)
     display_player_scores(bot, chat_id, pisunchik)
@@ -169,8 +171,16 @@ def display_answers(bot, chat_id, trivia, cursor, pisunchik):
 
 def display_player_scores(bot, chat_id, pisunchik):
     bot.send_message(chat_id, 'Total correct answers:')
+
     for player_id, stats in pisunchik.items():
-        bot.send_message(chat_id, f'{stats["player_name"]} : {stats["correct_answers"]}')
+        # Iterate through the correct_answers list
+        for correct_answer in stats["correct_answers"]:
+            # Assuming the format is '{chat_id:correct_answers_number}', split it by ':'
+            stored_chat_id, correct_answers = correct_answer.strip('{}').split(':')
+
+            # Convert stored_chat_id to integer for comparison
+            if int(stored_chat_id) == chat_id:
+                bot.send_message(chat_id, f'{stats["player_name"]} : {correct_answers}')
 
 
 def has_answered_question(user_id, question, cursor):
@@ -184,6 +194,7 @@ def answer_callback(call, bot, player_stats, cursor):
     player_name = player_stats[user_id]["player_name"]
     answer = call.data.split('_')[1]
     question_id = call.message.message_id
+    chat_id = call.message.chat.id
 
     cursor.execute("SELECT original_question, players_responses FROM question_state WHERE message_id = %s",
                    (question_id,))
@@ -195,7 +206,6 @@ def answer_callback(call, bot, player_stats, cursor):
 
     original_question, players_responses = result[0], result[1]
 
-    # Проверяем, является ли players_responses уже словарем или нужно преобразовать из строки JSON
     if isinstance(players_responses, str):
         players_responses = json.loads(players_responses)
 
@@ -212,9 +222,28 @@ def answer_callback(call, bot, player_stats, cursor):
 
     correct_answer = result[0]
 
+    # Check if the answer is correct
     if answer == correct_answer:
-        player_stats[user_id]["correct_answers"] += 1
         emoji = "✅"
+
+        # Retrieve the current stats or initialize if not present
+        if isinstance(player_stats[user_id]["correct_answers"], list):
+            # Convert the list to a dictionary
+            chat_stats = {item.split(":")[0]: int(item.split(":")[1]) for item in
+                          player_stats[user_id]["correct_answers"]}
+        else:
+            chat_stats = {}
+
+        # Initialize or update the count for the current chat
+        chat_id_str = str(chat_id)
+        if chat_id_str in chat_stats:
+            chat_stats[chat_id_str] += 1
+        else:
+            chat_stats[chat_id_str] = 1
+
+        # Convert back to list format
+        player_stats[user_id]["correct_answers"] = [f"{k}:{v}" for k, v in chat_stats.items()]
+
     else:
         emoji = "❌"
 
@@ -233,6 +262,7 @@ def answer_callback(call, bot, player_stats, cursor):
     save_player_stats(cursor, player_stats)
 
 
+
 def load_all_questions_state(cursor):
     global question_messages
     question_messages = load_question_state(cursor)
@@ -241,8 +271,15 @@ def load_all_questions_state(cursor):
 def save_player_stats(cursor, player_stats):
     cursor.execute("DELETE FROM pisunchik_data")
     for player_id, stats in player_stats.items():
-        data = {'player_id': player_id, **stats}
-        columns = ', '.join(data.keys())
-        placeholders = ', '.join(['%s'] * len(data))
-        cursor.execute(f"INSERT INTO pisunchik_data ({columns}) VALUES ({placeholders})", list(data.values()))
+        correct_answers = stats["correct_answers"]
+        cursor.execute("""
+            INSERT INTO pisunchik_data (player_id, player_name, correct_answers)
+            VALUES (%s, %s, %s::text[])
+            ON CONFLICT (player_id) DO UPDATE 
+            SET correct_answers = EXCLUDED.correct_answers
+        """, (player_id, stats['player_name'], correct_answers))
     cursor.connection.commit()
+
+
+
+
