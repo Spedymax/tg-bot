@@ -45,9 +45,11 @@ temp_user_sell_data = {}
 admin_actions = {}
 global_message = None
 
+
 def load_json_file(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
         return json.load(f)
+
 
 char = load_json_file('data/char.json')
 plot = load_json_file('data/plot.json')
@@ -65,6 +67,7 @@ NIKA_ID = 1085180226
 VIKA_ID = 1561630034
 # List of admin user IDs
 admin_ids = [MAX_ID]
+
 
 def load_data():
     cursor.execute("SELECT * FROM pisunchik_data")  # Select all columns
@@ -116,9 +119,7 @@ def load_data():
     return player_data
 
 
-# Initialize pisunchik data
 pisunchik = load_data()
-
 client.models.list()
 
 headers = {
@@ -173,8 +174,6 @@ def add_characteristic(message):
     else:
         print(f"Player with ID {player_id} not found")
     save_data()
-
-
 
 
 @bot.message_handler(commands=['pay'])
@@ -393,7 +392,8 @@ def start_game(message):
         # Existing player: display current pisunchik and coins
         pisunchik_size = pisunchik[player_id]['pisunchik_size']
         coins = pisunchik[player_id]['coins']
-        bot.reply_to(message, f"Your pisunchik: {pisunchik_size} cm\nYou have {coins} coins!\nUse /pisunchik to gain cm")
+        bot.reply_to(message,
+                     f"Your pisunchik: {pisunchik_size} cm\nYou have {coins} coins!\nUse /pisunchik to gain cm")
     else:
         # New player: ask for name and add to database
         bot.reply_to(message, "Добро пожаловать! Напишите ваше имя:")
@@ -436,6 +436,7 @@ def registration_callback(call):
 
 
 def approve_registration(message):
+    global pisunchik
     global new_user_id
     player_id = new_user_id
 
@@ -444,7 +445,7 @@ def approve_registration(message):
         'player_name': new_name,
         'pisunchik_size': 0,
         'coins': 0,
-        'correct_answers': 0,
+        'correct_answers': [],
         'items': [],
         'characteristics': [],
         'player_stocks': [],
@@ -463,13 +464,12 @@ def approve_registration(message):
         "statuetki, last_used, last_vor, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, "
         "player_stocks, correct_answers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (int(player_id), new_name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, datetime.min, 0,
-         None,
-         False, '{}',
-         0))
+         None, False, '{}', '{}'))
     conn.commit()
 
     bot.send_message(new_user_id, f"Приятной игры, {new_name}! Вы зарегистрированы как новый игрок!")
     save_data()
+    pisunchik = load_data()
 
 
 is_echoing = False
@@ -1515,45 +1515,56 @@ def peremoga(message):
 def callback_answer(call):
     trivia.answer_callback(call, bot, pisunchik, cursor)
 
+
 @bot.message_handler(commands=['stocks_update'])
 def stocks_wrapper(message):
     stocks.stocks_update(message, bot, admin_ids, cursor, helper)
+
 
 @bot.message_handler(commands=['current_stocks'])
 def current_stocks_wrapper(message):
     stocks.current_stocks(message, cursor, bot)
 
+
 @bot.message_handler(commands=['my_stocks'])
 def my_stocks_wrapper(message):
     stocks.my_stocks(message, pisunchik, cursor, bot)
 
-@bot.message_handler(commands=['buy_stocks'])
-def buy_stocks_wrapper(message):
-    stocks.buy_stocks(message, bot)
 
 @bot.message_handler(commands=['buy_stocks'])
 def buy_stocks_wrapper(message):
     stocks.buy_stocks(message, bot)
+
+
+@bot.message_handler(commands=['buy_stocks'])
+def buy_stocks_wrapper(message):
+    stocks.buy_stocks(message, bot)
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('buy_stocks_'))
 def handle_company_selection_wrapper(call):
     stocks.handle_company_selection(call, bot, temp_user_data)
 
+
 @bot.message_handler(func=lambda message: message.from_user.id in temp_user_data)
 def handle_quantity_selection(message):
     stocks.handle_quantity_selection(message, bot, cursor, temp_user_data, pisunchik, conn, save_data)
+
 
 @bot.message_handler(commands=['sell_stocks'])
 def sell_stocks(message):
     stocks.sell_stocks(message, bot, pisunchik)
 
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith('sell_stocks_'))
 def handle_sell_company_selection(call):
     stocks.handle_sell_company_selection(call, bot, temp_user_sell_data)
 
+
 @bot.message_handler(func=lambda message: message.from_user.id in temp_user_sell_data)
 def handle_sell_quantity_selection(message):
     stocks.handle_sell_quantity_selection(message, bot, cursor, temp_user_sell_data, pisunchik, conn, save_data)
+
 
 @bot.message_handler(commands=['prosipaisya'])
 def prosipaisya(message):
@@ -1675,8 +1686,6 @@ def vor_callback(call):
         bot.send_message(call.message.chat.id, f"Вы украли {vor_number} см у Богдана...")
 
 
-
-
 @bot.message_handler(commands=['anekdot'])
 def dad_jokes(message):
     url = "https://dad-jokes.p.rapidapi.com/random/joke"
@@ -1749,14 +1758,14 @@ def can_use_pisunchik():
             time_difference = current_time - last_used_time
 
             # Check if the cooldown period (24 or 13 hours) has passed
-            if time_difference >= timedelta(hours=cooldown):
-                # Update the last_used timestamp in the database
-                if not pisunchik[player]['notified']:
-                    helper.send_message_to_group(bot,
-                                     f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
-                                     parse_mode='html')
-                    pisunchik[player]['notified'] = True
-                    save_data()
+            # if time_difference >= timedelta(hours=cooldown):
+            #     # Update the last_used timestamp in the database
+            #     if not pisunchik[player]['notified']:
+            #         helper.send_message_to_group(bot,
+            #                          f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
+            #                          parse_mode='html')
+            #         pisunchik[player]['notified'] = True
+            #         save_data()
         curr_time = datetime.now(timezone.utc)
         if curr_time.hour == 12 and curr_time.minute == 0:
             for player in pisunchik:
@@ -1796,7 +1805,7 @@ def can_use_pisunchik():
                             pisunchik[player]['pisunchik_size'] = min_pisunchik
                             save_data()
                             helper.send_message_to_group(bot,
-                                             f"{player_name}, ваш член менее {min_pisunchik} сантиметров :( Но, не переживайте благодаря вашей Big Black характеристике ваш член снова стал {min_pisunchik} см")
+                                                         f"{player_name}, ваш член менее {min_pisunchik} сантиметров :( Но, не переживайте благодаря вашей Big Black характеристике ваш член снова стал {min_pisunchik} см")
 
         time.sleep(59)  # Sleep for 1 minute (adjust as needed)
 
@@ -1877,8 +1886,8 @@ def handle_send_to_group_message(message):
                 bot.send_message(message.chat.id, message.text)
         # Check if the user's message is a reply to the "sendtogroup" command
         if message.reply_to_message and message.reply_to_message.text == (
-        "Please send the message you want to forward to "
-        "the group chat."):
+                "Please send the message you want to forward to "
+                "the group chat."):
             # Forward the user's message to the group chat
             helper.send_message_to_group(bot, message.text)
             bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
