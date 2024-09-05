@@ -1891,6 +1891,12 @@ def handle_send_to_group_message(message):
             # Forward the user's message to the group chat
             helper.send_message_to_group(bot, message.text)
             bot.send_message(message.chat.id, "Your message has been sent to the group chat.")
+        if message.reply_to_message and message.reply_to_message.text == (
+                "Please send the message you want to forward to "
+                "the second group chat."):
+            # Forward the user's message to the group chat
+            helper.send_message_to_group(bot, message.text)
+            bot.send_message(message.chat.id, "Your message has been sent to the second group chat.")
         user_id = message.from_user.id
         message_text = message.text
         timestamp = datetime.fromtimestamp(message.date)
@@ -1928,3 +1934,4 @@ def handle_send_to_group_message(message):
 
 bot.polling()
 # -1001294162183 Чатик с пацанами
+# -4539972294 чатик с любимой
