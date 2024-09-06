@@ -1,6 +1,5 @@
 import random
 
-
 def bot_answer(message, bot, time, dad_jokes, image_urls2):
     # Словарь команд и их описаний
     commands = {
