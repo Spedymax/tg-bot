@@ -816,12 +816,10 @@ def handle_admin_actions(message):
 def update_pisunchik(message):
     player_id = str(message.from_user.id)
 
-    if player_id not in pisunchik:
-        pisunchik[player_id]['last_used'] = datetime.min
     existing_characteristic = pisunchik[player_id]['characteristics']
-    # Check if the characteristic is already in the player's characteristics
     characteristic_name = "Titan"
     cooldown = 24
+
     if existing_characteristic is not None:
         for char_info in existing_characteristic:
             if char_info.startswith(characteristic_name):
@@ -836,62 +834,64 @@ def update_pisunchik(message):
         bot.reply_to(message, f"Вы можете использовать эту команду только раз в день \nОсталось времени: {time_left}")
         return
 
-    if player_id in pisunchik:
-        pisunchik[player_id]['last_used'] = datetime.now(timezone.utc)
-        number = random.randint(-10, 17)
-        number2 = random.randint(5, 15)
-        kolzo_random = random.random()
-        bdsm_random = random.random()
-        ne_umenshilsya = False
-        cooldown = False
+    pisunchik[player_id]['last_used'] = datetime.now(timezone.utc)
+    number = random.randint(-10, 17)
+    number2 = random.randint(5, 15)
+    kolzo_random = random.random()
+    bdsm_random = random.random()
+    ne_umenshilsya = False
+    cooldown = False
 
-        if 'krystalnie_ballzzz' in pisunchik[player_id]['items'] and pisunchik[player_id]['ballzzz_number'] is not None:
-            number = pisunchik[player_id]['ballzzz_number']
-            pisunchik[player_id]['ballzzz_number'] = None
+    if 'krystalnie_ballzzz' in pisunchik[player_id]['items'] and pisunchik[player_id]['ballzzz_number'] is not None:
+        number = pisunchik[player_id]['ballzzz_number']
+        pisunchik[player_id]['ballzzz_number'] = None
 
-        # Check if the player has 'kolczo_na_chlen' in their inventory and apply its effect
-        if 'kolczo_na_chlen' in pisunchik[player_id]['items'] and kolzo_random <= 0.2:
-            number2 *= 2  # Double the amount of BTC
+    if 'kolczo_na_chlen' in pisunchik[player_id]['items'] and kolzo_random <= 0.2:
+        number2 *= 2
 
-        # Check if the player has 'prezervativ' in their inventory and apply its effect
-        if 'prezervativ' in pisunchik[player_id]['items'] and number < 0:
-            current_time = datetime.now(
-                timezone.utc)  # Use datetime.now(timezone.utc)  to create an offset-aware datetime
-            if current_time - pisunchik[player_id]['last_prezervativ'] >= timedelta(days=4):
-                number = 0
-                ne_umenshilsya = True
-                pisunchik[player_id]['pisunchik_size'] += number
-                pisunchik[player_id]['last_prezervativ'] = current_time  # Update to use the current time
-            else:
-                cooldown = True
+    if 'prezervativ' in pisunchik[player_id]['items'] and number < 0:
+        current_time = datetime.now(timezone.utc)
+        if current_time - pisunchik[player_id]['last_prezervativ'] >= timedelta(days=4):
+            number = 0
+            ne_umenshilsya = True
+            pisunchik[player_id]['last_prezervativ'] = current_time
+        else:
+            cooldown = True
 
-        # Check if the player has 'bdsm_kostumchik' in their inventory and apply its effect
-        if 'bdsm_kostumchik' in pisunchik[player_id]['items'] and bdsm_random <= 0.1:
-            number += 5  # Add +5 cm to the pisunchik size
+    if 'bdsm_kostumchik' in pisunchik[player_id]['items'] and bdsm_random <= 0.1:
+        number += 5
 
-        pisunchik[player_id]['pisunchik_size'] += number
-        pisunchik[player_id]['coins'] = pisunchik[player_id]['coins'] + number2
+    # Убедитесь, что pisunchik_size инициализирован и имеет значение int
+    if pisunchik[player_id]['pisunchik_size'] is None:
+        pisunchik[player_id]['pisunchik_size'] = 0
 
-        # Construct the reply message based on the effects of the items
-        reply_message = f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\nИзменения: {number} см\nТакже вы получили: {number2} BTC"
+    if pisunchik[player_id]['coins'] is None:
+        pisunchik[player_id]['coins'] = 0
 
-        if 'kolczo_na_chlen' in pisunchik[player_id]['items'] and kolzo_random <= 0.2:
-            reply_message += "\nЭффект от 'kolczo_na_chlen': количество подученного BTC УДВОЕНО!"
+    pisunchik[player_id]['pisunchik_size'] += number
+    pisunchik[player_id]['coins'] += number2
 
-        if 'bdsm_kostumchik' in pisunchik[player_id]['items'] and bdsm_random <= 0.1:
-            reply_message += "\nЭффект от 'bdsm_kostumchik': +5 см к писюнчику получено."
+    reply_message = f"Ваш писюнчик: {pisunchik[player_id]['pisunchik_size']} см\nИзменения: {number} см\nТакже вы получили: {number2} BTC"
 
-        if ne_umenshilsya:
-            reply_message += "\nЭффект от 'prezervativ': писюнчик не уменьшился."
-        if cooldown:
-            reply_message += "\nprezervativ' еще на кулдауне."
-        # Generate a random number to determine the next effect (for demonstration purposes)
-        next_effect = random.randint(-10, 17)
-        pisunchik[player_id]['ballzzz_number'] = next_effect
-        bot.reply_to(message, reply_message)
-        pisunchik[player_id]['notified'] = False
+    if 'kolczo_na_chlen' in pisunchik[player_id]['items'] and kolzo_random <= 0.2:
+        reply_message += "\nЭффект от 'kolczo_na_chlen': количество подученного BTC УДВОЕНО!"
+
+    if 'bdsm_kostumchik' in pisunchik[player_id]['items'] and bdsm_random <= 0.1:
+        reply_message += "\nЭффект от 'bdsm_kostumchik': +5 см к писюнчику получено."
+
+    if ne_umenshilsya:
+        reply_message += "\nЭффект от 'prezervativ': писюнчик не уменьшился."
+
+    if cooldown:
+        reply_message += "\nprezervativ' еще на кулдауне."
+
+    next_effect = random.randint(-10, 17)
+    pisunchik[player_id]['ballzzz_number'] = next_effect
+    bot.reply_to(message, reply_message)
+    pisunchik[player_id]['notified'] = False
 
     save_data()
+
 
 
 # Create an inline keyboard with options

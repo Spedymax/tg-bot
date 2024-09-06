@@ -270,7 +270,6 @@ def load_all_questions_state(cursor):
 
 
 def save_player_stats(cursor, player_stats):
-    cursor.execute("DELETE FROM pisunchik_data")
     for player_id, stats in player_stats.items():
         correct_answers = stats["correct_answers"]
         cursor.execute("""
@@ -280,7 +279,3 @@ def save_player_stats(cursor, player_stats):
             SET correct_answers = EXCLUDED.correct_answers
         """, (player_id, stats['player_name'], correct_answers))
     cursor.connection.commit()
-
-
-
-
