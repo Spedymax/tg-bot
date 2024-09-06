@@ -146,17 +146,18 @@ def load_question_state(cursor):
             isinstance(row[2], str)}
 
 
-def get_correct_answers(bot, pisunchik, cursor, message=False):
+def get_correct_answers(bot, pisunchik, cursor, chat_id):
     trivia = load_trivia_data(cursor)
-    if message is False:
-        chat_id = -1001294162183
-    else:
-        chat_id = message.chat.id
-
     send_correct_answers_header(bot, chat_id)
     display_answers(bot, chat_id, trivia, cursor, pisunchik)
     display_player_scores(bot, chat_id, pisunchik)
 
+def get_correct_answers2(bot, pisunchik, cursor, message):
+    trivia = load_trivia_data(cursor)
+    chat_id = message.chat.id
+    send_correct_answers_header(bot, chat_id)
+    display_answers(bot, chat_id, trivia, cursor, pisunchik)
+    display_player_scores(bot, chat_id, pisunchik)
 
 def send_correct_answers_header(bot, chat_id):
     bot.send_message(chat_id, f'Here are the correct answers for {TODAY}:')
