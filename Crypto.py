@@ -1,6 +1,4 @@
 from cryptography.fernet import Fernet
-import openpyxl
-import os
 
 # Generate a key for encryption and decryption
 # You should store this key securely - if you lose it, you will not be able to decrypt your files!
