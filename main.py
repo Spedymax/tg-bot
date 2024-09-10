@@ -450,6 +450,7 @@ def approve_registration(message):
         'characteristics': [],
         'player_stocks': [],
         'statuetki': [],
+        'chat_id': [],
         'last_used': datetime.min.replace(tzinfo=timezone.utc),
         'last_vor': datetime.min.replace(tzinfo=timezone.utc),
         'last_prezervativ': datetime.min.replace(tzinfo=timezone.utc),
@@ -462,9 +463,9 @@ def approve_registration(message):
     cursor.execute(
         "INSERT INTO pisunchik_data (player_id, player_name, pisunchik_size, coins, items, characteristics, "
         "statuetki, last_used, last_vor, last_prezervativ, casino_last_used, casino_usage_count, ballzzz_number, notified, "
-        "player_stocks, correct_answers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "player_stocks, correct_answers, chat_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (int(player_id), new_name, 0, 0, '{}', '{}', '{}', datetime.min, datetime.min, datetime.min, datetime.min, 0,
-         None, False, '{}', '{}'))
+         None, False, '{}', '{}', '{}'))
     conn.commit()
 
     bot.send_message(new_user_id, f"Приятной игры, {new_name}! Вы зарегистрированы как новый игрок!")
@@ -1713,16 +1714,19 @@ def dad_jokes_handler(call):
 
 
 def save_data():
-    # First, clear all existing data from the table, consider if this is what you really want to do
+    # Clear all existing data from the table (be sure this is what you want)
     cursor.execute("DELETE FROM pisunchik_data")
 
     # Loop through each player in the pisunchik dictionary
     for player_id, data in pisunchik.items():
-        # Ensure player_id is not None or empty
         if player_id:
+            # Ensure chat_id is stored as an array of integers
+            chat_id_list = data.get("chat_id", [])
+            if chat_id_list:  # Ensure it's not None or empty
+                chat_id_list = [int(chat_id) for chat_id in chat_id_list]  # Cast to integer
+
             # Prepare the data for insertion
-            # Add player_id to the data dictionary
-            data_with_id = {'player_id': player_id, **data}
+            data_with_id = {'player_id': int(player_id), **data, 'chat_id': chat_id_list}
 
             columns = ', '.join(data_with_id.keys())
             placeholders = ', '.join(['%s'] * len(data_with_id))
@@ -1758,14 +1762,16 @@ def can_use_pisunchik():
             time_difference = current_time - last_used_time
 
             # Check if the cooldown period (24 or 13 hours) has passed
-            # if time_difference >= timedelta(hours=cooldown):
-            #     # Update the last_used timestamp in the database
-            #     if not pisunchik[player]['notified']:
-            #         helper.send_message_to_group(bot,
-            #                          f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
-            #                          parse_mode='html')
-            #         pisunchik[player]['notified'] = True
-            #         save_data()
+            if time_difference >= timedelta(hours=cooldown):
+                # Update the last_used timestamp in the database
+                if not pisunchik[player]['notified']:
+                    if pisunchik[player]["chat_id"] is not None:
+                        for chat in pisunchik[player]["chat_id"]:
+                            bot.send_message(chat,
+                                             f"<a href='tg://user?id={player}'>@{pisunchik[player]['player_name']}</a>, вы можете использовать /pisunchik",
+                                             parse_mode='html')
+                        pisunchik[player]['notified'] = True
+                        save_data()
         curr_time = datetime.now(timezone.utc)
         if curr_time.hour == 12 and curr_time.minute == 0:
             for player in pisunchik:
@@ -1902,6 +1908,16 @@ def handle_send_to_group_message(message):
         message_text = message.text
         timestamp = datetime.fromtimestamp(message.date)
         name = get_player_name(str(user_id))
+        if str(user_id) in pisunchik:
+            if message.chat.type in ['group', 'supergroup']:
+                if pisunchik.get(str(user_id), {}).get("chat_id") is not None:
+                    if message.chat.id not in pisunchik[str(user_id)]["chat_id"]:
+                        pisunchik[str(user_id)]["chat_id"].append(message.chat.id)
+                        save_data()
+                else:
+                    pisunchik[str(user_id)]["chat_id"] = [message.chat.id]  # Initialize as list
+                    save_data()
+
 
         # Insert message into the database
         cursor.execute("INSERT INTO messages (user_id, message_text, timestamp, name) VALUES (%s, %s, %s, %s)",
@@ -1935,4 +1951,4 @@ def handle_send_to_group_message(message):
 
 bot.polling()
 # -1001294162183 Чатик с пацанами
-# -4539972294 чатик с любимкой
+# -1002491624152 чатик с любимкой
