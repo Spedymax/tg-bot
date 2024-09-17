@@ -106,8 +106,8 @@ def send_question_with_options(chat_id, bot, question, answer_options, cursor):
         button = types.InlineKeyboardButton(text=answer, callback_data=f"answer_{answer}")
         markup.add(button)
 
-    msg = bot.send_message(chat_id, "Внимание вопрос!", parse_mode='html')
-    question_msg = bot.send_message(chat_id, question, reply_markup=markup, parse_mode='html')
+    bot.send_message(chat_id, "Внимание вопрос!", parse_mode='html')
+    question_msg = bot.send_message(chat_id, question, reply_markup=markup, parse_mode='html', protect_content=True)
 
     # Сохранение оригинального вопроса и пустых ответов в базу данных
     question_messages[question_msg.message_id] = {"text": question, "players_responses": {}}
