@@ -24,11 +24,10 @@ bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
 
 # Establish a database connection
 conn = psycopg2.connect(
-    database="d7c917hcd5cueq",
-    user="lytcmoizjbmkyz",
-    host="ec2-79-125-89-233.eu-west-1.compute.amazonaws.com",
-    password="c641a9c8d30124f658cf93dc6fb98cf59ea6b9158591f4353684ee3bf91fadb1",
-    sslmode='require'
+    database="server-tg-pisunchik",
+    user="admin",
+    host="localhost",
+    password="Sokoez32"
 )
 
 # Create a cursor for executing SQL queries
