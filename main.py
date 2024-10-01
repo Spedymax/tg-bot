@@ -31,7 +31,6 @@ conn = psycopg2.connect(
     host="localhost",
     password="Sokoez32"
 )
-
 # Create a cursor for executing SQL queries
 cursor = conn.cursor()
 
