@@ -5,6 +5,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from subprocess import Popen, PIPE
+import subprocess
 
 import psycopg2
 import requests
@@ -23,12 +24,12 @@ from BotFunctions.cryptography import client
 bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
 
 # Establish a database connection
+
 conn = psycopg2.connect(
-    database="d7c917hcd5cueq",
-    user="lytcmoizjbmkyz",
-    host="ec2-79-125-89-233.eu-west-1.compute.amazonaws.com",
-    password="c641a9c8d30124f658cf93dc6fb98cf59ea6b9158591f4353684ee3bf91fadb1",
-    sslmode='require'
+    database="server-tg-pisunchik",
+    user="admin",
+    host="localhost",
+    password="Sokoez32"
 )
 
 # Create a cursor for executing SQL queries
@@ -36,6 +37,7 @@ cursor = conn.cursor()
 
 # Global variable to keep track of the subprocess
 script_process = None
+online_process = None
 discount = 0
 punchline = ""
 new_name = ''
@@ -327,6 +329,32 @@ def handle_characteristic_upgrade(call):
     else:
         bot.send_message(chat_id, "Недостаточно денег для улучшения или превышен максимальный уровень.")
     save_data()
+
+
+@bot.message_handler(commands=['start_online'])
+def start_script(message):
+    global online_process
+    if online_process is None or online_process.poll() is not None:
+        # Start the script
+        online_process = Popen(['python', 'BotFunctions/checkOnline.py'], stdout=PIPE, stderr=PIPE)
+        bot.reply_to(message, "Script started.")
+    else:
+        bot.reply_to(message, "Script is already running.")
+
+
+@bot.message_handler(commands=['stop_online'])
+def stop_script(message):
+    global online_process
+    if online_process is not None and online_process.poll() is None:
+        # Stop the script
+        online_process.terminate()
+        try:
+            online_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            online_process.kill()
+        bot.reply_to(message, "Script stopped.")
+    else:
+        bot.reply_to(message, "Script is not running.")
 
 
 @bot.message_handler(commands=['torgovec'])
