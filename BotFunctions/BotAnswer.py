@@ -31,7 +31,7 @@ def bot_answer(message, bot, time, dad_jokes, image_urls2):
         elif prompt == "накажи Богдана":
             bot.send_message(message.chat.id, "Отсылаю 9999 каринок фурри в личку Богдану :)")
             for i in range(1, 15):
-                send_furry_pics(random, bot, image_urls2)
+                send_furry_pics(random, bot, image_urls2, 855951767)
                 print(f'Отправлено: {i}')
         elif prompt == "как правильно ухаживать за ребёнком?":
             bot.send_message(message.chat.id, "1.Спускаем кровь \n Чтобы мясо не испортилось, спускают кровь. Делают это "
@@ -71,7 +71,7 @@ def bot_answer(message, bot, time, dad_jokes, image_urls2):
         elif prompt == "давай ещё разок":
             bot.send_message(message.chat.id, "Отсылаю ещё 9999 каринок фурри в личку Богдану :)")
             for i in range(1, 15):
-                send_furry_pics(random, bot, image_urls2)
+                send_furry_pics(random, bot, image_urls2, 855951767)
                 print(f'Отправлено: {i}')
         elif prompt == "расскажи анекдот про маму Юры":
             bot.send_message(message.chat.id, "Ну ладно")
@@ -96,10 +96,10 @@ def bot_answer(message, bot, time, dad_jokes, image_urls2):
     else:
         bot.send_message(message.chat.id, "?")
 
-def send_furry_pics(random, bot, image_urls2):
+def send_furry_pics(random, bot, image_urls2, chat_id):
     random_selection = random.sample(image_urls2, 5)
     for url in random_selection:
         if url.endswith(('.jpg', '.jpeg', '.png')):
-            bot.send_photo(chat_id=855951767, photo=url)
+            bot.send_photo(chat_id, photo=url)
         elif url.endswith(('.gif', '.gifv')):
-            bot.send_animation(chat_id=855951767, animation=url)
+            bot.send_animation(chat_id, animation=url)
