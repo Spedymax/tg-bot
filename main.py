@@ -368,6 +368,10 @@ def torgovec(message):
 def misha_wrapper(message):
     rofl.misha(message, bot, time)
 
+@bot.message_handler(commands=['zov'])
+def zov_wrapper(message):
+    rofl.zov(message, bot)
+
 
 @bot.message_handler(commands=['sho_tam_novogo'])
 def get_recent_messages(message):
