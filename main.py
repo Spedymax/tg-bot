@@ -1961,7 +1961,7 @@ def handle_send_to_group_message(message):
             else:
                 bot.send_message(message.chat.id, 'Неправильный пароль!')
         if message.reply_to_message and message.reply_to_message.text == (
-                "Введите пароль чтобы остановаить minecraft server:"):
+                "Введите пароль чтобы остановить minecraft server:"):
             if message.text == 'юрапиписька':
                 try:
                     # Запуск службы с помощью subprocess
