@@ -11,7 +11,7 @@ import psycopg2
 import requests
 import telebot.apihelper
 from telebot import types
-from telebot.types import LabeledPrice
+from telebot.types import LabeledPrice, ForceReply
 
 import BotFunctions.BotAnswer as botAnswer
 import BotFunctions.Rofl as rofl
@@ -1360,6 +1360,13 @@ def use_zelie_pisunchika(message):
 
     bot.reply_to(message, effect_message)
 
+@bot.message_handler(commands=['startmine'])
+def start_minecraft_server(message):
+    bot.send_message(message.chat.id, 'Введите пароль чтобы запустить minecraft server:', reply_markup=ForceReply())
+
+@bot.message_handler(commands=['stopmine'])
+def start_minecraft_server(message):
+    bot.send_message(message.chat.id, 'Введите пароль чтобы остановить minecraft server:', reply_markup=ForceReply())
 
 @bot.message_handler(commands=['masturbator'])
 def use_masturbator(message):
@@ -1935,6 +1942,42 @@ def handle_send_to_group_message(message):
             # Forward the user's message to the group chat
             helper.send_message_to_group2(bot, message.text)
             bot.send_message(message.chat.id, "Your message has been sent to the second group chat.")
+        if message.reply_to_message and message.reply_to_message.text == (
+                "Введите пароль чтобы запустить minecraft server:"):
+            if message.text == 'юрапиписька':
+                try:
+                    # Запуск службы с помощью subprocess
+                    result = subprocess.run(["sudo", "systemctl", "start", "curseforge.service"], capture_output=True,
+                                            text=True)
+
+                    # Проверка статуса выполнения
+                    if result.returncode == 0:
+                        bot.reply_to(message, "Minecraft сервер успешно запущен!")
+                    else:
+                        bot.reply_to(message, f"Ошибка при запуске сервера: {result.stderr}")
+
+                except Exception as e:
+                    bot.reply_to(message, f"Произошла ошибка: {str(e)}")
+            else:
+                bot.send_message(message.chat.id, 'Неправильный пароль!')
+        if message.reply_to_message and message.reply_to_message.text == (
+                "Введите пароль чтобы остановаить minecraft server:"):
+            if message.text == 'юрапиписька':
+                try:
+                    # Запуск службы с помощью subprocess
+                    result = subprocess.run(["sudo", "systemctl", "stop", "curseforge.service"], capture_output=True,
+                                            text=True)
+
+                    # Проверка статуса выполнения
+                    if result.returncode == 0:
+                        bot.reply_to(message, "Minecraft сервер успешно запущен!")
+                    else:
+                        bot.reply_to(message, f"Ошибка при запуске сервера: {result.stderr}")
+
+                except Exception as e:
+                    bot.reply_to(message, f"Произошла ошибка: {str(e)}")
+            else:
+                bot.send_message(message.chat.id, 'Неправильный пароль!')
         user_id = message.from_user.id
         message_text = message.text
         timestamp = datetime.fromtimestamp(message.date)
