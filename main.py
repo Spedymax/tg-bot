@@ -1970,7 +1970,7 @@ def handle_send_to_group_message(message):
 
                     # Проверка статуса выполнения
                     if result.returncode == 0:
-                        bot.reply_to(message, "Minecraft сервер успешно запущен!")
+                        bot.reply_to(message, "Minecraft сервер успешно остановлен!")
                     else:
                         bot.reply_to(message, f"Ошибка при запуске сервера: {result.stderr}")
 
