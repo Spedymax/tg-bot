@@ -113,8 +113,8 @@ def get_commands(message):
     if current_date >= start_date + datetime.timedelta(days=2):
         commands += '/trivia - викторина\n/answers - ответы на викторину\n'
     if current_date >= start_date + datetime.timedelta(days=3):
-        commands += '/invite - вас пригласили на свидание!\n'
-    if current_date == start_date + datetime.timedelta(days=4):
+        commands += '/invite - пригласи Максима на свидание!\n'
+    if current_date == start_date + datetime.timedelta(days=3):
         startuem = True
     bot.send_message(message.chat.id, f"Вам доступны команды:\n{commands}")
     if startuem:
@@ -147,9 +147,8 @@ def send_invitation(message):
     # Send the invitation message to you
     bot.send_message(
         MAX_ID,
-        "Вас пригласили на свидание!\nПерейдите по ссылке: http://spedymax.sytes.net:200"
+        "Пригласи Максима на свидание!\nПерейдите по ссылке чтобы это сделать: http://spedymax.sytes.net:200"
     )
-    bot.send_message(message.chat.id, "Приглашение уже отправлено Максу!")
     # Debug message to you
     if message.from_user.id == MUSHROOM_ID:
         bot.send_message(MAX_ID, f"Она использовала /invite")
