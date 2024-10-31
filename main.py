@@ -67,7 +67,7 @@ MAX_ID = 741542965
 BODYA_ID = 855951767
 NIKA_ID = 1085180226
 VIKA_ID = 1561630034
-bot.send_message(MAX_ID, 'Bot started')
+bot.send_message(MAX_ID, 'Bot restarted')
 # List of admin user IDs
 admin_ids = [MAX_ID]
 
