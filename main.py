@@ -19,6 +19,7 @@ import BotFunctions.main_functions as main
 import BotFunctions.trivia as trivia
 import BotFunctions.helpers as helper
 import BotFunctions.stocks as stocks
+from BotFunctions import NoNutNovember
 from BotFunctions.cryptography import client
 
 bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
@@ -46,6 +47,7 @@ temp_user_data = {}
 temp_user_sell_data = {}
 admin_actions = {}
 global_message = None
+nnn_chat_id = -1001294162183
 
 
 def load_json_file(file_path):
@@ -90,6 +92,9 @@ def load_data():
                 else:
                     items = column_value  # No need for conversion, it's already a list
                 player_dict['items'] = items
+            elif column_name == 'nnn_checkins':
+                nnn_checkins = column_value if column_value else []
+                player_dict['nnn_checkins'] = nnn_checkins
             elif column_name == 'last_used':
                 if column_value is None:
                     last_used = datetime.min.replace(tzinfo=timezone.utc)
@@ -129,6 +134,24 @@ headers = {
     'Content-Type': 'application/json',
     'Authorization': f'Bearer {client.api_key}',
 }
+
+NoNutNovember.schedule_daily_checkin(bot, nnn_chat_id)
+
+
+# Handle the check-in button callback
+@bot.callback_query_handler(func=lambda call: call.data == 'nnn_checkin')
+def handle_nnn_checkin(call):
+    NoNutNovember.handle_checkin_callback(call, bot, pisunchik, save_data)
+
+# Motivation command (/motivation)
+@bot.message_handler(commands=['motivation'])
+def send_motivation(message):
+    NoNutNovember.motivation_command(message, bot)
+
+# Leaderboard command (/leaderboard)
+@bot.message_handler(commands=['leaderboard'])
+def send_leaderboard(message):
+    NoNutNovember.get_leaderboard(message, bot, pisunchik)
 
 # Dictionary to keep track of admin actions
 
@@ -1766,6 +1789,10 @@ def save_data():
 
             # Prepare the data for insertion
             data_with_id = {'player_id': int(player_id), **data, 'chat_id': chat_id_list}
+
+            # Ensure 'nnn_checkins' is a list
+            if 'nnn_checkins' in data_with_id and data_with_id['nnn_checkins'] is None:
+                data_with_id['nnn_checkins'] = []
 
             columns = ', '.join(data_with_id.keys())
             placeholders = ', '.join(['%s'] * len(data_with_id))
