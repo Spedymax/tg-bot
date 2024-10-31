@@ -40,7 +40,7 @@ def schedule_daily_checkin(bot, chat_id):
     def run():
         while True:
             now = datetime.now()
-            next_run = now.replace(hour=14, minute=50, second=0, microsecond=0)
+            next_run = now.replace(hour=11, minute=53, second=0, microsecond=0)
             if now >= next_run:
                 next_run += timedelta(days=1)
             time_to_wait = (next_run - now).total_seconds()
