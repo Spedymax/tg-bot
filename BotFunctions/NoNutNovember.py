@@ -40,7 +40,7 @@ def schedule_daily_checkin(bot, chat_id):
     def run():
         while True:
             now = datetime.now()
-            next_run = now.replace(hour=12, minute=49, second=0, microsecond=0)
+            next_run = now.replace(hour=11, minute=00, second=0, microsecond=0)
             if now >= next_run:
                 next_run += timedelta(days=1)
             time_to_wait = (next_run - now).total_seconds()
@@ -51,7 +51,10 @@ def schedule_daily_checkin(bot, chat_id):
 def handle_checkin_callback(call, bot, pisunchik, save_data):
     user_id = str(call.from_user.id)
     username = call.from_user.username or call.from_user.first_name
-
+    # Update the last usage time and count for the user
+    if user_id not in pisunchik:
+        bot.send_message(call.from_user.id, 'Вы не зарегистрированы как игрок')
+        return
     today = datetime.now().strftime('%Y-%m-%d')
 
     # Initialize user data if not present
