@@ -33,6 +33,13 @@ conn = psycopg2.connect(
     password="Sokoez32"
 )
 
+# conn = psycopg2.connect(
+#     database="server-tg-pisunchik",
+#     user="postgres",
+#     host="192.168.8.2",
+#     password="123"
+# )
+
 # Create a cursor for executing SQL queries
 cursor = conn.cursor()
 
@@ -149,7 +156,7 @@ def send_motivation(message):
     NoNutNovember.motivation_command(message, bot)
 
 # Leaderboard command (/leaderboard)
-@bot.message_handler(commands=['/nut_leaderboard'])
+@bot.message_handler(commands=['nut_leaderboard'])
 def send_leaderboard(message):
     NoNutNovember.get_leaderboard(message, bot, pisunchik)
 
