@@ -2069,7 +2069,12 @@ def handle_send_to_group_message(message):
         print("Database error:", e)
 
 
+while True:
+    try:
+        bot.polling(none_stop=True)
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        time.sleep(15)  # Wait before restarting polling
 
-bot.polling(non_stop=True)
 # -1001294162183 Чатик с пацанами
 # -1002491624152 чатик с любимкой
