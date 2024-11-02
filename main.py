@@ -580,27 +580,37 @@ def show_leaderboard(message):
 
 @bot.message_handler(commands=['leaderboard'])
 def show_local_leaderboard(message):
-    # Get the current chat id
-    current_chat_id = message.chat.id
+    try:
+        current_chat_id = message.chat.id
+        local_players = {}
+        for player_id, data in pisunchik.items():
+            try:
+                chat_member = bot.get_chat_member(current_chat_id, int(player_id))
+                if chat_member.status != 'left':
+                    local_players[player_id] = data
+            except telebot.apihelper.ApiTelegramException as e:
+                if e.description == 'Bad Request: user not found' or e.description == 'Bad Request: member not found':
+                    continue
+                else:
+                    raise
 
-    # Filter pisunchik to include only users in the current chat
-    local_players = {player_id: data for player_id, data in pisunchik.items() if
-                     bot.get_chat_member(current_chat_id, int(player_id)).status != 'left'}
+        # Sort local_players by pisunchik_size in descending order
+        sorted_local_players = sorted(local_players.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
 
-    # Sort local_players by pisunchik_size in descending order
-    sorted_local_players = sorted(local_players.items(), key=lambda x: x[1]['pisunchik_size'], reverse=True)
+        leaderboard = "🏆 Local Leaderboard 🏆\n\n"
+        for i, (player_id, data) in enumerate(sorted_local_players[:5]):
+            try:
+                name = bot.get_chat(int(player_id)).first_name
+                pisunchik_size = data['pisunchik_size']
+                coins = data['coins']
+                leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {int(coins)} BTC💰\n"
+            except Exception as e:
+                continue  # Skip if the user is not found or any other exception occurs
 
-    leaderboard = "🏆 Local Leaderboard 🏆\n\n"
-    for i, (player_id, data) in enumerate(sorted_local_players[:5]):
-        try:
-            name = bot.get_chat(int(player_id)).first_name
-            pisunchik_size = data['pisunchik_size']
-            coins = data['coins']
-            leaderboard += f"{i + 1}. {name}: {pisunchik_size} sm🌭 и {int(coins)} BTC💰\n"
-        except Exception as e:
-            continue  # Skip if the user is not found or any other exception occurs
-
-    bot.reply_to(message, leaderboard)
+        bot.reply_to(message, leaderboard)
+    except Exception as e:
+        print(f"Error in show_local_leaderboard: {e}")
+        bot.send_message(message.chat.id, "An error occurred while fetching the leaderboard.")
 
 
 @bot.message_handler(commands=['smazka'])
