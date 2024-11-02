@@ -2052,6 +2052,7 @@ def handle_send_to_group_message(message):
         print("Database error:", e)
 
 
+
 bot.polling(non_stop=True)
 # -1001294162183 Чатик с пацанами
 # -1002491624152 чатик с любимкой
