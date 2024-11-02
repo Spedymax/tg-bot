@@ -149,7 +149,7 @@ def send_motivation(message):
     NoNutNovember.motivation_command(message, bot)
 
 # Leaderboard command (/leaderboard)
-@bot.message_handler(commands=['leaderboard'])
+@bot.message_handler(commands=['/nut_leaderboard'])
 def send_leaderboard(message):
     NoNutNovember.get_leaderboard(message, bot, pisunchik)
 
