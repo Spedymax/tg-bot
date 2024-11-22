@@ -2,18 +2,78 @@ import telebot
 import requests
 import time
 import json
-from threading import Thread, Event
+from threading import Thread, Event, Lock
+from collections import deque
+import random
 
 # Initialize bot
 bot = telebot.TeleBot('7460498911:AAGbjXFhXOOnXIr46dooSq_apvH-OM4HMP4')
 
-# CoinMarketCap API configuration
-CMC_API_KEY = '86baf32f-7a2e-4bfc-88af-1941b444c8c9'  # Replace with your API key
+# API Configuration
+API_KEYS = [
+    '86baf32f-7a2e-4bfc-88af-1941b444c8c9',
+    'bd2c05dc-481e-4770-a3a3-396aa6623c15',
+    '04182d40-7c7c-45ef-8ccb-b017585d70a2',
+    'b169dbb1-cc25-40b7-ab28-d0cbde161bec',
+    '788ea4bd-f0b2-4996-aebd-733e42741c96',
+    '3eefc680-b2ed-407f-b233-490911c798e6',
+    'bf0aa70b-92f6-417d-abd1-e0451fb34715'
+]
 CMC_API_URL = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
-CMC_HEADERS = {
-    'X-CMC_PRO_API_KEY': CMC_API_KEY,
-    'Accept': 'application/json'
-}
+
+
+class APIKeyManager:
+    def __init__(self, api_keys):
+        self.api_keys = api_keys
+        self.current_key_index = 0
+        self.request_counts = {key: deque(maxlen=2592000) for key in api_keys}  # 30 days in seconds
+        self.lock = Lock()
+
+    def get_next_api_key(self):
+        with self.lock:
+            current_time = time.time()
+
+            # Clean up old requests
+            for key in self.api_keys:
+                while self.request_counts[key] and current_time - self.request_counts[key][0] > 2592000:
+                    self.request_counts[key].popleft()
+
+            # Find key with least usage
+            min_requests = float('inf')
+            selected_key = None
+
+            for key in self.api_keys:
+                requests = len(self.request_counts[key])
+                if requests < min_requests:
+                    min_requests = requests
+                    selected_key = key
+
+            if selected_key and min_requests < 10000:
+                self.request_counts[selected_key].append(current_time)
+                return selected_key
+
+            return None
+
+
+class PriceCache:
+    def __init__(self, cache_duration=60):  # Cache duration in seconds
+        self.price = None
+        self.last_update = None
+        self.cache_duration = cache_duration
+        self.lock = Lock()
+
+    def update(self, price):
+        with self.lock:
+            self.price = price
+            self.last_update = time.time()
+
+    def get(self):
+        with self.lock:
+            if self.last_update is None:
+                return None
+            if time.time() - self.last_update > self.cache_duration:
+                return None
+            return self.price
 
 # Persistent storage for user data
 USER_STATES_FILE = "user_states.json"
@@ -61,18 +121,34 @@ def delete_alert(message):
 
 # Load user states from file at startup
 user_states = load_user_states()
-
+# Global instances
+api_manager = APIKeyManager(API_KEYS)
+price_cache = PriceCache()
 
 def get_btc_price():
-    """Fetch the current Bitcoin price in USD using CoinMarketCap API."""
+    """Fetch the current Bitcoin price with caching and API key rotation."""
+    cached_price = price_cache.get()
+    if cached_price is not None:
+        return cached_price
+
+    api_key = api_manager.get_next_api_key()
+    if api_key is None:
+        return None  # All API keys exceeded limits
+
     try:
+        headers = {
+            'X-CMC_PRO_API_KEY': api_key,
+            'Accept': 'application/json'
+        }
         params = {
             'symbol': 'BTC',
             'convert': 'USD'
         }
-        response = requests.get(CMC_API_URL, headers=CMC_HEADERS, params=params, timeout=10)
+        response = requests.get(CMC_API_URL, headers=headers, params=params, timeout=10)
         data = response.json()
-        return data['data']['BTC']['quote']['USD']['price']
+        price = data['data']['BTC']['quote']['USD']['price']
+        price_cache.update(price)
+        return price
     except Exception as e:
         print(f"Error fetching BTC price: {e}")
         return None
@@ -104,27 +180,26 @@ def show_live_price(message):
 
 
 def update_price_message(chat_id, message_id):
-    """Update the price message every minute."""
-    try:
-        while not stop_event.is_set():
-            current_price = get_btc_price()
-            if current_price is None:
-                time.sleep(60)
-                continue
+    """Update price message with reduced frequency."""
+    update_interval = random.randint(55, 65)  # Randomize interval to prevent synchronized requests
 
-            try:
-                bot.edit_message_text(
-                    f"Current BTC Price: ${current_price:,.2f} USD\n\nLast update: {time.strftime('%H:%M:%S')}",
-                    chat_id=chat_id,
-                    message_id=message_id
-                )
-            except telebot.apihelper.ApiTelegramException as e:
-                if "message is not modified" not in str(e).lower():
-                    raise e
+    while not stop_event.is_set():
+        current_price = get_btc_price()
+        if current_price is None:
+            time.sleep(update_interval)
+            continue
 
-            time.sleep(60)
-    except Exception as e:
-        print(f"Error in update_price_message: {e}")
+        try:
+            bot.edit_message_text(
+                f"Current BTC Price: ${current_price:,.2f} USD\n\nLast update: {time.strftime('%H:%M:%S')}",
+                chat_id=chat_id,
+                message_id=message_id
+            )
+        except telebot.apihelper.ApiTelegramException as e:
+            if "message is not modified" not in str(e).lower():
+                raise e
+
+        time.sleep(update_interval)
 
 
 @bot.message_handler(commands=['start'])
@@ -161,46 +236,42 @@ def handle_target_price(message):
 
 
 def monitor_target_price(chat_id, target_price):
-    """Monitor BTC price and alert when it nears the target."""
-    try:
-        while not stop_event.is_set():
-            current_price = get_btc_price()
-            if current_price is None:
-                time.sleep(60)
-                continue
+    """Monitor target price with optimized checking."""
+    check_interval = random.randint(55, 65)
 
-            if abs(current_price - target_price) <= 100:
-                bot.send_message(chat_id, f"Target price reached! Current price: ${current_price:,.2f} USD")
-                break
+    while not stop_event.is_set():
+        current_price = get_btc_price()
+        if current_price is None:
+            time.sleep(check_interval)
+            continue
 
-            time.sleep(60)
-    except Exception as e:
-        print(f"Error in monitor_target_price: {e}")
+        if abs(current_price - target_price) <= 100:
+            bot.send_message(chat_id, f"Target price reached! Current price: ${current_price:,.2f} USD")
+            break
+
+        time.sleep(check_interval)
 
 
 def monitor_price_changes(chat_id, threshold=1000):
-    """Monitor BTC price changes and notify of significant shifts."""
-    try:
-        last_price = get_btc_price()
-        last_notification_price = last_price
+    """Monitor price changes with optimized checking."""
+    check_interval = random.randint(55, 65)
+    last_price = get_btc_price()
+    last_notification_price = last_price
 
-        while not stop_event.is_set():
-            current_price = get_btc_price()
-            if current_price is None:
-                time.sleep(60)
-                continue
+    while not stop_event.is_set():
+        current_price = get_btc_price()
+        if current_price is None:
+            time.sleep(check_interval)
+            continue
 
-            price_change = abs(current_price - last_notification_price)
+        price_change = abs(current_price - last_notification_price)
+        if price_change >= threshold:
+            direction = "up to" if current_price > last_notification_price else "down to"
+            bot.send_message(chat_id, f"Price went {direction} ${current_price:,.2f} USD")
+            last_notification_price = current_price
 
-            if price_change >= threshold:
-                direction = "up to" if current_price > last_notification_price else "down to"
-                bot.send_message(chat_id, f"Price went {direction} ${current_price:,.2f} USD")
-                last_notification_price = current_price
-
-            last_price = current_price
-            time.sleep(60)
-    except Exception as e:
-        print(f"Error in monitor_price_changes: {e}")
+        last_price = current_price
+        time.sleep(check_interval)
 
 
 if __name__ == "__main__":
