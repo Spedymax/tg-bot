@@ -67,7 +67,7 @@ def update_price_message(chat_id, message_id):
 
             try:
                 bot.edit_message_text(
-                    f"Current BTC Price: ${current_price:,.2f} USD\n\nLast update: {time.strftime('%H:%M:%S')}",
+                    f"Current BTC Price: ${current_price} USD\n\nLast update: {time.strftime('%H:%M:%S')}",
                     chat_id=chat_id,
                     message_id=message_id
                 )
