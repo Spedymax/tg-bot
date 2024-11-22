@@ -7,6 +7,14 @@ from threading import Thread, Event
 # Initialize bot
 bot = telebot.TeleBot('7460498911:AAGbjXFhXOOnXIr46dooSq_apvH-OM4HMP4')
 
+# CoinMarketCap API configuration
+CMC_API_KEY = '86baf32f-7a2e-4bfc-88af-1941b444c8c9'  # Replace with your API key
+CMC_API_URL = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
+CMC_HEADERS = {
+    'X-CMC_PRO_API_KEY': CMC_API_KEY,
+    'Accept': 'application/json'
+}
+
 # Persistent storage for user data
 USER_STATES_FILE = "user_states.json"
 stop_event = Event()
@@ -25,15 +33,55 @@ def save_user_states(states):
         json.dump(states, file)
 
 
+@bot.message_handler(commands=['list_alerts'])
+def list_alerts(message):
+    """List all active price alerts for the user."""
+    chat_id = message.chat.id
+    user_state = user_states.get(chat_id, {})
+
+    if 'target_price' in user_state:
+        target_price = user_state['target_price']
+        bot.reply_to(message, f"Your active price alert:\n${target_price:,.2f} USD")
+    else:
+        bot.reply_to(message, "You have no active price alerts.")
+
+
+@bot.message_handler(commands=['delete_alert'])
+def delete_alert(message):
+    """Delete the user's price alert."""
+    chat_id = message.chat.id
+    if chat_id in user_states and 'target_price' in user_states[chat_id]:
+        target_price = user_states[chat_id]['target_price']
+        del user_states[chat_id]['target_price']
+        save_user_states(user_states)
+        bot.reply_to(message, f"Price alert for ${target_price:,.2f} USD has been deleted.")
+    else:
+        bot.reply_to(message, "You have no active price alerts to delete.")
+
+
 # Load user states from file at startup
 user_states = load_user_states()
+
+
+def get_btc_price():
+    """Fetch the current Bitcoin price in USD using CoinMarketCap API."""
+    try:
+        params = {
+            'symbol': 'BTC',
+            'convert': 'USD'
+        }
+        response = requests.get(CMC_API_URL, headers=CMC_HEADERS, params=params, timeout=10)
+        data = response.json()
+        return data['data']['BTC']['quote']['USD']['price']
+    except Exception as e:
+        print(f"Error fetching BTC price: {e}")
+        return None
 
 
 @bot.message_handler(commands=['price'])
 def show_live_price(message):
     """Show current BTC price and update it every minute."""
     try:
-        # Send initial price message
         current_price = get_btc_price()
         if current_price is None:
             bot.reply_to(message, "Error fetching BTC price. Please try again later.")
@@ -44,7 +92,6 @@ def show_live_price(message):
             f"Current BTC Price: ${current_price:,.2f} USD\n\nUpdating every minute..."
         )
 
-        # Start price update thread
         Thread(
             target=update_price_message,
             args=(message.chat.id, sent_message.message_id),
@@ -67,7 +114,7 @@ def update_price_message(chat_id, message_id):
 
             try:
                 bot.edit_message_text(
-                    f"Current BTC Price: ${current_price} USD\n\nLast update: {time.strftime('%H:%M:%S')}",
+                    f"Current BTC Price: ${current_price:,.2f} USD\n\nLast update: {time.strftime('%H:%M:%S')}",
                     chat_id=chat_id,
                     message_id=message_id
                 )
@@ -80,24 +127,15 @@ def update_price_message(chat_id, message_id):
         print(f"Error in update_price_message: {e}")
 
 
-def get_btc_price():
-    """Fetch the current Bitcoin price in USD."""
-    try:
-        response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
-                                timeout=10)
-        return response.json().get('bitcoin', {}).get('usd')
-    except Exception as e:
-        print(f"Error fetching BTC price: {e}")
-        return None
-
-
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.reply_to(message,
-        "Welcome! Available commands:\n"
-        "/set_check_btc_price - Set a price alert\n"
-        "/price - Show live BTC price updates"
-    )
+                 "Welcome! Available commands:\n"
+                 "/set_check_btc_price - Set a price alert\n"
+                 "/price - Show live BTC price updates\n"
+                 "/list_alerts - Show your active price alerts\n"
+                 "/delete_alert - Delete a price alert"
+                 )
 
 
 @bot.message_handler(commands=['set_check_btc_price'])
@@ -117,7 +155,6 @@ def handle_target_price(message):
 
         bot.reply_to(message, f"Alert set for ${target_price:,.2f} USD")
 
-        # Start monitoring in a separate thread
         Thread(target=monitor_target_price, args=(message.chat.id, target_price), daemon=True).start()
     except ValueError:
         bot.reply_to(message, "Please enter a valid number.")
@@ -168,11 +205,9 @@ def monitor_price_changes(chat_id, threshold=1000):
 
 if __name__ == "__main__":
     try:
-        # Start monitoring significant price changes in a background thread
         Thread(target=monitor_price_changes, args=(741542965,), daemon=True).start()
-
         print("Bot is running. Press Ctrl+C to stop.")
-        bot.polling()  # Start the bot
+        bot.polling()
     except KeyboardInterrupt:
         print("\nShutting down bot gracefully...")
         stop_event.set()
