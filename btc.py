@@ -29,6 +29,57 @@ def save_user_states(states):
 user_states = load_user_states()
 
 
+@bot.message_handler(commands=['price'])
+def show_live_price(message):
+    """Show current BTC price and update it every minute."""
+    try:
+        # Send initial price message
+        current_price = get_btc_price()
+        if current_price is None:
+            bot.reply_to(message, "Error fetching BTC price. Please try again later.")
+            return
+
+        sent_message = bot.reply_to(
+            message,
+            f"Current BTC Price: ${current_price:,.2f} USD\n\nUpdating every minute..."
+        )
+
+        # Start price update thread
+        Thread(
+            target=update_price_message,
+            args=(message.chat.id, sent_message.message_id),
+            daemon=True
+        ).start()
+
+    except Exception as e:
+        print(f"Error in show_live_price: {e}")
+        bot.reply_to(message, "An error occurred. Please try again later.")
+
+
+def update_price_message(chat_id, message_id):
+    """Update the price message every minute."""
+    try:
+        while not stop_event.is_set():
+            current_price = get_btc_price()
+            if current_price is None:
+                time.sleep(60)
+                continue
+
+            try:
+                bot.edit_message_text(
+                    f"Current BTC Price: ${current_price:,.2f} USD\n\nLast update: {time.strftime('%H:%M:%S')}",
+                    chat_id=chat_id,
+                    message_id=message_id
+                )
+            except telebot.apihelper.ApiTelegramException as e:
+                if "message is not modified" not in str(e).lower():
+                    raise e
+
+            time.sleep(60)
+    except Exception as e:
+        print(f"Error in update_price_message: {e}")
+
+
 def get_btc_price():
     """Fetch the current Bitcoin price in USD."""
     try:
@@ -42,7 +93,11 @@ def get_btc_price():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "Welcome! Use /set_check_btc_price to set a price alert.")
+    bot.reply_to(message,
+        "Welcome! Available commands:\n"
+        "/set_check_btc_price - Set a price alert\n"
+        "/price - Show live BTC price updates"
+    )
 
 
 @bot.message_handler(commands=['set_check_btc_price'])
