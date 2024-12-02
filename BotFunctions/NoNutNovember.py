@@ -38,14 +38,15 @@ def send_daily_checkin(bot, chat_id):
 
 def schedule_daily_checkin(bot, chat_id):
     def run():
-        while True:
-            now = datetime.now()
-            next_run = now.replace(hour=11, minute=00, second=0, microsecond=0)
-            if now >= next_run:
-                next_run += timedelta(days=1)
-            time_to_wait = (next_run - now).total_seconds()
-            time.sleep(time_to_wait)
-            send_daily_checkin(bot, chat_id)
+        now = datetime.now()
+        if now.month == 11:
+            while True:
+                next_run = now.replace(hour=11, minute=00, second=0, microsecond=0)
+                if now >= next_run:
+                    next_run += timedelta(days=1)
+                time_to_wait = (next_run - now).total_seconds()
+                time.sleep(time_to_wait)
+                send_daily_checkin(bot, chat_id)
     threading.Thread(target=run).start()
 
 def handle_checkin_callback(call, bot, pisunchik, save_data):
