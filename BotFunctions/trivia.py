@@ -6,7 +6,6 @@ from telebot import types
 import json
 from datetime import datetime, timezone
 
-API_URL = "https://api.api-ninjas.com/v1/trivia"
 DIFFICULTY = 'medium'
 CATEGORIES = 'general,entertainment,geography,sciencenature,fooddrink,peopleplaces'
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -24,9 +23,9 @@ original_questions = {}
 
 def fetch_trivia_questions(categories, cursor, headers):
     for i in range(50):
-        params = {"category": categories}
+        API_URL = 'https://api.api-ninjas.com/v1/trivia'
         try:
-            response = requests.get(API_URL, params=params, headers=headers)
+            response = requests.get(API_URL, headers=headers)
             response.raise_for_status()
             question_data = response.json()[0]
 
@@ -43,7 +42,7 @@ def is_question_in_database(question, cursor):
 
 
 headers2 = {
-    "X-Api-Key": "hjvcRr/5dpubsuksJXy8jA==qMIPk0DacEoy2XjI"
+    "X-Api-Key": "moGKfa1h6H4f95COwnuELg==peeKU76sjBgNFpRu"
 }
 
 
@@ -68,7 +67,7 @@ def send_trivia_questions(chat_id, bot, cursor, conn, headers):
 
         save_question_to_database(question_text, correct_answer, answer_options, cursor, conn)
     except Exception:
-        bot.send_message(-1001294162183, 'Error while fetching trivia.')
+        bot.send_message(chat_id, 'Error while fetching trivia.')
 
 
 def get_funny_answer(question, answer_options, headers):
