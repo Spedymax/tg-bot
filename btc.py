@@ -252,30 +252,62 @@ def monitor_target_price(chat_id, target_price):
         time.sleep(check_interval)
 
 
-def monitor_price_changes(chat_id, threshold=1000):
-    """Monitor price changes with optimized checking."""
+def monitor_price_changes(chat_id):
+    """Monitor price changes and notify when crossing $500 thresholds."""
     check_interval = random.randint(55, 65)
-    last_price = get_btc_price()
-    last_notification_price = last_price
+    last_price = None  # Track the price from the previous check
 
     while not stop_event.is_set():
         current_price = get_btc_price()
         if current_price is None:
             time.sleep(check_interval)
             continue
+        direction = None
+        if last_price is not None:
+            thresholds = []
+            if current_price > last_price:
+                # Price increased: check upwards thresholds
+                step = 500
+                first_threshold = ((last_price // step) + 1) * step
+                current_threshold = first_threshold
+                while current_threshold <= current_price:
+                    thresholds.append(current_threshold)
+                    current_threshold += step
+                direction = 'up'
+            elif current_price < last_price:
+                # Price decreased: check downwards thresholds
+                step = 500
+                first_threshold = (last_price // step) * step
+                # If last_price was exactly on a threshold, start from the next lower one
+                if last_price == first_threshold:
+                    first_threshold -= step
+                current_threshold = first_threshold
+                while current_threshold >= current_price:
+                    thresholds.append(current_threshold)
+                    current_threshold -= step
+                direction = 'down'
+            else:
+                # No price change
+                thresholds = []
 
-        price_change = abs(current_price - last_notification_price)
-        if price_change >= threshold:
-            direction = "up to" if current_price > last_notification_price else "down to"
-            bot.send_message(chat_id, f"Price went {direction} ${current_price:,.2f} USD")
-            last_notification_price = current_price
+            # Send notifications for each threshold crossed
+            for threshold in thresholds:
+                if direction == 'up':
+                    message = f"🚀 Price reached ${threshold:,.0f} USD (Current: ${current_price:,.2f})"
+                else:
+                    message = f"🔻 Price fell below ${threshold:,.0f} USD (Current: ${current_price:,.2f})"
+                try:
+                    bot.send_message(chat_id, message)
+                except Exception as e:
+                    print(f"Error sending message: {e}")
 
+        # Update last_price for the next iteration
         last_price = current_price
         time.sleep(check_interval)
 
-
 if __name__ == "__main__":
     try:
+        # Start monitoring price changes for the specified chat ID
         Thread(target=monitor_price_changes, args=(741542965,), daemon=True).start()
         print("Bot is running. Press Ctrl+C to stop.")
         bot.polling()
