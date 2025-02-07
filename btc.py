@@ -254,7 +254,7 @@ def monitor_target_price(chat_id, target_price):
 
 def monitor_price_changes(chat_id):
     """Monitor price changes and notify when crossing $500 thresholds."""
-    check_interval = random.randint(55, 65)
+    check_interval = 300 # 5 min
     last_price = None  # Track the price from the previous check
 
     while not stop_event.is_set():
