@@ -64,9 +64,9 @@ MATCHUP_TIME = "12:00"  # Формат ЧЧ:ММ
 
 # Плейлисты Spotify для каждого друга
 PLAYLISTS = {
-    "Max": "https://open.spotify.com/playlist/0gwy0oCdOogcb37FWQunFm?si=d97101113244400f",
-    "Yura": "https://open.spotify.com/playlist/0MeiPQyQh3Nd3mDr5JleQM?si=2e5924faaaa345aa",
-    "Bogdan": "https://open.spotify.com/playlist/4xGkrno4vquibfnoherdvO?si=a7d23312d4184714"
+    "Max": "https://open.spotify.com/playlist/7ph2Eak2w4HPuUclSarCpo?si=db6465a186904372",
+    "Yura": "https://open.spotify.com/playlist/0MeiPQyQh3Nd3mDr5JleQM?si=ca38ce473d774c6e",
+    "Bogdan": "https://open.spotify.com/playlist/1PEYtVxKK79sfwpHJtu4WA?si=9c1c8fe11f164432"
 }
 
 song_pools = {}
@@ -529,6 +529,8 @@ def tournament_info(message):
     info_text += f"Ещё в игре: {competing}\n"
     info_text += f"Вылетели: {eliminated}\n"
     bot.reply_to(message, info_text)
+
+
 
 
 @bot.message_handler(commands=['manual_matchup'])
