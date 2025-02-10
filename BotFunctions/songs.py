@@ -519,6 +519,7 @@ def announce_tournament(message):
     bot.reply_to(message, rules)
 
 
+
 @bot.message_handler(commands=['tournament_info'])
 def tournament_info(message):
     global current_round_size, current_tournament_round, current_round_number, current_matchup
