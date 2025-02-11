@@ -459,7 +459,7 @@ def handle_vote(call):
         logging.error("Ошибка редактирования сообщения: %s", str(e))
     bot.answer_callback_query(call.id, "Спасибо за голос, рок-звезда!")
     total_votes = vote1_count + vote2_count
-    if total_votes >= 2:
+    if total_votes >= 3:
         finalize_matchup()
 
 
@@ -602,7 +602,7 @@ def simulate_vote(message):
         total_votes = vote1_count + vote2_count
         bot.reply_to(message,
                      f"Симуляция голоса для варианта {vote_value} завершена. Всего голосов: {total_votes}. Продолжайте битву!")
-        if total_votes >= 2:
+        if total_votes >= 3:
             finalize_matchup()
     except Exception as e:
         bot.reply_to(message, f"Упс, ошибка при симуляции голосования: {str(e)}")
