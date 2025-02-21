@@ -1567,7 +1567,7 @@ def kazik_wrapper(message):
 
 @bot.message_handler(commands=['trivia'])
 def trivia_wrapper(message):
-    trivia.send_trivia_questions(message.chat.id, bot, cursor, conn, headers)
+    trivia.send_trivia_questions(message.chat.id, bot, cursor, conn)
 
 
 @bot.message_handler(commands=['correct_answers'])
@@ -1877,7 +1877,7 @@ def can_use_pisunchik():
             #-1002491624152 mushroom
             #-1001294162183 the boys
             for chat_id in [-1001294162183]:
-                trivia.send_trivia_questions(chat_id, bot, cursor, conn, headers)
+                trivia.send_trivia_questions(chat_id, bot, cursor, conn)
         if curr_time.hour == 21 and curr_time.minute == 50:
             for chat_id in [-1001294162183]:
                 trivia.get_correct_answers(bot, pisunchik, cursor, chat_id)
