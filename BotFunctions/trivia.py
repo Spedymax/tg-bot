@@ -6,6 +6,8 @@ from telebot import types
 import json
 from datetime import datetime, timezone
 
+from BotFunctions.cryptography import clientGoogle
+
 DIFFICULTY = 'medium'
 CATEGORIES = 'general,entertainment,geography,sciencenature,fooddrink,peopleplaces'
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -46,7 +48,7 @@ headers2 = {
 }
 
 
-def send_trivia_questions(chat_id, bot, cursor, conn, headers):
+def send_trivia_questions(chat_id, bot, cursor, conn):
     try:
         category = random.choice(CATEGORIES.split(','))
         question_data = fetch_trivia_questions(category, cursor, headers2)
@@ -58,7 +60,7 @@ def send_trivia_questions(chat_id, bot, cursor, conn, headers):
         correct_answer = html.unescape(question_data["answer"])
         print(correct_answer)
 
-        funny_answer = get_funny_answer(question_text, correct_answer, headers)
+        funny_answer = get_funny_answer(question_text, correct_answer)
         split_answers = funny_answer.split(",")
         answer_options = [correct_answer, split_answers[0], split_answers[1], split_answers[2]]
         # Shuffle the answer options
@@ -66,28 +68,24 @@ def send_trivia_questions(chat_id, bot, cursor, conn, headers):
         send_question_with_options(chat_id, bot, question_text, answer_options, cursor)
 
         save_question_to_database(question_text, correct_answer, answer_options, cursor, conn)
-    except Exception:
-        bot.send_message(chat_id, 'Error while fetching trivia.')
+    except Exception as e:
+        bot.send_message(chat_id, f'Error while fetching trivia: {e}')
 
 
-def get_funny_answer(question, answer_options, headers):
+def get_funny_answer(question, answer_options):
     try:
-        data = {"model": "gpt-4o", "messages": [{
-            "role": "system",
-            "content": "You're tasked with generating a wrong responses only to the question provided above, "
+        response = clientGoogle.models.generate_content(
+            model="gemini-2.0-flash", contents=f"{question} \n{answer_options}\nYou're tasked with generating a wrong responses only to the question provided above, "
                        "considering the given answer. Your goal is to come up with 3 wrong answers."
                        "Please separate your response answers with comma. Be aware with the capital letters, "
                        "if the correct answer starts from big letter you must write other answers starting from big "
                        "letter too. Your answer must look like this:"
                        "wrong_answer,wrong_answer,wrong_answer"
-        },
-            {"role": "user", "content": f"{question} \n{answer_options}"}],
-                "temperature": 0.7}
-        response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers, data=json.dumps(data))
-        response_data = response.json()
-        return response_data['choices'][0]['message']['content']
-    except Exception:
-        return "No funny answer available."
+        )
+        response_data = response.text
+        return response_data
+    except Exception as e:
+        return f"No funny answer available: {e}"
 
 
 def save_question_to_database(question, correct_answer, answer_options, cursor, conn):

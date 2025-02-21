@@ -26,7 +26,7 @@ def decrypt_file(encrypted_file_path, decrypted_file_path):
 
 
 # Usage
-# original_file = '../Api Keys.xlsx'  # Replace with your Excel file path
+# original_file = '../assistant_creds.xlsx'  # Replace with your Excel file path
 # encrypted_file = 'encrypted.xlsx'  # Replace with path for the encrypted file
 # decrypted_file = 'decrypted.xlsx'  # Replace with path for the decrypted file
 #
