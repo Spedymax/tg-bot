@@ -400,7 +400,6 @@ def finalize_matchup_bracket():
     active_matchup = None
     current_matchup_index += 1
     save_tournament_state()
-    post_daily_matchup_bracket()
 
 def record_matchup_result(matchup, winner, vote1=0, vote2=0):
     matchup_result = {"winner": winner, "vote1": vote1, "vote2": vote2}
