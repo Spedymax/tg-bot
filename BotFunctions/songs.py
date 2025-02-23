@@ -1,4 +1,4 @@
-DB_CONN_STRING = "dbname='server-tg-pisunchik' user='postgres' password='123' host='192.168.8.2'"
+# DB_CONN_STRING = "dbname='server-tg-pisunchik' user='postgres' password='123' host='192.168.8.2'"
 
 # YOUR_CHAT_ID = 741542965  # Замените на свой Telegram chat id
 
@@ -54,7 +54,7 @@ def get_tracks_from_playlist(playlist_url):
 logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = "7815692651:AAGBWOiEBMbulQOC_-6uvvBl9oF08pn3cJ0"
-# DB_CONN_STRING = "dbname='server-tg-pisunchik' user='admin' password='Sokoez32' host='localhost'"
+DB_CONN_STRING = "dbname='server-tg-pisunchik' user='admin' password='Sokoez32' host='localhost'"
 DOWNLOAD_DIR = "../downloads"
 YOUR_CHAT_ID = -1001294162183  # Замените на свой Telegram chat id
 
