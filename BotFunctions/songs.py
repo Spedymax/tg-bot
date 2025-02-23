@@ -1,4 +1,4 @@
-# DB_CONN_STRING = "dbname='server-tg-pisunchik' user='postgres' password='123' host='192.168.8.2'"
+DB_CONN_STRING = "dbname='server-tg-pisunchik' user='postgres' password='123' host='192.168.8.2'"
 
 # YOUR_CHAT_ID = 741542965  # Замените на свой Telegram chat id
 
@@ -54,18 +54,18 @@ def get_tracks_from_playlist(playlist_url):
 logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = "7815692651:AAGBWOiEBMbulQOC_-6uvvBl9oF08pn3cJ0"
-DB_CONN_STRING = "dbname='server-tg-pisunchik' user='admin' password='Sokoez32' host='localhost'"
+# DB_CONN_STRING = "dbname='server-tg-pisunchik' user='admin' password='Sokoez32' host='localhost'"
 DOWNLOAD_DIR = "../downloads"
 YOUR_CHAT_ID = -1001294162183  # Замените на свой Telegram chat id
 
 # Расписание матчей: 2 голосования в день (например, в 12:00 и 18:00)
 MATCHUP_TIMES = ["12:00", "18:00"]
 
-# Плейлисты Spotify для каждого участника (примерно по 10 треков в каждом)
+# Плейлисты Spotify для каждого участника (примерно по 12 треков в каждом)
 PLAYLISTS = {
-    "Max": "https://open.spotify.com/playlist/7ph2Eak2w4HPuUclSarCpo?si=db6465a186904372",
-    "Yura": "https://open.spotify.com/playlist/0MeiPQyQh3Nd3mDr5JleQM?si=ca38ce473d774c6e",
-    "Bogdan": "https://open.spotify.com/playlist/1PEYtVxKK79sfwpHJtu4WA?si=9c1c8fe11f164432"
+    "Max": "https://open.spotify.com/playlist/08rdra0gD67WtBLW1bsO6H?si=b2af7737f05c401e",
+    "Yura": "https://open.spotify.com/playlist/1dAbSSXLOQtchgDEk9fT8n?si=duZs2KIATI6P5y0rR8u1Dw&pi=ovW_dnvHSui0Z",
+    "Bogdan": "https://open.spotify.com/playlist/2HXLIMwPsz98ExLaeTAYNF?si=ejkJDecYQoeHK-hZ_Ht5Cg&pi=Krea-51RQBC72"
 }
 
 song_pools = {}
@@ -80,24 +80,44 @@ for friend, playlist_url in PLAYLISTS.items():
 # ============================
 def create_pairs(songs):
     """
-    Принимает список треков (dict с ключами 'track_uri' и 'friend')
-    и возвращает список пар, где пары состоят из двух треков от разных участников.
-    Если подходящего кандидата нет, трек получает bye (второй элемент None).
+    Формирует пары так, чтобы песни от разных участников парились максимально равномерно.
+    Сначала группируем песни по "friend", перемешиваем внутри групп, а затем по очереди
+    выбираем по одной песне из двух групп с наибольшим числом оставшихся песен.
+    Если осталась только одна группа, её песни получают "бай" (пара с None).
     """
+    import random
+
+    # Группировка песен по участнику
+    groups = {}
+    for song in songs:
+        groups.setdefault(song["friend"], []).append(song)
+
+    # Перемешиваем песни внутри каждой группы для случайности
+    for friend2 in groups:
+        random.shuffle(groups[friend2])
+
     pairs = []
-    songs_copy = songs[:]
-    random.shuffle(songs_copy)
-    while songs_copy:
-        first = songs_copy.pop(0)
-        found = False
-        for i, candidate in enumerate(songs_copy):
-            if candidate["friend"] != first["friend"]:
-                pairs.append((first, songs_copy.pop(i)))
-                found = True
-                break
-        if not found:
-            pairs.append((first, None))
+    # Пока есть хотя бы две группы с оставшимися песнями
+    while True:
+        available = [(friend1, lst) for friend1, lst in groups.items() if lst]
+        if len(available) < 2:
+            break
+        # Сортируем группы по количеству оставшихся песен (по убыванию)
+        available.sort(key=lambda x: len(x[1]), reverse=True)
+        # Выбираем первую и вторую группу
+        friend1, list1 = available[0]
+        friend2, list2 = available[1]
+        song1 = list1.pop(0)
+        song2 = list2.pop(0)
+        pairs.append((song1, song2))
+
+    # Для оставшихся песен (если осталась только одна группа) присваиваем бай
+    for friend2, lst in groups.items():
+        for song in lst:
+            pairs.append((song, None))
+
     return pairs
+
 
 # ============================
 # Переменные турнира (Bracket)
