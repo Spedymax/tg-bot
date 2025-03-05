@@ -398,6 +398,76 @@ def handle_bracket_vote(call):
     if total_votes >= 3:
         finalize_matchup_bracket()
 
+
+ADMIN_IDS = [741542965]  # Добавьте сюда ID администраторов
+
+@bot.message_handler(commands=['vote_for'])
+def vote_for_player(message):
+    if message.from_user.id not in ADMIN_IDS:
+        bot.reply_to(message, "❌ Эта команда доступна только администраторам.")
+        return
+        
+    try:
+        # Формат: /vote_for user_id song_number
+        parts = message.text.split()
+        if len(parts) != 3:
+            bot.reply_to(message, "❌ Использование: /vote_for user_id song_number")
+            return
+            
+        voter_id = parts[1]
+        vote_value = parts[2]
+        
+        if active_matchup is None:
+            bot.reply_to(message, "❌ Нет активного матча.")
+            return
+            
+        if voter_id in active_matchup["votes"]["1"] or voter_id in active_matchup["votes"]["2"]:
+            bot.reply_to(message, "❌ Этот пользователь уже голосовал!")
+            return
+            
+        if vote_value not in ["1", "2"]:
+            bot.reply_to(message, "❌ Номер песни должен быть 1 или 2")
+            return
+            
+        active_matchup["votes"][vote_value].add(voter_id)
+        if active_matchup["matchup_id"]:
+            insert_vote_into_db(active_matchup["matchup_id"], voter_id, vote_value)
+            
+        vote1_count = len(active_matchup["votes"]["1"])
+        vote2_count = len(active_matchup["votes"]["2"])
+        
+        new_text = f"🎤 Текущие голоса:\nПесня 1: {vote1_count}\nПесня 2: {vote2_count}"
+        bot.edit_message_text(new_text,
+                            chat_id=active_matchup["chat_id"],
+                            message_id=active_matchup["trivia_msg_id"],
+                            reply_markup=active_matchup["reply_markup"])
+                            
+        bot.reply_to(message, f"✅ Голос пользователя {voter_id} за песню {vote_value} засчитан!")
+        
+        total_votes = vote1_count + vote2_count
+        if total_votes >= 3:
+            finalize_matchup_bracket()
+            
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {str(e)}")
+
+# Добавим функцию для уведомления неголосовавших
+def notify_non_voters():
+    if active_matchup is None:
+        return
+        
+    # Получаем список всех возможных участников
+    all_participants = set(742272644, 741542965, 855951767)  # Здесь нужно добавить ID всех участников
+    voted_participants = active_matchup["votes"]["1"].union(active_matchup["votes"]["2"])
+    non_voters = all_participants - voted_participants
+    
+    if non_voters:
+        mention_text = " ".join([f"@{uid}" for uid in non_voters])
+        bot.send_message(YOUR_CHAT_ID, 
+                        f"⚠️ Напоминание! {mention_text}\n"
+                        f"У вас есть 30 минут, чтобы проголосовать в текущем матче!")
+
+
 def finalize_matchup_bracket():
     global active_matchup, current_matchup_index
     if active_matchup is None:
@@ -516,6 +586,14 @@ def schedule_daily_matchups():
         scheduler.add_job(post_daily_matchup_bracket, 'interval', days=1, next_run_time=target_time)
         logging.info("Матч запланирован на %s (через %d секунд)", t, int((target_time - now).total_seconds()))
 
+def schedule_reminder_before_matchup():
+    for t in MATCHUP_TIMES:
+        reminder_time = datetime.strptime(t, "%H:%M") - timedelta(minutes=30)
+        reminder_time = reminder_time.strftime("%H:%M")
+        scheduler.add_job(notify_non_voters, 'cron', hour=reminder_time.split(":")[0], 
+                        minute=reminder_time.split(":")[1])
+
+
 # ============================
 # Основное выполнение
 # ============================
@@ -528,5 +606,6 @@ if __name__ == "__main__":
     else:
         initialize_bracket_tournament()
     schedule_daily_matchups()
+    schedule_reminder_before_matchup()  # Добавляем планировщик уведомлений
     scheduler.start()
     bot.infinity_polling()
