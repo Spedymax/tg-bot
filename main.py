@@ -1423,10 +1423,6 @@ def update_items(player_id, items, coins):
 def furry_wrapper(message):
     rofl.send_furry_pics(message, random, bot)
 
-@bot.message_handler(commands=['furrypics2'])
-def furry_wrapper(message):
-    rofl.send_furry_pics(message, bot, "yiff")
-
 
 @bot.message_handler(commands=['kazik'])
 def kazik_wrapper(message):
