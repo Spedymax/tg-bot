@@ -17,57 +17,42 @@ def zov(message, bot):
     bot.send_message(message.chat.id, 'ZOV Z Z Z ZA СВОих СВО ГОЙДА ГОЙДА Z Z ZZZ ZOV ZOV СВО')
 
 
-def get_furry_images(category="cute", count=5):
-    """
-    Fetches a list of furry image URLs from Jay's Furry API.
-
-    Parameters:
-      category (str): API category to use; should be one of "cute", "meme", or "yiff".
-      count (int): Number of images to fetch.
-
-    Returns:
-      list[str]: List of image URLs.
-    """
-    base_url = "https://193.161.193.99:63393"
+def get_furry_images():
+    # Get the URL of the furry image website.
     image_urls = []
-    for _ in range(count):
-        response = requests.get(f"{base_url}/{category}")
-        if response.status_code == 200:
-            # Assuming the API returns the image URL as plain text.
-            image_url = response.text.strip()
-            image_urls.append(image_url)
-        else:
-            print(f"Error fetching {category} image: {response.status_code}")
+    for x in range(1, 3):
+        url = "https://imgbin.com/free-png/furry-art/" + str(x)
+        # Make a request to the website.
+        response = requests.get(url)
+
+        # Parse the response.
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        # Find all the image links.
+        for x in range(1, 10):
+            # Find the image link by id
+            image_link = soup.find(id='listimg' + str(x))
+
+            if image_link:
+                # Extract the URL from the 'src' attribute of the 'img' tag
+
+                if 'data-src' in image_link.attrs:
+                    image_url = image_link['data-src']
+                    image_urls.append(image_url)
+
     return image_urls
 
 
 image_urls2 = get_furry_images()
 print("Loaded")
 
-
-def send_furry_pics(message, bot, category="cute", count=5):
-    """
-    Selects a set of furry image URLs from Jay's Furry API and sends them via Telegram.
-
-    Parameters:
-      message: Telegram message object.
-      bot: Telegram bot instance.
-      category (str): Category of images to fetch ("cute", "meme", "yiff").
-      count (int): Number of images to send.
-    """
-    image_urls = get_furry_images(category, count)
-    # Alternatively, if you want a random selection from a larger pool, you can fetch more and then use sample()
-    # image_urls = get_furry_images(category, count * 2)
-    # image_urls = sample(image_urls, count)
-
-    for url in image_urls:
+def send_furry_pics(message, random, bot):
+    random_selection = random.sample(image_urls2, 5)
+    for url in random_selection:
         if url.endswith(('.jpg', '.jpeg', '.png')):
             bot.send_photo(chat_id=message.chat.id, photo=url)
         elif url.endswith(('.gif', '.gifv')):
             bot.send_animation(chat_id=message.chat.id, animation=url)
-        else:
-            # For other file types, you might want to send as a document or handle accordingly.
-            bot.send_message(chat_id=message.chat.id, text=f"Image: {url}")
 
 def otsos(message, pisunchik, bot):
     chat_id = message.chat.id
