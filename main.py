@@ -701,12 +701,12 @@ def handle_callback(call):
     markup = types.InlineKeyboardMarkup()
 
     for player_id in pisunchik:
-        markup.add(types.InlineKeyboardButton(get_player_name(player_id), callback_data=f"select_{action}_{player_id}"))
+        markup.add(types.InlineKeyboardButton(get_player_name(player_id), callback_data=f"selectplayer_{action}_{player_id}"))
 
     bot.send_message(call.message.chat.id, f"Select a player to {action.replace('_', ' ')}:", reply_markup=markup)
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("select"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("selectplayer"))
 def handle_select_player(call):
     if call.from_user.id not in admin_ids:
         return bot.answer_callback_query(call.id, "Unauthorized action.")
