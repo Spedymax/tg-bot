@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from subprocess import Popen, PIPE
 import subprocess
+import sys
 
 import psycopg2
 import requests
@@ -26,19 +27,19 @@ bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
 
 # Establish a database connection
 
-conn = psycopg2.connect(
-    database="server-tg-pisunchik",
-    user="admin",
-    host="localhost",
-    password="Sokoez32"
-)
-
 # conn = psycopg2.connect(
 #     database="server-tg-pisunchik",
-#     user="postgres",
-#     host="192.168.8.2",
-#     password="123"
+#     user="admin",
+#     host="localhost",
+#     password="Sokoez32"
 # )
+
+conn = psycopg2.connect(
+    database="server-tg-pisunchik",
+    user="postgres",
+    host="192.168.8.2",
+    password="123"
+)
 
 # Create a cursor for executing SQL queries
 cursor = conn.cursor()
@@ -301,7 +302,7 @@ def upgrade_characteristic(message):
             for characteristic in existing_characteristic:
                 characteristic_name, _ = characteristic.split(":")
                 button_text = f"{characteristic_name}"
-                callback_data = f"select_{characteristic}"
+                callback_data = f"selectchar_{characteristic}"
                 characteristic_buttons.append(types.InlineKeyboardButton(text=button_text, callback_data=callback_data))
 
             keyboard = types.InlineKeyboardMarkup()
@@ -315,7 +316,7 @@ def upgrade_characteristic(message):
     save_data()
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("select"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("selectchar"))
 def select_characteristic_for_upgrade(call):
     chat_id = call.message.chat.id
     selected_characteristic = call.data.split("_")[1]
@@ -673,82 +674,516 @@ def get_player_name(player_id):
 
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
-    if message.from_user.id not in admin_ids:
-        return bot.reply_to(message, "You are not authorized to access the admin panel.")
+    if message.from_user.id in admin_ids:
+        # Create an inline keyboard for the admin panel with categories
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        
+        # Main categories
+        player_management = types.InlineKeyboardButton("👤 Управление игроками", callback_data="admin_playerManagement")
+        economy = types.InlineKeyboardButton("💰 Экономика", callback_data="admin_economy")
+        items = types.InlineKeyboardButton("🎁 Предметы", callback_data="admin_items")
+        system = types.InlineKeyboardButton("⚙️ Система", callback_data="admin_system")
+        
+        markup.add(player_management, economy, items, system)
+        
+        bot.send_message(message.chat.id, "🎮 Админ-панель\nВыберите категорию:", reply_markup=markup)
+    else:
+        bot.reply_to(message, "У вас нет доступа к админ-панели.")
 
-    markup = types.InlineKeyboardMarkup()
-    buttons = [
-        ("Increase Pisunchik", "increase_pisunchik"),
-        ("Decrease Pisunchik", "decrease_pisunchik"),
-        ("Increase BTC", "increase_btc"),
-        ("Decrease BTC", "decrease_btc"),
-        ("Add Item", "add_item"),
-        ("Remove Item", "remove_item")
-    ]
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_"))
+def handle_admin_categories(call):
+    if call.from_user.id in admin_ids:
+        category = call.data.split("_")[1]
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        
+        if category == "playerManagement":
+            # Player management options
+            buttons = [
+                types.InlineKeyboardButton("➕ Увеличить писюнчик", callback_data="action_increasePisunchik"),
+                types.InlineKeyboardButton("➖ Уменьшить писюнчик", callback_data="action_decreasePisunchik"),
+                types.InlineKeyboardButton("🔄 Сбросить кулдаун", callback_data="action_resetCooldown"),
+                types.InlineKeyboardButton("📊 Статистика игрока", callback_data="action_playerStats"),
+                types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back")
+            ]
+            markup.add(*buttons)
+            
+            bot.edit_message_text(
+                "👤 Управление игроками\nВыберите действие:", 
+                call.message.chat.id, 
+                call.message.message_id, 
+                reply_markup=markup
+            )
+            
+        elif category == "economy":
+            # Economy management options
+            buttons = [
+                types.InlineKeyboardButton("➕ Добавить BTC", callback_data="action_increaseBtc"),
+                types.InlineKeyboardButton("➖ Убрать BTC", callback_data="action_decreaseBtc"),
+                types.InlineKeyboardButton("💱 Управление акциями", callback_data="action_manageStocks"),
+                types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back")
+            ]
+            markup.add(*buttons)
+            bot.edit_message_text("💰 Управление экономикой\nВыберите действие:", 
+                                call.message.chat.id, 
+                                call.message.message_id, 
+                                reply_markup=markup)
+            
+        elif category == "items":
+            # Item management options
+            buttons = [
+                types.InlineKeyboardButton("➕ Добавить предмет", callback_data="action_addItem"),
+                types.InlineKeyboardButton("➖ Убрать предмет", callback_data="action_removeItem"),
+                types.InlineKeyboardButton("🏆 Добавить статуэтку", callback_data="action_addStatue"),
+                types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back")
+            ]
+            markup.add(*buttons)
+            bot.edit_message_text("🎁 Управление предметами\nВыберите действие:", 
+                                call.message.chat.id, 
+                                call.message.message_id, 
+                                reply_markup=markup)
+            
+        elif category == "system":
+            # System management options
+            buttons = [
+                types.InlineKeyboardButton("🔄 Перезапуск бота", callback_data="action_restartBot"),
+                types.InlineKeyboardButton("💾 Бэкап данных", callback_data="action_backupData"),
+                types.InlineKeyboardButton("📢 Рассылка", callback_data="action_broadcast"),
+                types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back")
+            ]
+            markup.add(*buttons)
+            bot.edit_message_text("⚙️ Системные функции\nВыберите действие:", 
+                                call.message.chat.id, 
+                                call.message.message_id, 
+                                reply_markup=markup)
+            
+        elif category == "back":
+            # Return to main admin panel
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            player_management = types.InlineKeyboardButton("👤 Управление игроками", callback_data="admin_playerManagement")
+            economy = types.InlineKeyboardButton("💰 Экономика", callback_data="admin_economy")
+            items = types.InlineKeyboardButton("🎁 Предметы", callback_data="admin_items")
+            system = types.InlineKeyboardButton("⚙️ Система", callback_data="admin_system")
+            markup.add(player_management, economy, items, system)
+            
+            bot.edit_message_text("🎮 Админ-панель\nВыберите категорию:", 
+                                call.message.chat.id, 
+                                call.message.message_id, 
+                                reply_markup=markup)
+    else:
+        bot.answer_callback_query(call.id, "У вас нет доступа к админ-панели.")
 
-    for text, callback in buttons:
-        markup.add(types.InlineKeyboardButton(text, callback_data=f"admin_{callback}"))
 
-    bot.send_message(message.chat.id, "Admin Panel:", reply_markup=markup)
+@bot.callback_query_handler(func=lambda call: call.data.startswith("action_"))
+def handle_admin_actions(call):
+    if call.from_user.id in admin_ids:
+        action = call.data.split("_")[1]
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        
+        if action == "increasePisunchik" or action == "decreasePisunchik":
+            # Создаем кнопки для каждого игрока
+            for player_id, data in pisunchik.items():
+                player_name = data['player_name']
+                button = types.InlineKeyboardButton(
+                    player_name, 
+                    callback_data=f"select_{action}_{player_id}"
+                )
+                markup.add(button)
+            markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_playerManagement"))
+            
+            action_text = "увеличить" if action == "increasePisunchik" else "уменьшить"
+            bot.edit_message_text(
+                f"Выберите игрока, чтобы {action_text} писюнчик:", 
+                call.message.chat.id, 
+                call.message.message_id, 
+                reply_markup=markup
+            )
+
+        elif action == "resetCooldown":
+            # Создаем кнопки для каждого игрока
+            for player_id, data in pisunchik.items():
+                player_name = data['player_name']
+                button = types.InlineKeyboardButton(
+                    player_name, 
+                    callback_data=f"select_resetCooldown_{player_id}"
+                )
+                markup.add(button)
+            markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_playerManagement"))
+            
+            bot.edit_message_text(
+                "Выберите игрока для сброса кулдауна:", 
+                call.message.chat.id, 
+                call.message.message_id, 
+                reply_markup=markup
+            )
+
+        elif action == "playerStats":
+            # Создаем кнопки для каждого игрока
+            for player_id, data in pisunchik.items():
+                player_name = data['player_name']
+                button = types.InlineKeyboardButton(
+                    player_name, 
+                    callback_data=f"select_stats_{player_id}"
+                )
+                markup.add(button)
+            markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_playerManagement"))
+            
+            bot.edit_message_text(
+                "Выберите игрока для просмотра статистики:", 
+                call.message.chat.id, 
+                call.message.message_id, 
+                reply_markup=markup
+            )
+
+        elif action in ["increaseBtc", "decreaseBtc"]:
+            # Создаем кнопки для каждого игрока
+            for player_id, data in pisunchik.items():
+                player_name = data['player_name']
+                button = types.InlineKeyboardButton(
+                    player_name, 
+                    callback_data=f"select_{action}_{player_id}"
+                )
+                markup.add(button)
+            markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_economy"))
+            
+            action_text = "добавить" if action == "increaseBtc" else "убрать"
+            bot.edit_message_text(
+                f"Выберите игрока, чтобы {action_text} BTC:", 
+                call.message.chat.id, 
+                call.message.message_id, 
+                reply_markup=markup
+            )
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("admin"))
-def handle_callback(call):
-    if call.from_user.id not in admin_ids:
-        return bot.answer_callback_query(call.id, "Unauthorized action.")
+        elif action in ["addItem", "removeItem", "addStatue"]:
+            # Создаем кнопки для каждого игрока
+            for player_id, data in pisunchik.items():
+                player_name = data['player_name']
+                button = types.InlineKeyboardButton(
+                    player_name, 
+                    callback_data=f"select_{action}_{player_id}"
+                )
+                markup.add(button)
+            markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_items"))
+            
+            action_text = {
+                "addItem": "добавить предмет",
+                "removeItem": "убрать предмет",
+                "addStatue": "добавить статуэтку"
+            }[action]
+            
+            bot.edit_message_text(
+                f"Выберите игрока, чтобы {action_text}:", 
+                call.message.chat.id, 
+                call.message.message_id, 
+                reply_markup=markup
+            )
 
-    action = call.data.split("_")[1]
-    markup = types.InlineKeyboardMarkup()
+        elif action == "restartBot":
+            markup.add(
+                types.InlineKeyboardButton("✅ Подтвердить", callback_data="confirm_restart"),
+                types.InlineKeyboardButton("❌ Отменить", callback_data="admin_system")
+            )
+            bot.edit_message_text(
+                "Вы уверены, что хотите перезапустить бота?", 
+                call.message.chat.id, 
+                call.message.message_id, 
+                reply_markup=markup
+            )
 
-    for player_id in pisunchik:
-        markup.add(types.InlineKeyboardButton(get_player_name(player_id), callback_data=f"seleplayer_{action}_{player_id}"))
+        elif action == "backupData":
+            # Создаем бэкап данных
+            try:
+                backup_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_filename = f"backup_{backup_time}.json"
+                with open(backup_filename, 'w', encoding='utf-8') as f:
+                    json.dump(pisunchik, f, ensure_ascii=False, indent=4, default=str)
+                bot.edit_message_text(
+                    f"✅ Бэкап успешно создан: {backup_filename}", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
+            except Exception as e:
+                bot.edit_message_text(
+                    f"❌ Ошибка при создании бэкапа: {str(e)}", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
 
-    bot.send_message(call.message.chat.id, f"Select a player to {action.replace('_', ' ')}:", reply_markup=markup)
+        elif action == "broadcast":
+            admin_actions[call.from_user.id] = {"action": "broadcast"}
+            bot.edit_message_text(
+                "Введите сообщение для рассылки всем игрокам:", 
+                call.message.chat.id, 
+                call.message.message_id
+            )
+
+    else:
+        bot.answer_callback_query(call.id, "У вас нет доступа к админ-панели.")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("select_"))
+def handle_player_selection(call):
+    if call.from_user.id in admin_ids:
+        action_data = call.data.split("_")
+        action = action_data[1]
+        player_id = action_data[2]
+        
+        if action in ["addItem", "removeItem", "addStatue"]:
+            admin_actions[call.from_user.id] = {"action": action, "player_id": player_id}
+            
+            if action == "addItem":
+                # Показать список доступных предметов
+                items_list = "\n".join([f"- {item}" for item in item_desc.keys()])
+                bot.edit_message_text(
+                    f"Введите название предмета для добавления:\n\nДоступные предметы:\n{items_list}", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
+            elif action == "removeItem":
+                # Показать список предметов игрока
+                player_items = pisunchik[player_id]['items']
+                if player_items:
+                    items_list = "\n".join([f"- {item}" for item in player_items])
+                    bot.edit_message_text(
+                        f"Введите название предмета для удаления:\n\nПредметы игрока:\n{items_list}", 
+                        call.message.chat.id, 
+                        call.message.message_id
+                    )
+                else:
+                    bot.edit_message_text(
+                        "У игрока нет предметов", 
+                        call.message.chat.id, 
+                        call.message.message_id
+                    )
+            elif action == "addStatue":
+                # Показать список доступных статуэток
+                statues_list = "\n".join([f"- {statue}" for statue in statuetki_desc.keys()])
+                bot.edit_message_text(
+                    f"Введите название статуэтки для добавления:\n\nДоступные статуэтки:\n{statues_list}", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
+
+        elif action in ["increasePisunchik", "decreasePisunchik", "increaseBtc", "decreaseBtc"]:
+            admin_actions[call.from_user.id] = {"action": action, "player_id": player_id}
+            action_text = {
+                "increasePisunchik": "увеличения писюнчика",
+                "decreasePisunchik": "уменьшения писюнчика",
+                "increaseBtc": "добавления BTC",
+                "decreaseBtc": "уменьшения BTC"
+            }[action]
+            bot.edit_message_text(
+                f"Введите значение для {action_text}:", 
+                call.message.chat.id, 
+                call.message.message_id
+            )
+            
+        elif action == "resetooldown":
+            # Сброс кулдауна для выбранного игрока
+            pisunchik[player_id]['last_used'] = datetime(2000, 1, 1, tzinfo=timezone.utc)
+            save_data()
+            bot.edit_message_text(
+                f"✅ Кулдаун сброшен для игрока {pisunchik[player_id]['player_name']}", 
+                call.message.chat.id, 
+                call.message.message_id
+            )
+            
+        elif action == "stats":
+            # Показать статистику игрока
+            player = pisunchik[player_id]
+            stats_text = (
+                f"📊 Статистика игрока {player['player_name']}:\n\n"
+                f"🌭 Размер писюнчика: {player['pisunchik_size']} см\n"
+                f"💰 BTC: {player['coins']}\n"
+                f"🎁 Предметов: {len(player['items'])}\n"
+                f"🏆 Статуэток: {len(player['statuetki'])}\n"
+                f"✨ Характеристик: {len(player['characteristics'])}\n"
+            )
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="action_playerStats"))
+            bot.edit_message_text(
+                stats_text, 
+                call.message.chat.id, 
+                call.message.message_id,
+                reply_markup=markup
+            )
+
+    else:
+        bot.answer_callback_query(call.id, "У вас нет доступа к админ-панели.")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("stocks_"))
+def handle_stocks_actions(call):
+    if call.from_user.id in admin_ids:
+        action = call.data.split("_")[1]
+        
+        if action == "updatePrices":
+            try:
+                stocks.update_stock_prices(cursor, bot, helper)
+                bot.edit_message_text(
+                    "✅ Цены на акции успешно обновлены", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
+            except Exception as e:
+                bot.edit_message_text(
+                    f"❌ Ошибка при обновлении цен: {str(e)}", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
+                
+        elif action == "resetMarket":
+            markup = types.InlineKeyboardMarkup()
+            markup.add(
+                types.InlineKeyboardButton("✅ Подтвердить", callback_data="confirm_marketReset"),
+                types.InlineKeyboardButton("❌ Отменить", callback_data="admin_economy")
+            )
+            bot.edit_message_text(
+                "⚠️ Вы уверены, что хотите сбросить рынок акций? Это действие нельзя отменить.", 
+                call.message.chat.id, 
+                call.message.message_id,
+                reply_markup=markup
+            )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_"))
+def handle_confirmations(call):
+    if call.from_user.id in admin_ids:
+        action = call.data.split("_")[1]
+        
+        if action == "restart":
+            try:
+                bot.edit_message_text(
+                    "🔄 Перезапуск бота...", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
+                save_data()
+                os.execv(sys.executable, ['python'] + sys.argv)
+            except Exception as e:
+                bot.edit_message_text(
+                    f"❌ Ошибка при перезапуске бота: {str(e)}", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
+        elif action == "marketReset":
+            try:
+                # Сброс всех акций у игроков
+                for player_id in pisunchik:
+                    pisunchik[player_id]["player_stocks"] = {}
+                
+                # Сброс цен на акции
+                cursor.execute("UPDATE stocks SET current_price = initial_price")
+                conn.commit()
+                save_data()
+                
+                bot.edit_message_text(
+                    "✅ Рынок акций успешно сброшен", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
+            except Exception as e:
+                bot.edit_message_text(
+                    f"❌ Ошибка при сбросе рынка: {str(e)}", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("seleplayer"))
-def handle_select_player(call):
-    if call.from_user.id not in admin_ids:
-        return bot.answer_callback_query(call.id, "Unauthorized action.")
-
-    _, action, player_id = call.data.split("_")
-    admin_chat_id = call.message.chat.id
-    admin_actions[admin_chat_id] = {"action": action, "player": player_id}
-    prompt = "Enter the value" if "pisunchik" in action or "btc" in action else "Enter the item name"
-    bot.send_message(admin_chat_id, f"{prompt} for {get_player_name(player_id)}:")
-
-
-@bot.message_handler(func=lambda message: message.chat.id in admin_actions)
-def handle_admin_actions(message):
-    if message.from_user.id not in admin_ids:
-        return bot.answer_callback_query(message.id, "Unauthorized action.")
-
-    admin_chat_id = message.chat.id
-    action_data = admin_actions.pop(admin_chat_id, None)
-    if not action_data:
-        return bot.send_message(admin_chat_id, "Invalid admin action.")
-
-    action, player_id = action_data["action"], action_data["player"]
-    player_name = get_player_name(player_id)
-
-    try:
-        if "pisunchik" in action or "btc" in action:
-            value = int(message.text)
-            key = "pisunchik_size" if "pisunchik" in action else "coins"
-            modifier = 1 if "increase" in action else -1
-            pisunchik[player_id][key] += value * modifier
-            bot.send_message(admin_chat_id,
-                             f"{key.replace('_', ' ').title()} {'increased' if modifier == 1 else 'decreased'} for {player_name}.")
-        else:
-            item_name = message.text
-            if "add" in action:
-                pisunchik[player_id]["items"].append(item_name)
-                bot.send_message(admin_chat_id, f"Item '{item_name}' added to {player_name}.")
+@bot.message_handler(func=lambda message: message.from_user.id in admin_actions)
+def handle_admin_input(message):
+    if message.from_user.id in admin_ids:
+        action_data = admin_actions[message.from_user.id]
+        action = action_data.get("action")
+        player_id = action_data.get("player_id")
+        
+        if action in ["increasePisunchik", "decreasePisunchik"]:
+            try:
+                value = int(message.text)
+                if player_id in pisunchik:
+                    if action == "increasePisunchik":
+                        pisunchik[player_id]["pisunchik_size"] += value
+                    else:
+                        pisunchik[player_id]["pisunchik_size"] -= value
+                    save_data()
+                    bot.reply_to(
+                        message, 
+                        f"✅ Размер писюнчика игрока {pisunchik[player_id]['player_name']} теперь: {pisunchik[player_id]['pisunchik_size']} см"
+                    )
+                else:
+                    bot.reply_to(message, "❌ Игрок не найден")
+            except ValueError:
+                bot.reply_to(message, "❌ Пожалуйста, введите корректное число")
+                
+        elif action in ["increaseBtc", "decreaseBtc"]:
+            try:
+                value = int(message.text)
+                if player_id in pisunchik:
+                    if action == "increase_btc":
+                        pisunchik[player_id]["coins"] += value
+                    else:
+                        pisunchik[player_id]["coins"] -= value
+                    save_data()
+                    bot.reply_to(
+                        message, 
+                        f"✅ Баланс BTC игрока {pisunchik[player_id]['player_name']} теперь: {pisunchik[player_id]['coins']}"
+                    )
+                else:
+                    bot.reply_to(message, "❌ Игрок не найден")
+            except ValueError:
+                bot.reply_to(message, "❌ Пожалуйста, введите корректное число")
+                
+        elif action in ["addItem", "addStatue"]:
+            item_name = message.text.strip()
+            if player_id in pisunchik:
+                if action == "addItem":
+                    if item_name in item_desc:
+                        pisunchik[player_id]["items"].append(item_name)
+                        save_data()
+                        bot.reply_to(message, f"✅ Предмет '{item_name}' добавлен игроку {pisunchik[player_id]['player_name']}")
+                    else:
+                        bot.reply_to(message, "❌ Предмет не найден в списке доступных предметов")
+                else:  # add_statue
+                    if item_name in statuetki_desc:
+                        pisunchik[player_id]["statuetki"].append(item_name)
+                        save_data()
+                        bot.reply_to(message, f"✅ Статуэтка '{item_name}' добавлена игроку {pisunchik[player_id]['player_name']}")
+                    else:
+                        bot.reply_to(message, "❌ Статуэтка не найдена в списке доступных статуэток")
             else:
-                pisunchik[player_id]["items"].remove(item_name)
-                bot.send_message(admin_chat_id, f"Item '{item_name}' removed from {player_name}.")
-    except Exception as e:
-        bot.send_message(admin_chat_id, f"Error: {str(e)}")
+                bot.reply_to(message, "❌ Игрок не найден")
+                
+        elif action == "removeItem":
+            item_name = message.text.strip()
+            if player_id in pisunchik:
+                if item_name in pisunchik[player_id]["items"]:
+                    pisunchik[player_id]["items"].remove(item_name)
+                    save_data()
+                    bot.reply_to(message, f"✅ Предмет '{item_name}' удален у игрока {pisunchik[player_id]['player_name']}")
+                else:
+                    bot.reply_to(message, "❌ У игрока нет такого предмета")
+            else:
+                bot.reply_to(message, "❌ Игрок не найден")
+                
+        elif action == "broadcast":
+            broadcast_message = message.text
+            success_count = 0
+            fail_count = 0
+            
+            for player_id, player_data in pisunchik.items():
+                try:
+                    if player_data.get("chat_id"):
+                        for chat_id in player_data["chat_id"]:
+                            bot.send_message(chat_id, f"📢 Объявление:\n\n{broadcast_message}")
+                            success_count += 1
+                except Exception as e:
+                    fail_count += 1
+                    print(f"Failed to send broadcast to {player_id}: {e}")
+            
+            bot.reply_to(
+                message, 
+                f"📢 Рассылка завершена\n✅ Успешно: {success_count}\n❌ Неудачно: {fail_count}"
+            )
+        
+        # Clear the admin action after processing
+        del admin_actions[message.from_user.id]
 
 
 @bot.message_handler(commands=['pisunchik'])
@@ -1909,7 +2344,7 @@ def handle_send_to_group_message(message):
                        (user_id, message_text, timestamp, name))
         conn.commit()
 
-        some_hours_ago = datetime.utcnow() - timedelta(hours=12)
+        some_hours_ago = datetime.now(timezone.utc) - timedelta(hours=12)
         # Delete messages older than 12 hours
         cursor.execute("DELETE FROM messages WHERE timestamp < %s", (some_hours_ago,))
         conn.commit()
