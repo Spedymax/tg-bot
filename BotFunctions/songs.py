@@ -463,12 +463,19 @@ def notify_non_voters():
         855951767: "lofiSnitch"
     }
     
+    
+    participants2 = {
+        742272644: "Макс",
+        741542965: "Юра",
+        855951767: "Богдан"
+    }
 
     # Проверяем, что active_matchup и его поля существуют
     if not isinstance(active_matchup, dict) or "votes" not in active_matchup:
         return
         
-    voted_participants = active_matchup["votes"].get("1", set()).union(
+    voted_participants = set().union(
+        active_matchup["votes"].get("1", set()),
         active_matchup["votes"].get("2", set())
     )
     non_voters = set(participants.keys()) - voted_participants
