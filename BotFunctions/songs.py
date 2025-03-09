@@ -456,16 +456,30 @@ def notify_non_voters():
     if active_matchup is None:
         return
         
-    # Получаем список всех возможных участников
-    all_participants = set(742272644, 741542965, 855951767)  # Здесь нужно добавить ID всех участников
-    voted_participants = active_matchup["votes"]["1"].union(active_matchup["votes"]["2"])
-    non_voters = all_participants - voted_participants
+    # Словарь с ID пользователей и их именами в Telegram
+    participants = {
+        742272644: "spedymax",
+        741542965: "Spatifilum",
+        855951767: "lofiSnitch"
+    }
+    
+
+    # Проверяем, что active_matchup и его поля существуют
+    if not isinstance(active_matchup, dict) or "votes" not in active_matchup:
+        return
+        
+    voted_participants = active_matchup["votes"].get("1", set()).union(
+        active_matchup["votes"].get("2", set())
+    )
+    non_voters = set(participants.keys()) - voted_participants
     
     if non_voters:
-        mention_text = " ".join([f"@{uid}" for uid in non_voters])
+        # Создаем упоминания с помощью HTML-разметки
+        mention_text = " ".join([f"<a href='https://t.me/{participants[uid]}'>@{participants2[uid]}</a>" for uid in non_voters])
         bot.send_message(YOUR_CHAT_ID, 
                         f"⚠️ Напоминание! {mention_text}\n"
-                        f"У вас есть 30 минут, чтобы проголосовать в текущем матче!")
+                        f"У вас есть 30 минут, чтобы проголосовать в текущем матче!",
+                        parse_mode='HTML')
 
 
 def finalize_matchup_bracket():
@@ -553,7 +567,9 @@ def show_bracket(message):
 @bot.message_handler(commands=['start_tournament'])
 def cmd_start_tournament(message):
     if os.path.exists(STATE_FILE):
-        bot.send_message(YOUR_CHAT_ID, "Найден сохранённый турнир. Отправьте 'новый' для нового турнира или 'продолжить' для возобновления.")
+        load_tournament_state()
+        bot.send_message(YOUR_CHAT_ID, "Продолжаем существующий турнир!")
+        post_daily_matchup_bracket()
     else:
         initialize_bracket_tournament()
 
@@ -597,15 +613,18 @@ def schedule_reminder_before_matchup():
 # ============================
 # Основное выполнение
 # ============================
+
 if __name__ == "__main__":
     if not os.path.exists(DOWNLOAD_DIR):
         os.makedirs(DOWNLOAD_DIR)
     init_db()
     if os.path.exists(STATE_FILE):
-        bot.send_message(YOUR_CHAT_ID, "Найден сохранённый турнир. Напишите 'новый' для нового турнира или 'продолжить' для возобновления.")
+        load_tournament_state()
+        bot.send_message(YOUR_CHAT_ID, "Продолжаем существующий турнир!")
+        post_daily_matchup_bracket()
     else:
         initialize_bracket_tournament()
     schedule_daily_matchups()
-    schedule_reminder_before_matchup()  # Добавляем планировщик уведомлений
+    schedule_reminder_before_matchup()
     scheduler.start()
     bot.infinity_polling()
