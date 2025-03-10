@@ -3,10 +3,10 @@
 # YOUR_CHAT_ID = 741542965  # Замените на свой Telegram chat id
 
 import os
-import random
 import subprocess
 import json
-from time import sleep
+
+from main import MAX_ID
 import psycopg2
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -575,7 +575,7 @@ def show_bracket(message):
 def cmd_start_tournament(message):
     if os.path.exists(STATE_FILE):
         load_tournament_state()
-        bot.send_message(YOUR_CHAT_ID, "Продолжаем существующий турнир!")
+        bot.send_message(MAX_ID, "Продолжаем существующий турнир!")
         post_daily_matchup_bracket()
     else:
         initialize_bracket_tournament()
