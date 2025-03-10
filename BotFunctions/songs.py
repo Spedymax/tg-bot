@@ -6,7 +6,6 @@ import os
 import subprocess
 import json
 
-from main import MAX_ID
 import psycopg2
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -23,6 +22,7 @@ from spotipy.oauth2 import SpotifyClientCredentials
 # ============================
 client_id = "9bf48d25628445f4a046b633498a0933"
 client_secret = "db437688f371473b92a2e54c8e8199b5"
+MAX_ID = 741542965
 
 sp = spotipy.Spotify(
     client_credentials_manager=SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
