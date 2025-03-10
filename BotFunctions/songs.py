@@ -479,14 +479,14 @@ def notify_non_voters():
         active_matchup["votes"].get("2", set())
     )
     non_voters = set(participants.keys()) - voted_participants
-    
+    disabled_link=types.LinkPreviewOptions(is_disabled=True)
     if non_voters:
         # Создаем упоминания с помощью HTML-разметки
         mention_text = " ".join([f"<a href='https://t.me/{participants[uid]}'>@{participants2[uid]}</a>" for uid in non_voters])
-        bot.send_message(YOUR_CHAT_ID, 
+        bot.reply_to(active_matchup["trivia_msg_id"],
                         f"⚠️ Напоминание! {mention_text}\n"
                         f"У вас есть 30 минут, чтобы проголосовать в текущем матче!",
-                        parse_mode='HTML')
+                        parse_mode='HTML', link_preview_options=disabled_link)
 
 
 def finalize_matchup_bracket():
