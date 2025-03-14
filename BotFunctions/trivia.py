@@ -78,6 +78,7 @@ def get_question_from_gemini(category):
         correct_answer = response_text.split('ПРАВИЛЬНЫЙ ОТВЕТ: ')[1].split('НЕПРАВИЛЬНЫЕ ОТВЕТЫ:')[0].strip()
         print(correct_answer)
         wrong_answers = response_text.split('НЕПРАВИЛЬНЫЕ ОТВЕТЫ: ')[1].strip().split(',')
+        print(wrong_answers)
         wrong_answers = [ans.strip() for ans in wrong_answers]
 
         return {
