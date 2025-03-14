@@ -1063,28 +1063,6 @@ def handle_confirmations(call):
                     call.message.chat.id, 
                     call.message.message_id
                 )
-        elif action == "marketReset":
-            try:
-                # Сброс всех акций у игроков
-                for player_id in pisunchik:
-                    pisunchik[player_id]["player_stocks"] = {}
-                
-                # Сброс цен на акции
-                cursor.execute("UPDATE stocks SET current_price = initial_price")
-                conn.commit()
-                save_data()
-                
-                bot.edit_message_text(
-                    "✅ Рынок акций успешно сброшен", 
-                    call.message.chat.id, 
-                    call.message.message_id
-                )
-            except Exception as e:
-                bot.edit_message_text(
-                    f"❌ Ошибка при сбросе рынка: {str(e)}", 
-                    call.message.chat.id, 
-                    call.message.message_id
-                )
 
 
 @bot.message_handler(func=lambda message: message.from_user.id in admin_actions)
