@@ -3,10 +3,9 @@
 # YOUR_CHAT_ID = 741542965  # Замените на свой Telegram chat id
 
 import os
-import random
 import subprocess
 import json
-from time import sleep
+
 import psycopg2
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -23,6 +22,7 @@ from spotipy.oauth2 import SpotifyClientCredentials
 # ============================
 client_id = "9bf48d25628445f4a046b633498a0933"
 client_secret = "db437688f371473b92a2e54c8e8199b5"
+MAX_ID = 741542965
 
 sp = spotipy.Spotify(
     client_credentials_manager=SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
@@ -479,14 +479,14 @@ def notify_non_voters():
         active_matchup["votes"].get("2", set())
     )
     non_voters = set(participants.keys()) - voted_participants
-    
+    disabled_link=types.LinkPreviewOptions(is_disabled=True)
     if non_voters:
         # Создаем упоминания с помощью HTML-разметки
         mention_text = " ".join([f"<a href='https://t.me/{participants[uid]}'>@{participants2[uid]}</a>" for uid in non_voters])
-        bot.send_message(YOUR_CHAT_ID, 
+        bot.reply_to(active_matchup["trivia_msg_id"],
                         f"⚠️ Напоминание! {mention_text}\n"
                         f"У вас есть 30 минут, чтобы проголосовать в текущем матче!",
-                        parse_mode='HTML')
+                        parse_mode='HTML', link_preview_options=disabled_link)
 
 
 def finalize_matchup_bracket():
@@ -575,7 +575,7 @@ def show_bracket(message):
 def cmd_start_tournament(message):
     if os.path.exists(STATE_FILE):
         load_tournament_state()
-        bot.send_message(YOUR_CHAT_ID, "Продолжаем существующий турнир!")
+        bot.send_message(MAX_ID, "Продолжаем существующий турнир!")
         post_daily_matchup_bracket()
     else:
         initialize_bracket_tournament()
