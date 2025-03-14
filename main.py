@@ -2234,7 +2234,22 @@ def handle_mention(message):
             bot.reply_to(message, response_data['choices'][0]['message']['content'])
         except:
             bot.send_message(message.chat.id, "Нормальное что-то попроси :(")
+added_users = {}
+def update_user_activity(message, cursor):
+    """
+    Добавляет пользователя в список участников чата, если его там еще нет
+    """
+    user_id = message.from_user.id
+    chat_id = message.chat.id
 
+    cursor.execute("""
+        INSERT INTO user_activity (user_id, chat_id)
+        VALUES (%s, %s)
+        ON CONFLICT (user_id, chat_id) 
+        DO NOTHING
+    """, (user_id, chat_id))
+    cursor.connection.commit()
+    added_users[user_id] = chat_id
 
 # Handle user messages for sending a message to the group
 @bot.message_handler(func=lambda message: True, content_types=['text'])
@@ -2242,6 +2257,8 @@ def handle_send_to_group_message(message):
     try:
         global is_echoing
         global otmechai
+        if user_id not in added_users:
+            update_user_activity(message, cursor)
         if otmechai:
             helper.send_message_to_group(bot, f"<a href='tg://user?id={BODYA_ID}'>@lofiSnitch</a>", parse_mode='html')
         if is_echoing:
