@@ -9,7 +9,25 @@ from datetime import datetime, timezone
 from BotFunctions.cryptography import clientGoogle
 
 DIFFICULTY = 'medium'
-CATEGORIES = 'general,entertainment,geography,sciencenature,fooddrink,peopleplaces'
+CATEGORIES = [
+    'Шуточные темы',
+    'Расистские шутки',
+    'Шутки 18+',
+    'Иностранные языки',
+    'Dota 2',
+    'Технологии и IT',
+    'История',
+    'География', 
+    'Фильмы и сериалы',
+    'Новости',
+    'Компьютерные игры',
+    'Политика',
+    'Жизнь в Украине',
+    'Жизнь в Германии',
+    'Жизнь в Копенгагене',
+    'Мемы',
+    'Социальные сети'
+]
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
 # Player IDs
@@ -23,21 +41,6 @@ question_messages = {}
 original_questions = {}
 
 
-def fetch_trivia_questions(categories, cursor, headers):
-    for i in range(50):
-        API_URL = 'https://api.api-ninjas.com/v1/trivia'
-        try:
-            response = requests.get(API_URL, headers=headers)
-            response.raise_for_status()
-            question_data = response.json()[0]
-
-            if not is_question_in_database(question_data['question'], cursor):
-                return question_data
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching trivia questions: {e}")
-            return None
-
-
 def is_question_in_database(question, cursor):
     cursor.execute("SELECT 1 FROM questions WHERE question = %s", (question,))
     return cursor.fetchone() is not None
@@ -48,44 +51,61 @@ headers2 = {
 }
 
 
+def get_question_from_gemini(category):
+    try:
+        prompt = f"""Создай интересный вопрос для викторины на тему "{category}".
+        Формат ответа должен быть строго такой:
+        ВОПРОС: [сам вопрос]
+        ПРАВИЛЬНЫЙ ОТВЕТ: [правильный ответ]
+        НЕПРАВИЛЬНЫЕ ОТВЕТЫ: [ответ1],[ответ2],[ответ3]
+        
+        Вопросы должны быть интересными и иногда с юмором. Это викторина между друзьями, так что можно делать более неформальные и веселые вопросы/ответы.
+        Неправильные ответы должны быть правдоподобными."""
+
+        response = clientGoogle.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt
+        )
+        
+        response_text = response.text
+        
+        # Парсим ответ
+        question = response_text.split('ВОПРОС: ')[1].split('ПРАВИЛЬНЫЙ ОТВЕТ:')[0].strip()
+        correct_answer = response_text.split('ПРАВИЛЬНЫЙ ОТВЕТ: ')[1].split('НЕПРАВИЛЬНЫЕ ОТВЕТЫ:')[0].strip()
+        wrong_answers = response_text.split('НЕПРАВИЛЬНЫЕ ОТВЕТЫ: ')[1].strip().split(',')
+        wrong_answers = [ans.strip() for ans in wrong_answers]
+
+        return {
+            "question": question,
+            "answer": correct_answer,
+            "wrong_answers": wrong_answers
+        }
+    except Exception as e:
+        print(f"Error generating question: {e}")
+        return None
+
+
 def send_trivia_questions(chat_id, bot, cursor, conn):
     try:
-        category = random.choice(CATEGORIES.split(','))
-        question_data = fetch_trivia_questions(category, cursor, headers2)
+        category = random.choice(CATEGORIES)
+        question_data = get_question_from_gemini(category)
+        
         if question_data is None:
-            bot.send_message(chat_id, "Sorry, there was an error fetching trivia questions.")
+            bot.send_message(chat_id, "Извините, произошла ошибка при создании вопроса.")
             return
 
-        question_text = html.unescape(question_data["question"])
-        correct_answer = html.unescape(question_data["answer"])
-        print(correct_answer)
+        question_text = question_data["question"]
+        correct_answer = question_data["answer"]
+        wrong_answers = question_data["wrong_answers"]
 
-        funny_answer = get_funny_answer(question_text, correct_answer)
-        split_answers = funny_answer.split(",")
-        answer_options = [correct_answer, split_answers[0], split_answers[1], split_answers[2]]
-        # Shuffle the answer options
+        answer_options = [correct_answer] + wrong_answers[:3]
         random.shuffle(answer_options)
+        
         send_question_with_options(chat_id, bot, question_text, answer_options, cursor)
-
         save_question_to_database(question_text, correct_answer, answer_options, cursor, conn)
+        
     except Exception as e:
-        bot.send_message(chat_id, f'Error while fetching trivia: {e}')
-
-
-def get_funny_answer(question, answer_options):
-    try:
-        response = clientGoogle.models.generate_content(
-            model="gemini-2.0-flash", contents=f"{question} \n{answer_options}\nYou're tasked with generating a wrong responses only to the question provided above, "
-                       "considering the given answer. Your goal is to come up with 3 wrong answers."
-                       "Please separate your response answers with comma. Be aware with the capital letters, "
-                       "if the correct answer starts from big letter you must write other answers starting from big "
-                       "letter too. Your answer must look like this:"
-                       "wrong_answer,wrong_answer,wrong_answer"
-        )
-        response_data = response.text
-        return response_data
-    except Exception as e:
-        return f"No funny answer available: {e}"
+        bot.send_message(chat_id, f'Ошибка при создании вопроса: {e}')
 
 
 def save_question_to_database(question, correct_answer, answer_options, cursor, conn):
