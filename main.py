@@ -2257,6 +2257,7 @@ def handle_send_to_group_message(message):
     try:
         global is_echoing
         global otmechai
+        user_id = message.from_user.id
         if user_id not in added_users:
             update_user_activity(message, cursor)
         if otmechai:
