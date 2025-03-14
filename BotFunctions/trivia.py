@@ -125,25 +125,15 @@ def save_question_to_database(question, correct_answer, answer_options, cursor, 
 
 def send_question_with_options(chat_id, bot, question, answer_options, cursor):
     markup = types.InlineKeyboardMarkup()
-    
-    # Создаем кнопки с короткими callback_data
-    for idx, answer in enumerate(answer_options):
-        button = types.InlineKeyboardButton(
-            text=answer, 
-            callback_data=f"ans_{idx}"  # Используем короткий индекс вместо полного ответа
-        )
+    for answer in answer_options:
+        button = types.InlineKeyboardButton(text=answer, callback_data=f"answer_{answer}")
         markup.add(button)
 
     bot.send_message(chat_id, "Внимание вопрос!", parse_mode='html')
     question_msg = bot.send_message(chat_id, question, reply_markup=markup, parse_mode='html', protect_content=True)
 
-    # Сохраняем соответствие индексов и ответов
-    question_data = {
-        "text": question,
-        "players_responses": {},
-        "answer_options": answer_options  # Сохраняем варианты ответов
-    }
-    question_messages[question_msg.message_id] = question_data
+    # Сохранение оригинального вопроса и пустых ответов в базу данных
+    question_messages[question_msg.message_id] = {"text": question, "players_responses": {}}
     save_question_state(question_msg.message_id, question, {}, cursor)
 
 
@@ -226,7 +216,7 @@ def has_answered_question(user_id, question, cursor):
 def answer_callback(call, bot, player_stats, cursor):
     user_id = str(call.from_user.id)
     player_name = player_stats[user_id]["player_name"]
-    answer_idx = int(call.data.split('_')[1])  # Получаем индекс ответа
+    answer = call.data.split('_')[1]
     question_id = call.message.message_id
     chat_id = call.message.chat.id
 
@@ -243,7 +233,7 @@ def answer_callback(call, bot, player_stats, cursor):
     if isinstance(players_responses, str):
         players_responses = json.loads(players_responses)
 
-    cursor.execute("SELECT correct_answer, answer_options FROM questions WHERE question = %s", (original_question,))
+    cursor.execute("SELECT correct_answer FROM questions WHERE question = %s", (original_question,))
     result = cursor.fetchone()
 
     if not result:
@@ -255,25 +245,27 @@ def answer_callback(call, bot, player_stats, cursor):
         return
 
     correct_answer = result[0]
-    answer_options = json.loads(result[1])
-    selected_answer = answer_options[answer_idx]
 
     # Check if the answer is correct
-    if selected_answer == correct_answer:
+    if answer == correct_answer:
         emoji = "✅"
 
+        # Retrieve the current stats or initialize if not present
         if isinstance(player_stats[user_id]["correct_answers"], list):
+            # Convert the list to a dictionary
             chat_stats = {item.split(":")[0]: int(item.split(":")[1]) for item in
                           player_stats[user_id]["correct_answers"]}
         else:
             chat_stats = {}
 
+        # Initialize or update the count for the current chat
         chat_id_str = str(chat_id)
         if chat_id_str in chat_stats:
             chat_stats[chat_id_str] += 1
         else:
             chat_stats[chat_id_str] = 1
 
+        # Convert back to list format
         player_stats[user_id]["correct_answers"] = [f"{k}:{v}" for k, v in chat_stats.items()]
 
     else:
