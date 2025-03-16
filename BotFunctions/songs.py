@@ -552,13 +552,26 @@ def visualize_bracket():
                 song1 = match[0]
                 song2 = match[1]
                 winner = match[2]["winner"]
-                visual += f"  Матч {m_idx+1}: {song1['friend']} vs {song2['friend']} -> Победитель: {winner['friend']}\n"
+                # Проверяем оба участника на None
+                if song1 is None and song2 is None:
+                    visual += f"  Матч {m_idx+1}: Пустой матч\n"
+                elif song1 is None:
+                    visual += f"  Матч {m_idx+1}: БАЙ vs {song2['friend']} -> Победитель: {winner['friend']}\n"
+                elif song2 is None:
+                    visual += f"  Матч {m_idx+1}: {song1['friend']} (БАЙ) -> Победитель: {winner['friend']}\n"
+                else:
+                    visual += f"  Матч {m_idx+1}: {song1['friend']} vs {song2['friend']} -> Победитель: {winner['friend']}\n"
             else:
                 song1 = match[0]
-                if match[1] is None:
+                song2 = match[1]
+                # Проверяем оба участника на None для текущих матчей
+                if song1 is None and song2 is None:
+                    visual += f"  Матч {m_idx+1}: Пустой матч\n"
+                elif song1 is None:
+                    visual += f"  Матч {m_idx+1}: БАЙ vs {song2['friend']}\n"
+                elif song2 is None:
                     visual += f"  Матч {m_idx+1}: {song1['friend']} -> БАЙ\n"
                 else:
-                    song2 = match[1]
                     visual += f"  Матч {m_idx+1}: {song1['friend']} vs {song2['friend']} -> (ожидается голосование)\n"
         visual += "\n"
     return visual
