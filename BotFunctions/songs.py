@@ -640,7 +640,6 @@ if __name__ == "__main__":
     init_db()
     if os.path.exists(STATE_FILE):
         load_tournament_state()
-        bot.send_message(YOUR_CHAT_ID, "Продолжаем существующий турнир!")
         post_daily_matchup_bracket()
     else:
         initialize_bracket_tournament()
