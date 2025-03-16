@@ -81,9 +81,6 @@ for friend, playlist_url in PLAYLISTS.items():
 def create_pairs(songs):
     """
     Формирует пары так, чтобы песни от разных участников парились максимально равномерно.
-    Сначала группируем песни по "friend", перемешиваем внутри групп, а затем по очереди
-    выбираем по одной песне из двух групп с наибольшим числом оставшихся песен.
-    Если осталась только одна группа, её песни получают "бай" (пара с None).
     """
     import random
 
@@ -92,29 +89,27 @@ def create_pairs(songs):
     for song in songs:
         groups.setdefault(song["friend"], []).append(song)
 
-    # Перемешиваем песни внутри каждой группы для случайности
-    for friend2 in groups:
-        random.shuffle(groups[friend2])
-
     pairs = []
-    # Пока есть хотя бы две группы с оставшимися песнями
-    while True:
-        available = [(friend1, lst) for friend1, lst in groups.items() if lst]
-        if len(available) < 2:
-            break
-        # Сортируем группы по количеству оставшихся песен (по убыванию)
-        available.sort(key=lambda x: len(x[1]), reverse=True)
-        # Выбираем первую и вторую группу
-        friend1, list1 = available[0]
-        friend2, list2 = available[1]
-        song1 = list1.pop(0)
-        song2 = list2.pop(0)
+    remaining_songs = songs.copy()  # Создаем копию списка всех песен
+
+    while len(remaining_songs) > 1:
+        song1 = random.choice(remaining_songs)
+        remaining_songs.remove(song1)
+        
+        # Ищем песню другого участника
+        other_songs = [s for s in remaining_songs if s["friend"] != song1["friend"]]
+        
+        if other_songs:  # Если есть песни других участников
+            song2 = random.choice(other_songs)
+        else:  # Если остались только песни того же участника
+            song2 = random.choice(remaining_songs)
+            
+        remaining_songs.remove(song2)
         pairs.append((song1, song2))
 
-    # Для оставшихся песен (если осталась только одна группа) присваиваем бай
-    for friend2, lst in groups.items():
-        for song in lst:
-            pairs.append((song, None))
+    # Если осталась одна песня, даём ей "бай"
+    if remaining_songs:
+        pairs.append((remaining_songs[0], None))
 
     return pairs
 
