@@ -63,9 +63,9 @@ MATCHUP_TIMES = ["12:00", "18:00"]
 
 # Плейлисты Spotify для каждого участника (примерно по 12 треков в каждом)
 PLAYLISTS = {
-    "Max": "https://open.spotify.com/playlist/08rdra0gD67WtBLW1bsO6H?si=b2af7737f05c401e",
+    "Max": "https://open.spotify.com/playlist/6GWIvmFtFQ9ZM7K5rkW3D6?si=fdefb484eaa54b41",
     "Yura": "https://open.spotify.com/playlist/1dAbSSXLOQtchgDEk9fT8n?si=duZs2KIATI6P5y0rR8u1Dw&pi=ovW_dnvHSui0Z",
-    "Bogdan": "https://open.spotify.com/playlist/2HXLIMwPsz98ExLaeTAYNF?si=ejkJDecYQoeHK-hZ_Ht5Cg&pi=Krea-51RQBC72"
+    "Bogdan": "https://open.spotify.com/playlist/2lG3kJGp3TKf8L2fb85tIi?si=fcX3CtcpQs6jSDv8RxlEDg"
 }
 
 song_pools = {}
@@ -503,8 +503,20 @@ def finalize_matchup_bracket():
     loser_vote = "2" if winner_vote == "1" else "1"
     winner_song = active_matchup["song1"] if winner_vote == "1" else active_matchup["song2"]
     loser_song = active_matchup["song1"] if loser_vote == "1" else active_matchup["song2"]
-    bot.send_message(YOUR_CHAT_ID,
-                     f"Победитель матча – песня от {winner_song['friend']}!")
+    
+    # Отправка аудио и названия песни победителя
+    file_path = download_song(winner_song["track_uri"])
+    if file_path:
+        try:
+            bot.send_audio(YOUR_CHAT_ID, audio=open(file_path, 'rb'))
+            bot.send_message(YOUR_CHAT_ID, f"Победитель матча – песня от {winner_song['friend']}!\nНазвание: {winner_song['track_uri']}")
+        except Exception as e:
+            bot.send_message(YOUR_CHAT_ID, f"Ошибка отправки аудио победителя: {str(e)}")
+        finally:
+            delete_file(file_path)
+    else:
+        bot.send_message(YOUR_CHAT_ID, f"Не удалось скачать песню победителя от {winner_song['friend']}")
+
     if active_matchup["matchup_id"]:
         finalize_matchup_in_db(active_matchup["matchup_id"], vote1, vote2, winner_song)
     record_matchup_result(bracket[current_round_index][current_matchup_index], winner_song, vote1, vote2)
@@ -627,7 +639,7 @@ if __name__ == "__main__":
     init_db()
     if os.path.exists(STATE_FILE):
         load_tournament_state()
-        bot.send_message(YOUR_CHAT_ID, "Продолжаем существующий турнир!")
+        bot.send_message(MAX_ID, "Продолжаем существующий турнир!")
         post_daily_matchup_bracket()
     else:
         initialize_bracket_tournament()
