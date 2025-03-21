@@ -9,7 +9,25 @@ from datetime import datetime, timezone
 from BotFunctions.cryptography import clientGoogle
 
 DIFFICULTY = 'medium'
-CATEGORIES = 'general,entertainment,geography,sciencenature,fooddrink,peopleplaces'
+CATEGORIES = [
+    'Шуточные темы',
+    'Расистские шутки',
+    'Шутки 18+',
+    'Иностранные языки',
+    'Dota 2',
+    'Технологии и IT',
+    'История',
+    'География', 
+    'Фильмы и сериалы',
+    'Новости',
+    'Компьютерные игры',
+    'Политика',
+    'Жизнь в Украине',
+    'Жизнь в Германии',
+    'Жизнь в Копенгагене',
+    'Мемы',
+    'Социальные сети'
+]
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
 # Player IDs
@@ -23,21 +41,6 @@ question_messages = {}
 original_questions = {}
 
 
-def fetch_trivia_questions(categories, cursor, headers):
-    for i in range(50):
-        API_URL = 'https://api.api-ninjas.com/v1/trivia'
-        try:
-            response = requests.get(API_URL, headers=headers)
-            response.raise_for_status()
-            question_data = response.json()[0]
-
-            if not is_question_in_database(question_data['question'], cursor):
-                return question_data
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching trivia questions: {e}")
-            return None
-
-
 def is_question_in_database(question, cursor):
     cursor.execute("SELECT 1 FROM questions WHERE question = %s", (question,))
     return cursor.fetchone() is not None
@@ -48,52 +51,100 @@ headers2 = {
 }
 
 
+def get_question_from_gemini(category):
+    try:
+        prompt = f"""Создай интересный вопрос для викторины на тему "{category}".
+
+        Требования к вопросу:
+        - Должен быть нестандартным и заставлять задуматься
+        - Средняя сложность (не очевидный, но и не экспертный)
+        - Можно с элементами юмора или неожиданными фактами
+        - Краткость формулировки (не более 2 строк)
+        - Вопрос должен быть актуальным и реальным, а не твоей галюцинацией
+        - ВАЖНО: Вопрос и правильный ответ должны быть логически связаны и соответствовать историческим фактам
+        - ВАЖНО: Не создавать вопросы, где правильный ответ противоречит условиям вопроса
+
+        После генерации обязательно проверь:
+        1. Соответствует ли правильный ответ условиям вопроса
+        2. Нет ли исторических или фактических противоречий
+        3. Если есть противоречия - переделай вопрос полностью
+
+        Требования к ответам:
+        - Правильный ответ должен быть однозначным
+        - Неправильные ответы должны быть правдоподобными и логичными
+        - Каждый ответ должен быть не более 60 байтов
+        - Без подсказок в формулировках
+        - Начинай с большой буквы
+        - Все ответы должны быть на одном и том же языке
+
+        После того как ты сгенерируешь вопрос и ответы, проверь имеют ли они вообще смыслб и переделай если нужно.
+
+        Обязательный формат ответа:
+        ВОПРОС: [сам вопрос]
+        ПРАВИЛЬНЫЙ ОТВЕТ: [правильный ответ]
+        ОБЪЯСНЕНИЕ: [1-2 интересных факта, объясняющих правильный ответ]
+        НЕПРАВИЛЬНЫЕ ОТВЕТЫ: [ответ1], [ответ2], [ответ3]
+
+        Помни, это дружеская викторина - используй разговорный стиль, но без упрощения содержания."""
+
+        response = clientGoogle.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt
+        )
+        
+        response_text = response.text
+        
+        # Парсим ответ
+        question = response_text.split('ВОПРОС: ')[1].split('ПРАВИЛЬНЫЙ ОТВЕТ:')[0].strip()
+        print(question)
+        correct_answer = response_text.split('ПРАВИЛЬНЫЙ ОТВЕТ: ')[1].split('ОБЪЯСНЕНИЕ:')[0].strip()
+        print(correct_answer)
+        explanation = response_text.split('ОБЪЯСНЕНИЕ: ')[1].split('НЕПРАВИЛЬНЫЕ ОТВЕТЫ:')[0].strip()
+        print(explanation)
+        wrong_answers = response_text.split('НЕПРАВИЛЬНЫЕ ОТВЕТЫ: ')[1].strip().split(',')
+        print(wrong_answers)
+        wrong_answers = [ans.strip() for ans in wrong_answers]
+
+        return {
+            "question": question,
+            "answer": correct_answer,
+            "explanation": explanation,
+            "wrong_answers": wrong_answers
+        }
+    except Exception as e:
+        print(f"Error generating question: {e}")
+        return None
+
+
 def send_trivia_questions(chat_id, bot, cursor, conn):
     try:
-        category = random.choice(CATEGORIES.split(','))
-        question_data = fetch_trivia_questions(category, cursor, headers2)
+        category = random.choice(CATEGORIES)
+        question_data = get_question_from_gemini(category)
+        
         if question_data is None:
-            bot.send_message(chat_id, "Sorry, there was an error fetching trivia questions.")
+            bot.send_message(chat_id, "Извините, произошла ошибка при создании вопроса.")
             return
 
-        question_text = html.unescape(question_data["question"])
-        correct_answer = html.unescape(question_data["answer"])
-        print(correct_answer)
+        question_text = question_data["question"]
+        correct_answer = question_data["answer"]
+        wrong_answers = question_data["wrong_answers"]
 
-        funny_answer = get_funny_answer(question_text, correct_answer)
-        split_answers = funny_answer.split(",")
-        answer_options = [correct_answer, split_answers[0], split_answers[1], split_answers[2]]
-        # Shuffle the answer options
+        answer_options = [correct_answer] + wrong_answers[:3]
         random.shuffle(answer_options)
+        
         send_question_with_options(chat_id, bot, question_text, answer_options, cursor)
-
-        save_question_to_database(question_text, correct_answer, answer_options, cursor, conn)
+        save_question_to_database(question_text, correct_answer, answer_options, cursor, conn, question_data["explanation"])
+        
     except Exception as e:
-        bot.send_message(chat_id, f'Error while fetching trivia: {e}')
+        bot.send_message(chat_id, f'Ошибка при создании вопроса: {e}')
 
 
-def get_funny_answer(question, answer_options):
-    try:
-        response = clientGoogle.models.generate_content(
-            model="gemini-2.0-flash", contents=f"{question} \n{answer_options}\nYou're tasked with generating a wrong responses only to the question provided above, "
-                       "considering the given answer. Your goal is to come up with 3 wrong answers."
-                       "Please separate your response answers with comma. Be aware with the capital letters, "
-                       "if the correct answer starts from big letter you must write other answers starting from big "
-                       "letter too. Your answer must look like this:"
-                       "wrong_answer,wrong_answer,wrong_answer"
-        )
-        response_data = response.text
-        return response_data
-    except Exception as e:
-        return f"No funny answer available: {e}"
-
-
-def save_question_to_database(question, correct_answer, answer_options, cursor, conn):
+def save_question_to_database(question, correct_answer, answer_options, cursor, conn, explanation=""):
     answer_options_str = json.dumps(answer_options)
     current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cursor.execute(
-        "INSERT INTO questions (question, correct_answer, answer_options, date_added) VALUES (%s, %s, %s, %s)",
-        (question, correct_answer, answer_options_str, current_date))
+        "INSERT INTO questions (question, correct_answer, answer_options, date_added, explanation) VALUES (%s, %s, %s, %s, %s)",
+        (question, correct_answer, answer_options_str, current_date, explanation))
     conn.commit()
 
 
@@ -194,12 +245,15 @@ def answer_callback(call, bot, player_stats, cursor):
     question_id = call.message.message_id
     chat_id = call.message.chat.id
 
+    # Проверяем, является ли чат личным
+    is_private_chat = call.message.chat.type == "private"
+
     cursor.execute("SELECT original_question, players_responses FROM question_state WHERE message_id = %s",
                    (question_id,))
     result = cursor.fetchone()
 
     if not result:
-        bot.send_message(call.message.chat.id, "Error: Original question not found.")
+        bot.send_message(chat_id, "Error: Original question not found.")
         return
 
     original_question, players_responses = result[0], result[1]
@@ -207,49 +261,42 @@ def answer_callback(call, bot, player_stats, cursor):
     if isinstance(players_responses, str):
         players_responses = json.loads(players_responses)
 
-    cursor.execute("SELECT correct_answer FROM questions WHERE question = %s", (original_question,))
+    cursor.execute("SELECT correct_answer, explanation FROM questions WHERE question = %s", (original_question,))
     result = cursor.fetchone()
 
     if not result:
-        bot.send_message(call.message.chat.id, "Error: Question not found in the database.")
+        bot.send_message(chat_id, "Error: Question not found in the database.")
         return
+
+    correct_answer, explanation = result[0], result[1]
 
     if has_answered_question(user_id, original_question, cursor):
-        bot.send_message(call.message.chat.id, "Ты уже ответил.")
+        bot.send_message(chat_id, "Ты уже ответил.")
         return
 
-    correct_answer = result[0]
-
-    # Check if the answer is correct
-    if answer == correct_answer:
-        emoji = "✅"
-
-        # Retrieve the current stats or initialize if not present
-        if isinstance(player_stats[user_id]["correct_answers"], list):
-            # Convert the list to a dictionary
-            chat_stats = {item.split(":")[0]: int(item.split(":")[1]) for item in
-                          player_stats[user_id]["correct_answers"]}
-        else:
-            chat_stats = {}
-
-        # Initialize or update the count for the current chat
-        chat_id_str = str(chat_id)
-        if chat_id_str in chat_stats:
-            chat_stats[chat_id_str] += 1
-        else:
-            chat_stats[chat_id_str] = 1
-
-        # Convert back to list format
-        player_stats[user_id]["correct_answers"] = [f"{k}:{v}" for k, v in chat_stats.items()]
-
-    else:
-        emoji = "❌"
-
+    # Проверяем правильность ответа и обновляем статистику
+    is_correct = answer == correct_answer
+    emoji = "✅" if is_correct else "❌"
     players_responses[player_name] = emoji
 
+    # Обновляем сообщение с вопросом
     updated_text = original_question + "\n\n" + \
                    "\n".join([f"{player} {response}" for player, response in players_responses.items()])
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=question_id, text=updated_text,
+    
+    # Если это личный чат, сразу показываем результат
+    if is_private_chat:
+        result_text = f"{'Правильно!' if is_correct else 'Неправильно!'}\nПравильный ответ: {correct_answer}\n\nОбъяснение: {explanation}"
+        bot.send_message(chat_id, result_text)
+    else:
+        # Получаем количество активных участников в группе
+        cursor.execute("SELECT COUNT(DISTINCT user_id) FROM user_activity WHERE chat_id = %s", (chat_id,))
+        active_users_count = cursor.fetchone()[0]
+        
+        # Если все активные участники ответили, показываем объяснение
+        if len(players_responses) >= active_users_count:
+            updated_text += f"\n\nПравильный ответ: {correct_answer}\nОбъяснение: {explanation}"
+
+    bot.edit_message_text(chat_id=chat_id, message_id=question_id, text=updated_text,
                           reply_markup=call.message.reply_markup, parse_mode='html')
 
     save_question_state(question_id, original_question, players_responses, cursor)
