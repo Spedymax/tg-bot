@@ -648,7 +648,11 @@ if __name__ == "__main__":
         post_daily_matchup_bracket()
     else:
         initialize_bracket_tournament()
-    schedule_daily_matchups()
-    schedule_reminder_before_matchup()
+    
+    # Убедитесь, что планирование задач выполняется только один раз
+    if not scheduler.get_jobs():
+        schedule_daily_matchups()
+        schedule_reminder_before_matchup()
+    
     scheduler.start()
     bot.infinity_polling()
