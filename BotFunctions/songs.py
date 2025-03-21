@@ -322,13 +322,11 @@ def post_daily_matchup_bracket():
     except Exception as e:
         bot.send_message(YOUR_CHAT_ID, f"Ошибка отправки аудио первой песни: {str(e)}")
         delete_file(file1)
-        delete_file(file2)
         return
     try:
         bot.send_audio(YOUR_CHAT_ID, audio=open(file2, 'rb'))
     except Exception as e:
         bot.send_message(YOUR_CHAT_ID, f"Ошибка отправки аудио второй песни: {str(e)}")
-        delete_file(file1)
         delete_file(file2)
         return
 
