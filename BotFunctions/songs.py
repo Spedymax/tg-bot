@@ -34,6 +34,7 @@ def extract_playlist_id(playlist_url):
         raise ValueError("Неверный формат URL плейлиста")
     return match.group(1)
 
+
 def get_tracks_from_playlist(playlist_url):
     playlist_id = extract_playlist_id(playlist_url)
     track_uris = []
