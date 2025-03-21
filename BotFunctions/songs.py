@@ -275,7 +275,10 @@ def download_song(track_uri):
 
 def delete_file(file_path):
     try:
-        os.remove(file_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        else:
+            logging.warning("Файл %s не существует и не может быть удалён.", file_path)
     except Exception as e:
         logging.error("Не удалось удалить файл %s: %s", file_path, str(e))
 
