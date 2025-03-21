@@ -614,7 +614,7 @@ def handle_tournament_choice(message):
 @bot.message_handler(commands=['manual_matchup'])
 def manual_matchup(message):
     post_daily_matchup_bracket()
-    bot.reply_to(message, "Ручной запуск матча активирован!")
+    bot.reply_to(message, "Ручной запуск матча активирован! ")
 
 # ============================
 # Планирование матчей – 2 в день
