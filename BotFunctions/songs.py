@@ -506,7 +506,7 @@ def finalize_matchup_bracket():
     if file_path:
         try:
             bot.send_audio(YOUR_CHAT_ID, audio=open(file_path, 'rb'))
-            bot.send_message(YOUR_CHAT_ID, f"Победитель матча – песня от {winner_song['friend']}!\nНазвание: {winner_song['track_uri']}")
+            bot.send_message(YOUR_CHAT_ID, f"Победитель матча – песня от {winner_song['friend']}!")
         except Exception as e:
             bot.send_message(YOUR_CHAT_ID, f"Ошибка отправки аудио победителя: {str(e)}")
         finally:
