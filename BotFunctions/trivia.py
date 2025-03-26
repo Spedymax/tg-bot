@@ -208,7 +208,8 @@ def get_correct_answers2(bot, pisunchik, cursor, message):
     display_player_scores(bot, chat_id, pisunchik)
 
 def send_correct_answers_header(bot, chat_id):
-    bot.send_message(chat_id, f'Here are the correct answers for {TODAY}:')
+    current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    bot.send_message(chat_id, f'Here are the correct answers for {current_date}:')
 
 
 def display_answers(bot, chat_id, trivia, cursor, pisunchik):
@@ -233,8 +234,9 @@ def display_player_scores(bot, chat_id, pisunchik):
 
 
 def has_answered_question(user_id, question, cursor):
+    current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     cursor.execute("SELECT 1 FROM answered_questions WHERE user_id = %s AND question = %s AND date_added = %s",
-                   (user_id, question, TODAY))
+                   (user_id, question, current_date))
     return cursor.fetchone() is not None
 
 
@@ -300,9 +302,9 @@ def answer_callback(call, bot, player_stats, cursor):
                           reply_markup=call.message.reply_markup, parse_mode='html')
 
     save_question_state(question_id, original_question, players_responses, cursor)
-
+    current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     cursor.execute("INSERT INTO answered_questions (user_id, question, date_added) VALUES (%s, %s, %s)",
-                   (user_id, original_question, TODAY))
+                   (user_id, original_question, current_date))
     cursor.connection.commit()
     save_player_stats(cursor, player_stats)
 
