@@ -30,6 +30,7 @@ CATEGORIES = [
 ]
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
+
 # Player IDs
 PLAYER_IDS = {
     'YURA': 742272644,
