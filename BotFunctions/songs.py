@@ -258,7 +258,7 @@ def finalize_matchup_in_db(matchup_id, vote1, vote2, winner_song):
 # ============================
 def download_song(track_uri):
     try:
-        cmd = ["spotdl", "--output", DOWNLOAD_DIR, "--bitrate", "192k", track_uri]
+        cmd = ["spotdl", "--output", DOWNLOAD_DIR, "--bitrate", "320k", track_uri]
         logging.info("Скачиваем песню %s", track_uri)
         result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
         if result.returncode != 0:
