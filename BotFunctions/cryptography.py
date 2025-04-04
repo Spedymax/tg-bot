@@ -1,4 +1,4 @@
-import Crypto
+import Crypto1
 from openai import OpenAI
 from openpyxl import load_workbook
 from google import genai
@@ -6,7 +6,7 @@ from google import genai
 encrypted_file = 'encrypted.xlsx'  # Replace with path for the encrypted file
 decrypted_file = 'decrypted.xlsx'  # Replace with path for the decrypted file
 
-Crypto.decrypt_file(encrypted_file, decrypted_file)
+Crypto1.decrypt_file(encrypted_file, decrypted_file)
 
 workbook = load_workbook(filename='decrypted.xlsx')
 sheet = workbook.active  # Assumes you want the active sheet

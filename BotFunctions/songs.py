@@ -56,7 +56,7 @@ logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = "7815692651:AAGBWOiEBMbulQOC_-6uvvBl9oF08pn3cJ0"
 DB_CONN_STRING = "dbname='server-tg-pisunchik' user='admin' password='Sokoez32' host='localhost'"
-DOWNLOAD_DIR = "../downloads"
+DOWNLOAD_DIR = "downloads"
 YOUR_CHAT_ID = -1001294162183  # Замените на свой Telegram chat id
 
 # Расписание матчей: 2 голосования в день (например, в 12:00 и 18:00)
@@ -649,7 +649,6 @@ if __name__ == "__main__":
     init_db()
     if os.path.exists(STATE_FILE):
         load_tournament_state()
-        post_daily_matchup_bracket()
     else:
         initialize_bracket_tournament()
     
