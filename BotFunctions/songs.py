@@ -5,6 +5,7 @@
 import os
 import subprocess
 import json
+import uuid
 
 import psycopg2
 from datetime import datetime, timedelta
@@ -258,17 +259,21 @@ def finalize_matchup_in_db(matchup_id, vote1, vote2, winner_song):
 # ============================
 def download_song(track_uri):
     try:
-        cmd = ["spotdl", "--output", DOWNLOAD_DIR, "--bitrate", "320k", track_uri]
-        logging.info("Скачиваем песню %s", track_uri)
+        unique_dir = os.path.join(DOWNLOAD_DIR, str(uuid.uuid4()))
+        os.makedirs(unique_dir, exist_ok=True)
+
+        cmd = ["spotdl", "--output", unique_dir, "--bitrate", "320k", track_uri]
+        logging.info("Скачиваем песню %s в %s", track_uri, unique_dir)
         result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
         if result.returncode != 0:
             logging.error("Не удалось скачать %s: %s", track_uri, result.stderr)
             return None
-        files = os.listdir(DOWNLOAD_DIR)
+
+        files = os.listdir(unique_dir)
         if not files:
             return None
-        files.sort(key=lambda f: os.path.getctime(os.path.join(DOWNLOAD_DIR, f)), reverse=True)
-        file_path = os.path.join(DOWNLOAD_DIR, files[0])
+
+        file_path = os.path.join(unique_dir, files[0])
         return file_path
     except Exception as e:
         logging.exception("Исключение при скачивании %s: %s", track_uri, str(e))
@@ -312,21 +317,23 @@ def post_daily_matchup_bracket():
 
     # Скачиваем аудио для обоих участников
     file1 = download_song(matchup[0]["track_uri"])
-    file2 = download_song(matchup[1]["track_uri"])
     if file1 is None:
         bot.send_message(YOUR_CHAT_ID, f"Не удалось скачать песню от {matchup[0]['friend']}")
-        return
-    if file2 is None:
-        bot.send_message(YOUR_CHAT_ID, f"Не удалось скачать песню от {matchup[1]['friend']}")
-        delete_file(file1)
         return
 
     try:
         bot.send_audio(YOUR_CHAT_ID, audio=open(file1, 'rb'))
+        delete_file(file1)
     except Exception as e:
         bot.send_message(YOUR_CHAT_ID, f"Ошибка отправки аудио первой песни: {str(e)}")
         delete_file(file1)
         return
+
+    file2 = download_song(matchup[1]["track_uri"])  # Скачиваем второй файл только после удаления первого
+    if file2 is None:
+        bot.send_message(YOUR_CHAT_ID, f"Не удалось скачать песню от {matchup[1]['friend']}")
+        return
+
     try:
         bot.send_audio(YOUR_CHAT_ID, audio=open(file2, 'rb'))
     except Exception as e:
@@ -334,7 +341,6 @@ def post_daily_matchup_bracket():
         delete_file(file2)
         return
 
-    delete_file(file1)
     delete_file(file2)
 
     # Клавиатура для голосования
