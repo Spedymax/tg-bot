@@ -29,6 +29,7 @@ sp = spotipy.Spotify(
     client_credentials_manager=SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
 )
 
+
 def extract_playlist_id(playlist_url):
     match = re.search(r'playlist/([a-zA-Z0-9]+)', playlist_url)
     if not match:
@@ -49,6 +50,7 @@ def get_tracks_from_playlist(playlist_url):
         if track:
             track_uris.append(track['external_urls']['spotify'])
     return track_uris
+
 
 # ============================
 # Конфигурация и константы
@@ -77,6 +79,7 @@ for friend, playlist_url in PLAYLISTS.items():
     except Exception as e:
         print(f"Ошибка при получении плейлиста для {friend}: {e}")
 
+
 # ============================
 # Функция формирования пар с ограничением по friend
 # ============================
@@ -97,15 +100,15 @@ def create_pairs(songs):
     while len(remaining_songs) > 1:
         song1 = random.choice(remaining_songs)
         remaining_songs.remove(song1)
-        
+
         # Ищем песню другого участника
         other_songs = [s for s in remaining_songs if s["friend"] != song1["friend"]]
-        
+
         if other_songs:  # Если есть песни других участников
             song2 = random.choice(other_songs)
         else:  # Если остались только песни того же участника
             song2 = random.choice(remaining_songs)
-            
+
         remaining_songs.remove(song2)
         pairs.append((song1, song2))
 
@@ -122,12 +125,13 @@ def create_pairs(songs):
 # Каждый раунд – список матчей, где матч = (song1, song2).
 # Если матч сыгран, для хранения результата он преобразуется в список:
 # [song1, song2, {"winner": winner_song, "vote1": X, "vote2": Y}]
-bracket = []           # Список раундов
+bracket = []  # Список раундов
 current_round_index = 0  # Индекс текущего раунда
 current_matchup_index = 0  # Индекс текущего матча в раунде
 active_matchup = None  # Текущий активный матч
 
 STATE_FILE = "tournament_bracket_state.json"
+
 
 def save_tournament_state():
     state = {
@@ -139,6 +143,7 @@ def save_tournament_state():
         json.dump(state, f, ensure_ascii=False)
     logging.info("Состояние турнира сохранено.")
 
+
 def load_tournament_state():
     global bracket, current_round_index, current_matchup_index
     with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -146,7 +151,8 @@ def load_tournament_state():
     bracket = state.get("bracket", [])
     current_round_index = state.get("current_round_index", 0)
     current_matchup_index = state.get("current_matchup_index", 0)
-    logging.info("Состояние турнира загружено: Раунд %d, матч %d", current_round_index+1, current_matchup_index+1)
+    logging.info("Состояние турнира загружено: Раунд %d, матч %d", current_round_index + 1, current_matchup_index + 1)
+
 
 def initialize_bracket_tournament():
     global bracket, current_round_index, current_matchup_index
@@ -162,6 +168,7 @@ def initialize_bracket_tournament():
     save_tournament_state()
     bot.send_message(YOUR_CHAT_ID, f"🎉 Новый турнир запущен! Раунд 1, пар: {len(first_round)}.")
 
+
 # ============================
 # Работа с БД
 # ============================
@@ -169,43 +176,78 @@ def init_db():
     conn = psycopg2.connect(DB_CONN_STRING)
     cur = conn.cursor()
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS matchups (
-        id SERIAL PRIMARY KEY,
-        round INTEGER,
-        matchup_date TIMESTAMP,
-        song1_track_uri TEXT,
-        song1_friend TEXT,
-        song2_track_uri TEXT,
-        song2_friend TEXT,
-        song1_votes INTEGER DEFAULT 0,
-        song2_votes INTEGER DEFAULT 0,
-        winner_track_uri TEXT,
-        winner_friend TEXT,
-        processed BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
+                CREATE TABLE IF NOT EXISTS matchups
+                (
+                    id
+                    SERIAL
+                    PRIMARY
+                    KEY,
+                    round
+                    INTEGER,
+                    matchup_date
+                    TIMESTAMP,
+                    song1_track_uri
+                    TEXT,
+                    song1_friend
+                    TEXT,
+                    song2_track_uri
+                    TEXT,
+                    song2_friend
+                    TEXT,
+                    song1_votes
+                    INTEGER
+                    DEFAULT
+                    0,
+                    song2_votes
+                    INTEGER
+                    DEFAULT
+                    0,
+                    winner_track_uri
+                    TEXT,
+                    winner_friend
+                    TEXT,
+                    processed
+                    BOOLEAN
+                    DEFAULT
+                    FALSE,
+                    created_at
+                    TIMESTAMP
+                    DEFAULT
+                    CURRENT_TIMESTAMP
+                )
+                """)
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS votes (
-        id SERIAL PRIMARY KEY,
-        matchup_id INTEGER REFERENCES matchups(id),
-        voter_id TEXT,
-        vote INTEGER,
-        vote_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
+                CREATE TABLE IF NOT EXISTS votes
+                (
+                    id
+                    SERIAL
+                    PRIMARY
+                    KEY,
+                    matchup_id
+                    INTEGER
+                    REFERENCES
+                    matchups
+                (
+                    id
+                ),
+                    voter_id TEXT,
+                    vote INTEGER,
+                    vote_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
     conn.commit()
     cur.close()
     conn.close()
+
 
 def insert_matchup_into_db(matchup_data, round_number):
     try:
         conn = psycopg2.connect(DB_CONN_STRING)
         cur = conn.cursor()
         query = """
-        INSERT INTO matchups (round, matchup_date, song1_track_uri, song1_friend, song2_track_uri, song2_friend)
-        VALUES (%s, %s, %s, %s, %s, %s) RETURNING id;
-        """
+                INSERT INTO matchups (round, matchup_date, song1_track_uri, song1_friend, song2_track_uri, song2_friend)
+                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id; \
+                """
         matchup_date = datetime.now()
         cur.execute(query, (round_number, matchup_date,
                             matchup_data["song1"]["track_uri"],
@@ -222,14 +264,15 @@ def insert_matchup_into_db(matchup_data, round_number):
         logging.error("Ошибка записи матча в БД: %s", str(e))
         return None
 
+
 def insert_vote_into_db(matchup_id, voter_id, vote_value):
     try:
         conn = psycopg2.connect(DB_CONN_STRING)
         cur = conn.cursor()
         query = """
-        INSERT INTO votes (matchup_id, voter_id, vote)
-        VALUES (%s, %s, %s);
-        """
+                INSERT INTO votes (matchup_id, voter_id, vote)
+                VALUES (%s, %s, %s); \
+                """
         cur.execute(query, (matchup_id, voter_id, int(vote_value)))
         conn.commit()
         cur.close()
@@ -238,14 +281,20 @@ def insert_vote_into_db(matchup_id, voter_id, vote_value):
     except Exception as e:
         logging.error("Ошибка записи голоса в БД: %s", str(e))
 
+
 def finalize_matchup_in_db(matchup_id, vote1, vote2, winner_song):
     try:
         conn = psycopg2.connect(DB_CONN_STRING)
         cur = conn.cursor()
         query = """
-        UPDATE matchups SET song1_votes = %s, song2_votes = %s, winner_track_uri = %s, winner_friend = %s, processed = TRUE
-        WHERE id = %s;
-        """
+                UPDATE matchups \
+                SET song1_votes      = %s, \
+                    song2_votes      = %s, \
+                    winner_track_uri = %s, \
+                    winner_friend    = %s, \
+                    processed        = TRUE
+                WHERE id = %s; \
+                """
         cur.execute(query, (vote1, vote2, winner_song["track_uri"], winner_song["friend"], matchup_id))
         conn.commit()
         cur.close()
@@ -253,6 +302,29 @@ def finalize_matchup_in_db(matchup_id, vote1, vote2, winner_song):
         logging.info("Матч %s завершён в БД", matchup_id)
     except Exception as e:
         logging.error("Ошибка завершения матча в БД: %s", str(e))
+
+
+def get_existing_votes(matchup_id):
+    try:
+        conn = psycopg2.connect(DB_CONN_STRING)
+        cur = conn.cursor()
+        query = """
+                SELECT voter_id, vote \
+                FROM votes \
+                WHERE matchup_id = %s; \
+                """
+        cur.execute(query, (matchup_id,))
+        votes = {"1": set(), "2": set()}
+        for row in cur.fetchall():
+            voter_id, vote = row
+            votes[str(vote)].add(str(voter_id))
+        cur.close()
+        conn.close()
+        return votes
+    except Exception as e:
+        logging.error("Ошибка получения голосов из БД: %s", str(e))
+        return {"1": set(), "2": set()}
+
 
 # ============================
 # Spotify Download Helper
@@ -279,6 +351,7 @@ def download_song(track_uri):
         logging.exception("Исключение при скачивании %s: %s", track_uri, str(e))
         return None
 
+
 def delete_file(file_path):
     try:
         if os.path.exists(file_path):
@@ -288,10 +361,12 @@ def delete_file(file_path):
     except Exception as e:
         logging.error("Не удалось удалить файл %s: %s", file_path, str(e))
 
+
 # ============================
 # Telegram Bot Setup
 # ============================
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+
 
 # ============================
 # Публикация матча (Bracket)
@@ -301,19 +376,43 @@ def post_daily_matchup_bracket():
 
     # Если текущий раунд закончен, переходим к следующему
     if current_matchup_index >= len(bracket[current_round_index]):
-        bot.send_message(YOUR_CHAT_ID, f"Раунд {current_round_index+1} завершён. Подготовка следующего раунда...")
+        bot.send_message(YOUR_CHAT_ID, f"Раунд {current_round_index + 1} завершён. Подготовка следующего раунда...")
         build_next_round()
         return
 
     matchup = bracket[current_round_index][current_matchup_index]
     # Если второй участник отсутствует – бай
     if matchup[1] is None:
-        bot.send_message(YOUR_CHAT_ID, f"Песня от {matchup[0]['friend']} ({matchup[0]['track_uri']}) получает бай и проходит в следующий раунд!")
+        bot.send_message(YOUR_CHAT_ID,
+                         f"Песня от {matchup[0]['friend']} ({matchup[0]['track_uri']}) получает бай и проходит в следующий раунд!")
         record_matchup_result(matchup, winner=matchup[0], vote1=0, vote2=0)
         current_matchup_index += 1
         save_tournament_state()
         post_daily_matchup_bracket()
         return
+
+    # Проверяем, существует ли уже матч в БД
+    matchup_id = None
+    try:
+        conn = psycopg2.connect(DB_CONN_STRING)
+        cur = conn.cursor()
+        query = """
+                SELECT id \
+                FROM matchups
+                WHERE song1_track_uri = %s \
+                  AND song2_track_uri = %s
+                  AND round = %s \
+                  AND processed = FALSE
+                ORDER BY created_at DESC LIMIT 1; \
+                """
+        cur.execute(query, (matchup[0]["track_uri"], matchup[1]["track_uri"], current_round_index + 1))
+        result = cur.fetchone()
+        if result:
+            matchup_id = result[0]
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logging.error("Ошибка проверки существующего матча: %s", str(e))
 
     # Скачиваем аудио для обоих участников
     file1 = download_song(matchup[0]["track_uri"])
@@ -349,24 +448,36 @@ def post_daily_matchup_bracket():
     btn2 = types.InlineKeyboardButton("Голосовать за Песню 2", callback_data="bracket_vote|2")
     markup.row(btn1, btn2)
 
-    msg = bot.send_message(YOUR_CHAT_ID,
-                           "🎶 Выберите победителя матча:",
-                           reply_markup=markup)
+    # Если матч уже существует, получаем существующие голоса
+    existing_votes = {"1": set(), "2": set()}
+    if matchup_id:
+        existing_votes = get_existing_votes(matchup_id)
+        vote1_count = len(existing_votes["1"])
+        vote2_count = len(existing_votes["2"])
+        msg_text = f"🎶 Выберите победителя матча:\n\nТекущие голоса:\nПесня 1: {vote1_count}\nПесня 2: {vote2_count}"
+    else:
+        msg_text = "🎶 Выберите победителя матча:"
+        matchup_id = insert_matchup_into_db({
+            "song1": matchup[0],
+            "song2": matchup[1]
+        }, current_round_index + 1)
+
+    msg = bot.send_message(YOUR_CHAT_ID, msg_text, reply_markup=markup)
+
     active_matchup = {
         "round": current_round_index + 1,
         "match_index": current_matchup_index,
         "song1": matchup[0],
         "song2": matchup[1],
-        "votes": {"1": set(), "2": set()},
+        "votes": existing_votes,
         "trivia_msg_id": msg.message_id,
         "chat_id": YOUR_CHAT_ID,
         "reply_markup": markup,
-        "matchup_id": insert_matchup_into_db({
-            "song1": matchup[0],
-            "song2": matchup[1]
-        }, current_round_index+1)
+        "matchup_id": matchup_id,
+        "start_time": datetime.now()  # Добавляем время начала матча
     }
     logging.info("Матч опубликован: %s vs %s", matchup[0]["track_uri"], matchup[1]["track_uri"])
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("bracket_vote|"))
 def handle_bracket_vote(call):
@@ -404,92 +515,102 @@ def handle_bracket_vote(call):
 
 ADMIN_IDS = [741542965]  # Добавьте сюда ID администраторов
 
+
 @bot.message_handler(commands=['vote_for'])
 def vote_for_player(message):
     if message.from_user.id not in ADMIN_IDS:
         bot.reply_to(message, "❌ Эта команда доступна только администраторам.")
         return
-        
+
     try:
         # Формат: /vote_for user_id song_number
         parts = message.text.split()
         if len(parts) != 3:
             bot.reply_to(message, "❌ Использование: /vote_for user_id song_number")
             return
-            
+
         voter_id = parts[1]
         vote_value = parts[2]
-        
+
         if active_matchup is None:
             bot.reply_to(message, "❌ Нет активного матча.")
             return
-            
+
         if voter_id in active_matchup["votes"]["1"] or voter_id in active_matchup["votes"]["2"]:
             bot.reply_to(message, "❌ Этот пользователь уже голосовал!")
             return
-            
+
         if vote_value not in ["1", "2"]:
             bot.reply_to(message, "❌ Номер песни должен быть 1 или 2")
             return
-            
+
         active_matchup["votes"][vote_value].add(voter_id)
         if active_matchup["matchup_id"]:
             insert_vote_into_db(active_matchup["matchup_id"], voter_id, vote_value)
-            
+
         vote1_count = len(active_matchup["votes"]["1"])
         vote2_count = len(active_matchup["votes"]["2"])
-        
+
         new_text = f"🎤 Текущие голоса:\nПесня 1: {vote1_count}\nПесня 2: {vote2_count}"
         bot.edit_message_text(new_text,
-                            chat_id=active_matchup["chat_id"],
-                            message_id=active_matchup["trivia_msg_id"],
-                            reply_markup=active_matchup["reply_markup"])
-                            
+                              chat_id=active_matchup["chat_id"],
+                              message_id=active_matchup["trivia_msg_id"],
+                              reply_markup=active_matchup["reply_markup"])
+
         bot.reply_to(message, f"✅ Голос пользователя {voter_id} за песню {vote_value} засчитан!")
-        
+
         total_votes = vote1_count + vote2_count
         if total_votes >= 3:
             finalize_matchup_bracket()
-            
+
     except Exception as e:
         bot.reply_to(message, f"❌ Ошибка: {str(e)}")
+
 
 # Добавим функцию для уведомления неголосовавших
 def notify_non_voters():
     if active_matchup is None:
         return
-        
+
+    # Проверяем, что матч активен не более 30 минут
+    match_start_time = active_matchup.get('start_time')
+    if match_start_time and (datetime.now() - match_start_time).total_seconds() > 1800:
+        return
+
+    # Проверяем количество голосов
+    total_votes = len(active_matchup["votes"]["1"]) + len(active_matchup["votes"]["2"])
+    if total_votes >= 3:  # Если уже есть 3 голоса, не отправляем напоминание
+        return
+
     # Словарь с ID пользователей и их именами в Telegram
     participants = {
         742272644: "spedymax",
         741542965: "Spatifilum",
         855951767: "lofiSnitch"
     }
-    
-    
+
     participants2 = {
         742272644: "Макс",
         741542965: "Юра",
         855951767: "Богдан"
     }
 
-    # Проверяем, что active_matchup и его поля существуют
-    if not isinstance(active_matchup, dict) or "votes" not in active_matchup:
-        return
-        
     voted_participants = set().union(
         active_matchup["votes"].get("1", set()),
         active_matchup["votes"].get("2", set())
     )
     non_voters = set(participants.keys()) - voted_participants
-    disabled_link=types.LinkPreviewOptions(is_disabled=True)
+
     if non_voters:
-        # Создаем упоминания с помощью HTML-разметки
-        mention_text = " ".join([f"<a href='https://t.me/{participants[uid]}'>@{participants2[uid]}</a>" for uid in non_voters])
-        bot.reply_to(active_matchup["trivia_msg_id"],
-                        f"⚠️ Напоминание! {mention_text}\n"
-                        f"У вас есть 30 минут, чтобы проголосовать в текущем матче!",
-                        parse_mode='HTML', link_preview_options=disabled_link)
+        mention_text = " ".join(
+            [f"<a href='https://t.me/{participants[uid]}'>@{participants2[uid]}</a>" for uid in non_voters])
+        bot.send_message(
+            active_matchup["chat_id"],
+            f"⚠️ Напоминание! {mention_text}\n"
+            f"У вас есть 30 минут, чтобы проголосовать в текущем матче!",
+            parse_mode='HTML',
+            disable_web_page_preview=True
+        )
 
 
 def finalize_matchup_bracket():
@@ -506,7 +627,7 @@ def finalize_matchup_bracket():
     loser_vote = "2" if winner_vote == "1" else "1"
     winner_song = active_matchup["song1"] if winner_vote == "1" else active_matchup["song2"]
     loser_song = active_matchup["song1"] if loser_vote == "1" else active_matchup["song2"]
-    
+
     # Отправка аудио и названия песни победителя
     file_path = download_song(winner_song["track_uri"])
     if file_path:
@@ -527,9 +648,11 @@ def finalize_matchup_bracket():
     current_matchup_index += 1
     save_tournament_state()
 
+
 def record_matchup_result(matchup, winner, vote1=0, vote2=0):
     matchup_result = {"winner": winner, "vote1": vote1, "vote2": vote2}
     bracket[current_round_index][current_matchup_index] = [matchup[0], matchup[1], matchup_result]
+
 
 def build_next_round():
     global bracket, current_round_index, current_matchup_index
@@ -552,8 +675,9 @@ def build_next_round():
     current_round_index += 1
     current_matchup_index = 0
     save_tournament_state()
-    bot.send_message(YOUR_CHAT_ID, f"Начинается раунд {current_round_index+1} с {len(next_round)} матчами.")
+    bot.send_message(YOUR_CHAT_ID, f"Начинается раунд {current_round_index + 1} с {len(next_round)} матчами.")
     post_daily_matchup_bracket()
+
 
 # ============================
 # Визуализация таблицы турнира (брекета)
@@ -561,7 +685,7 @@ def build_next_round():
 def visualize_bracket():
     visual = ""
     for r_idx, round_matches in enumerate(bracket):
-        visual += f"Раунд {r_idx+1}:\n"
+        visual += f"Раунд {r_idx + 1}:\n"
         for m_idx, match in enumerate(round_matches):
             if isinstance(match, list) and len(match) == 3 and "winner" in match[2]:
                 song1 = match[0]
@@ -569,32 +693,34 @@ def visualize_bracket():
                 winner = match[2]["winner"]
                 # Проверяем оба участника на None
                 if song1 is None and song2 is None:
-                    visual += f"  Матч {m_idx+1}: Пустой матч\n"
+                    visual += f"  Матч {m_idx + 1}: Пустой матч\n"
                 elif song1 is None:
-                    visual += f"  Матч {m_idx+1}: БАЙ vs {song2['friend']} -> Победитель: {winner['friend']}\n"
+                    visual += f"  Матч {m_idx + 1}: БАЙ vs {song2['friend']} -> Победитель: {winner['friend']}\n"
                 elif song2 is None:
-                    visual += f"  Матч {m_idx+1}: {song1['friend']} (БАЙ) -> Победитель: {winner['friend']}\n"
+                    visual += f"  Матч {m_idx + 1}: {song1['friend']} (БАЙ) -> Победитель: {winner['friend']}\n"
                 else:
-                    visual += f"  Матч {m_idx+1}: {song1['friend']} vs {song2['friend']} -> Победитель: {winner['friend']}\n"
+                    visual += f"  Матч {m_idx + 1}: {song1['friend']} vs {song2['friend']} -> Победитель: {winner['friend']}\n"
             else:
                 song1 = match[0]
                 song2 = match[1]
                 # Проверяем оба участника на None для текущих матчей
                 if song1 is None and song2 is None:
-                    visual += f"  Матч {m_idx+1}: Пустой матч\n"
+                    visual += f"  Матч {m_idx + 1}: Пустой матч\n"
                 elif song1 is None:
-                    visual += f"  Матч {m_idx+1}: БАЙ vs {song2['friend']}\n"
+                    visual += f"  Матч {m_idx + 1}: БАЙ vs {song2['friend']}\n"
                 elif song2 is None:
-                    visual += f"  Матч {m_idx+1}: {song1['friend']} -> БАЙ\n"
+                    visual += f"  Матч {m_idx + 1}: {song1['friend']} -> БАЙ\n"
                 else:
-                    visual += f"  Матч {m_idx+1}: {song1['friend']} vs {song2['friend']} -> (ожидается голосование)\n"
+                    visual += f"  Матч {m_idx + 1}: {song1['friend']} vs {song2['friend']} -> (ожидается голосование)\n"
         visual += "\n"
     return visual
+
 
 @bot.message_handler(commands=['bracket'])
 def show_bracket(message):
     bracket_visual = visualize_bracket()
     bot.reply_to(message, f"Текущая таблица турнира:\n\n{bracket_visual}")
+
 
 # ============================
 # Команды для управления турниром
@@ -607,6 +733,8 @@ def cmd_start_tournament(message):
         post_daily_matchup_bracket()
     else:
         initialize_bracket_tournament()
+        bot.send_message(MAX_ID, 'Муз бот запущен! И новый турнир создан')
+
 
 @bot.message_handler(func=lambda message: message.text.lower() in ["новый", "продолжить"])
 def handle_tournament_choice(message):
@@ -618,15 +746,18 @@ def handle_tournament_choice(message):
         bot.reply_to(message, "Продолжаем старый турнир!")
         post_daily_matchup_bracket()
 
+
 @bot.message_handler(commands=['manual_matchup'])
 def manual_matchup(message):
     post_daily_matchup_bracket()
     bot.reply_to(message, "Ручной запуск матча активирован! ")
 
+
 # ============================
 # Планирование матчей – 2 в день
 # ============================
 scheduler = BackgroundScheduler()
+
 
 def schedule_daily_matchups():
     now = datetime.now()
@@ -637,12 +768,22 @@ def schedule_daily_matchups():
         scheduler.add_job(post_daily_matchup_bracket, 'interval', days=1, next_run_time=target_time)
         logging.info("Матч запланирован на %s (через %d секунд)", t, int((target_time - now).total_seconds()))
 
+
 def schedule_reminder_before_matchup():
     for t in MATCHUP_TIMES:
-        reminder_time = datetime.strptime(t, "%H:%M") - timedelta(minutes=30)
-        reminder_time = reminder_time.strftime("%H:%M")
-        scheduler.add_job(notify_non_voters, 'cron', hour=reminder_time.split(":")[0], 
-                        minute=reminder_time.split(":")[1])
+        # Рассчитываем время напоминания с учетом текущей даты
+        now = datetime.now()
+        match_time = datetime.strptime(t, "%H:%M").replace(year=now.year, month=now.month, day=now.day)
+        reminder_time = match_time - timedelta(minutes=30)
+
+        # Добавляем задачу с проверкой активного матча
+        scheduler.add_job(
+            notify_non_voters,
+            'date',
+            run_date=reminder_time,
+            id=f'reminder_{t}',
+            replace_existing=True
+        )
 
 
 # ============================
@@ -655,15 +796,15 @@ if __name__ == "__main__":
     init_db()
     if os.path.exists(STATE_FILE):
         load_tournament_state()
-        bot.send_message(MAX_ID,'Муз бот запущен! И старый турнир загружен')
+        bot.send_message(MAX_ID, 'Муз бот запущен! И старый турнир загружен')
     else:
         initialize_bracket_tournament()
         bot.send_message(MAX_ID, 'Муз бот запущен! И новый турнир создан')
-    
+
     # Убедитесь, что планирование задач выполняется только один раз
     if not scheduler.get_jobs():
         schedule_daily_matchups()
         schedule_reminder_before_matchup()
-    
+
     scheduler.start()
     bot.infinity_polling()
