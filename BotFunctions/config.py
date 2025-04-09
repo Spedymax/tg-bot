@@ -10,14 +10,14 @@ SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "db437688f371473b92a2
 
 # Telegram config
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7815692651:AAGBWOiEBMbulQOC_-6uvvBl9oF08pn3cJ0")
-# YOUR_CHAT_ID = int(os.getenv("YOUR_CHAT_ID", "-1001294162183"))
-YOUR_CHAT_ID = int(os.getenv("YOUR_CHAT_ID", "741542965"))
+YOUR_CHAT_ID = int(os.getenv("YOUR_CHAT_ID", "-1001294162183"))
+# YOUR_CHAT_ID = int(os.getenv("YOUR_CHAT_ID", "741542965"))
 MAX_ID = int(os.getenv("MAX_ID", "741542965"))
 ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "741542965").split(",")]
 
 # Database config
-# DB_CONN_STRING = os.getenv("DB_CONN_STRING", "dbname='server-tg-pisunchik' user='admin' password='Sokoez32' host='localhost'")
-DB_CONN_STRING = os.getenv("DB_CONN_STRING", "dbname='server-tg-pisunchik' user='postgres' password='123' host='192.168.8.2'")
+DB_CONN_STRING = os.getenv("DB_CONN_STRING", "dbname='server-tg-pisunchik' user='admin' password='Sokoez32' host='localhost'")
+# DB_CONN_STRING = os.getenv("DB_CONN_STRING", "dbname='server-tg-pisunchik' user='postgres' password='123' host='192.168.8.2'")
 
 # Paths
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "../downloads")
