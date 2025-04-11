@@ -313,8 +313,6 @@ class TournamentManager:
         
         new_text = (
             f"🎵 Choose the winner of this matchup:\n\n"
-            f"Song 1: {song1_info['artist']} - {song1_info['title']} ({self.active_matchup['song1']['friend']})\n"
-            f"Song 2: {song2_info['artist']} - {song2_info['title']} ({self.active_matchup['song2']['friend']})\n\n"
             f"Current votes:\n"
             f"Song 1: {vote1_count}\n"
             f"Song 2: {vote2_count}"
@@ -367,8 +365,6 @@ class TournamentManager:
         
         new_text = (
             f"🎵 Choose the winner of this matchup:\n\n"
-            f"Song 1: {song1_info['artist']} - {song1_info['title']} ({self.active_matchup['song1']['friend']})\n"
-            f"Song 2: {song2_info['artist']} - {song2_info['title']} ({self.active_matchup['song2']['friend']})\n\n"
             f"Current votes:\n"
             f"Song 1: {vote1_count}\n"
             f"Song 2: {vote2_count}"
