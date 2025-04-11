@@ -100,6 +100,7 @@ class SpotifyClient:
             logging.exception(f"Exception during download of {track_uri}: {str(e)}")
             return None
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def get_track_info(self, track_uri):
         """Get track information from Spotify."""
         try:
@@ -121,6 +122,9 @@ class SpotifyClient:
             }
         except Exception as e:
             logging.error(f"Error fetching track info: {str(e)}")
+            # Если все попытки не удались, возвращаем дефолтные значения
+            if isinstance(e, (ConnectionError, spotipy.SpotifyException)):
+                raise  # Позволяем retry работать
             return {
                 "title": "Unknown Track",
                 "artist": "Unknown Artist",
