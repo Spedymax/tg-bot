@@ -145,7 +145,7 @@ def create_winners_playlist(message):
 
         # Get winners from completed matchups
         query = """
-            SELECT DISTINCT winner_track_uri
+            SELECT DISTINCT winner_track_uri, created_at
             FROM matchups
             WHERE processed = TRUE
             ORDER BY created_at DESC
@@ -244,3 +244,4 @@ def run_songs_bot():
 
 if __name__ == "__main__":
     run_songs_bot()
+    
