@@ -192,11 +192,11 @@ class TournamentManager:
             # Create voting keyboard
             markup = types.InlineKeyboardMarkup(row_width=1)
             btn1 = types.InlineKeyboardButton(
-                f"{song1_info['artist']} - {song1_info['title']}",
+                f"Song 1",
                 callback_data="bracket_vote|1"
             )
             btn2 = types.InlineKeyboardButton(
-                f"{song2_info['artist']} - {song2_info['title']}",
+                f"Song 2",
                 callback_data="bracket_vote|2"
             )
             markup.add(btn1, btn2)
@@ -306,11 +306,7 @@ class TournamentManager:
         # Update vote counts
         vote1_count = len(self.active_matchup["votes"]["1"])
         vote2_count = len(self.active_matchup["votes"]["2"])
-        
-        # Update message
-        song1_info = self.active_matchup.get("song1_info", {"artist": "Unknown", "title": "Unknown"})
-        song2_info = self.active_matchup.get("song2_info", {"artist": "Unknown", "title": "Unknown"})
-        
+
         new_text = (
             f"🎵 Choose the winner of this matchup:\n\n"
             f"Current votes:\n"
@@ -358,11 +354,7 @@ class TournamentManager:
         # Update vote counts
         vote1_count = len(self.active_matchup["votes"]["1"])
         vote2_count = len(self.active_matchup["votes"]["2"])
-        
-        # Update message
-        song1_info = self.active_matchup.get("song1_info", {"artist": "Unknown", "title": "Unknown"})
-        song2_info = self.active_matchup.get("song2_info", {"artist": "Unknown", "title": "Unknown"})
-        
+
         new_text = (
             f"🎵 Choose the winner of this matchup:\n\n"
             f"Current votes:\n"
