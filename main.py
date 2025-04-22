@@ -9,6 +9,8 @@ import subprocess
 import sys
 
 import psycopg2
+import socket
+import struct
 import requests
 import telebot.apihelper
 from telebot import types
@@ -22,6 +24,8 @@ import BotFunctions.helpers as helper
 import BotFunctions.stocks as stocks
 from BotFunctions import NoNutNovember
 from BotFunctions.cryptography import client
+
+
 
 bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
 
