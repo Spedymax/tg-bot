@@ -1679,6 +1679,59 @@ def use_zelie_pisunchika(message):
 
     bot.reply_to(message, effect_message)
 
+
+def wake_on_lan(mac_addr, broadcast_ip='255.255.255.255', port=9):
+    """
+    Send a Wake-on-LAN magic packet to wake up a computer with the specified MAC address.
+
+    Args:
+        mac_addr (str): The MAC address of the target computer in format 'XX:XX:XX:XX:XX:XX'
+        broadcast_ip (str): The broadcast IP address (default: '255.255.255.255')
+        port (int): The port to send the magic packet to (default: 9)
+
+    Returns:
+        bool: True if packet was sent successfully, False otherwise
+    """
+    try:
+        # Convert MAC address to bytes
+        mac_bytes = bytes.fromhex(mac_addr.replace(':', ''))
+
+        # Create magic packet: 6 bytes of 0xFF followed by 16 repetitions of the MAC address
+        magic_packet = b'\xff' * 6 + mac_bytes * 16
+
+        # Send packet
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            s.sendto(magic_packet, (broadcast_ip, port))
+
+        return True
+    except Exception as e:
+        print(f"Error sending WoL packet: {e}")
+        return False
+
+
+# Command handler for /wakepc
+@bot.message_handler(commands=['wakepc'])
+def handle_wakepc(message):
+    chat_id = message.chat.id
+
+    # You can add authentication here to ensure only authorized users can wake your PC
+    # For example, checking if message.from_user.id is in a list of authorized users
+
+    try:
+        bot.send_message(chat_id, "Sending Wake-on-LAN packet to your PC...")
+
+        # Send the WoL packet using the MAC address from config
+        result = wake_on_lan('D8:43:AE:BD:2B:F1', '255.255.255.255')
+
+        if result:
+            bot.send_message(chat_id, "Wake-on-LAN packet sent successfully! Your PC should be waking up.")
+        else:
+            bot.send_message(chat_id, "Failed to send Wake-on-LAN packet. Check the logs for details.")
+
+    except Exception as e:
+        bot.send_message(chat_id, f"Error: {str(e)}")
+
 @bot.message_handler(commands=['startmine'])
 def start_minecraft_server(message):
     bot.send_message(message.chat.id, 'Введите пароль чтобы запустить minecraft server:', reply_markup=ForceReply())
