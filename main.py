@@ -752,6 +752,7 @@ def handle_admin_categories(call):
                 types.InlineKeyboardButton("🔄 Перезапуск бота", callback_data="action_restartBot"),
                 types.InlineKeyboardButton("💾 Бэкап данных", callback_data="action_backupData"),
                 types.InlineKeyboardButton("📢 Рассылка", callback_data="action_broadcast"),
+                types.InlineKeyboardButton("🖥️ Включить ПК", callback_data="action_wakePc"),
                 types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back")
             ]
             markup.add(*buttons)
@@ -920,6 +921,33 @@ def handle_admin_actions(call):
                 call.message.chat.id, 
                 call.message.message_id
             )
+
+        elif action == "wakePc":
+            try:
+                bot.edit_message_text(
+                    "Отправляю Wake-on-LAN пакет на ваш ПК...", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
+                result = wake_on_lan('D8:43:AE:BD:2B:F1', '255.255.255.255')
+                if result:
+                    bot.edit_message_text(
+                        "✅ Wake-on-LAN пакет успешно отправлен! Ваш ПК должен включиться.", 
+                        call.message.chat.id, 
+                        call.message.message_id
+                    )
+                else:
+                    bot.edit_message_text(
+                        "❌ Не удалось отправить Wake-on-LAN пакет. Проверьте логи для деталей.", 
+                        call.message.chat.id, 
+                        call.message.message_id
+                    )
+            except Exception as e:
+                bot.edit_message_text(
+                    f"❌ Ошибка: {str(e)}", 
+                    call.message.chat.id, 
+                    call.message.message_id
+                )
 
     else:
         bot.answer_callback_query(call.id, "У вас нет доступа к админ-панели.")
@@ -1714,27 +1742,6 @@ def wake_on_lan(mac_addr, broadcast_ip='255.255.255.255', port=9):
         return False
 
 
-# Command handler for /wakepc
-@bot.message_handler(commands=['wakepc'])
-def handle_wakepc(message):
-    chat_id = message.chat.id
-
-    # You can add authentication here to ensure only authorized users can wake your PC
-    # For example, checking if message.from_user.id is in a list of authorized users
-
-    try:
-        bot.send_message(chat_id, "Sending Wake-on-LAN packet to your PC...")
-
-        # Send the WoL packet using the MAC address from config
-        result = wake_on_lan('D8:43:AE:BD:2B:F1', '255.255.255.255')
-
-        if result:
-            bot.send_message(chat_id, "Wake-on-LAN packet sent successfully! Your PC should be waking up.")
-        else:
-            bot.send_message(chat_id, "Failed to send Wake-on-LAN packet. Check the logs for details.")
-
-    except Exception as e:
-        bot.send_message(chat_id, f"Error: {str(e)}")
 
 @bot.message_handler(commands=['startmine'])
 def start_minecraft_server(message):
