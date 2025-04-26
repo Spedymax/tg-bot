@@ -10,7 +10,6 @@ import sys
 
 import psycopg2
 import socket
-import struct
 import requests
 import telebot.apihelper
 from telebot import types
