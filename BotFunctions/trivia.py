@@ -93,7 +93,7 @@ def get_question_from_gemini(category):
 - Проверь финальный результат на логичность и соответствие фактам"""
 
         response = clientGoogle.models.generate_content(
-            model="gemini-2.5-pro-preview-03-25",
+            model="gemini-2.5-pro-exp-03-25",
             contents=prompt
         )
         
