@@ -286,6 +286,26 @@ def answer_callback(call, bot, player_stats, cursor):
     emoji = "✅" if is_correct else "❌"
     players_responses[player_name] = emoji
 
+    # Обновляем статистику игрока
+    if is_correct:
+        # Находим текущий счет для этого чата
+        current_score = 0
+        for score_entry in player_stats[user_id]["correct_answers"]:
+            if f"{chat_id}:" in score_entry:
+                current_score = int(score_entry.split(":")[1])
+                break
+        
+        # Обновляем или добавляем новый счет
+        new_score = current_score + 1
+        new_score_entry = f"{chat_id}:{new_score}"
+        
+        # Удаляем старый счет и добавляем новый
+        player_stats[user_id]["correct_answers"] = [
+            entry for entry in player_stats[user_id]["correct_answers"] 
+            if not entry.startswith(f"{chat_id}:")
+        ]
+        player_stats[user_id]["correct_answers"].append(new_score_entry)
+
     # Обновляем сообщение с вопросом
     updated_text = original_question + "\n\n" + \
                    "\n".join([f"{player} {response}" for player, response in players_responses.items()])
