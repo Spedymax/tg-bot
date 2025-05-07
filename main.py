@@ -1932,7 +1932,7 @@ def peremoga(message):
         i = i + 1
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('answer'))
+@bot.callback_query_handler(func=lambda call: call.data.startswith('ans'))
 def callback_answer(call):
     trivia.answer_callback(call, bot, pisunchik, cursor)
 
