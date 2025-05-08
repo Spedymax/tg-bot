@@ -49,7 +49,7 @@ headers2 = {
 }
 
 
-def get_question_from_gemini(category):
+def get_question_from_gemini():
     try:
         prompt = f"""Ты - эксперт по созданию вопросов для викторины. Создай интересный вопрос на любую тему.
 
@@ -123,8 +123,7 @@ def get_question_from_gemini(category):
 
 def send_trivia_questions(chat_id, bot, cursor, conn):
     try:
-        category = random.choice(CATEGORIES)
-        question_data = get_question_from_gemini(category)
+        question_data = get_question_from_gemini()
         
         if question_data is None:
             bot.send_message(chat_id, "Извините, произошла ошибка при создании вопроса.")
