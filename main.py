@@ -2582,17 +2582,6 @@ def handle_send_to_group_message(message):
     except psycopg2.DatabaseError as e:
         print("Database error:", e)
 
-
-while True:
-    try:
-        bot.polling(none_stop=True)
-    except Exception as e:
-        print(f"Error occurred: {e}")
-        time.sleep(15)  # Wait before restarting polling
-
-# -1001294162183 Чатик с пацанами
-# -1002491624152 чатик с любимкой
-
 @bot.callback_query_handler(func=lambda call: call.data.startswith("chat_") or call.data.startswith("new_chat_"))
 def handle_chat_selection(call):
     if call.from_user.id in admin_ids:
@@ -2642,3 +2631,16 @@ def handle_chat_selection(call):
             )
     else:
         bot.answer_callback_query(call.id, "У вас нет доступа к админ-панели.")
+
+
+while True:
+    try:
+        bot.polling(none_stop=True)
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        time.sleep(15)  # Wait before restarting polling
+
+# -1001294162183 Чатик с пацанами
+# -1002491624152 чатик с любимкой
+
+
