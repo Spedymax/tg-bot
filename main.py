@@ -706,7 +706,7 @@ def handle_admin_categories(call):
                 types.InlineKeyboardButton("➖ Уменьшить писюнчик", callback_data="action_decreasePisunchik"),
                 types.InlineKeyboardButton("🔄 Сбросить кулдаун", callback_data="action_resetCooldown"),
                 types.InlineKeyboardButton("📊 Статистика игрока", callback_data="action_playerStats"),
-                types.InlineKeyboardButton("🎯 Изменить очки квиза", callback_data="action_modifyQuizScore"),
+                types.InlineKeyboardButton("🧠 Изменить очки квиза", callback_data="action_quizPoints"),
                 types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back")
             ]
             markup.add(*buttons)
@@ -838,6 +838,24 @@ def handle_admin_actions(call):
                 call.message.message_id, 
                 reply_markup=markup
             )
+            
+        elif action == "quizPoints":
+            # Создаем кнопки для каждого игрока
+            for player_id, data in pisunchik.items():
+                player_name = data['player_name']
+                button = types.InlineKeyboardButton(
+                    player_name, 
+                    callback_data=f"select_quizPoints_{player_id}"
+                )
+                markup.add(button)
+            markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_playerManagement"))
+            
+            bot.edit_message_text(
+                "Выберите игрока для изменения очков квиза:", 
+                call.message.chat.id, 
+                call.message.message_id, 
+                reply_markup=markup
+            )
 
         elif action in ["increaseBtc", "decreaseBtc"]:
             # Создаем кнопки для каждого игрока
@@ -949,27 +967,6 @@ def handle_admin_actions(call):
                     call.message.message_id
                 )
 
-        elif action == "modifyQuizScore":
-            if call.from_user.id in admin_ids:
-                markup = types.InlineKeyboardMarkup(row_width=2)
-                
-                # Create buttons for each player
-                for player_id, data in pisunchik.items():
-                    player_name = data['player_name']
-                    button = types.InlineKeyboardButton(
-                        player_name, 
-                        callback_data=f"select_quizPlayer_{player_id}"
-                    )
-                    markup.add(button)
-                markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_playerManagement"))
-                
-                bot.edit_message_text(
-                    "Выберите игрока для изменения очков квиза:", 
-                    call.message.chat.id, 
-                    call.message.message_id, 
-                    reply_markup=markup
-                )
-
     else:
         bot.answer_callback_query(call.id, "У вас нет доступа к админ-панели.")
 
@@ -1028,6 +1025,47 @@ def handle_player_selection(call):
                 f"Введите значение для {action_text}:", 
                 call.message.chat.id, 
                 call.message.message_id
+            )
+            
+        elif action == "quizPoints":
+            # Сохраняем выбранного игрока
+            admin_actions[call.from_user.id] = {"action": "quizPoints", "player_id": player_id}
+            
+            # Получаем список чатов, в которых участвует игрок
+            available_chats = []
+            
+            # Проверяем наличие записей об очках в чатах
+            for score_entry in pisunchik[player_id]["correct_answers"]:
+                if ":" in score_entry:
+                    chat_id, score = score_entry.strip('{}').split(':')
+                    try:
+                        # Пытаемся получить информацию о чате
+                        chat_info = bot.get_chat(int(chat_id))
+                        chat_title = chat_info.title if chat_info.title else f"Чат {chat_id}"
+                        available_chats.append((chat_id, chat_title, score))
+                    except Exception as e:
+                        # Если не удалось получить информацию о чате, используем только ID
+                        available_chats.append((chat_id, f"Чат {chat_id}", score))
+            
+            # Добавляем кнопки для выбора чата
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            for chat_id, chat_title, score in available_chats:
+                button = types.InlineKeyboardButton(
+                    f"{chat_title} (текущие очки: {score})", 
+                    callback_data=f"chat_{chat_id}_{player_id}"
+                )
+                markup.add(button)
+                
+            # Кнопка для добавления нового чата
+            markup.add(types.InlineKeyboardButton("➕ Добавить новый чат", callback_data=f"new_chat_{player_id}"))
+            markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="action_quizPoints"))
+            
+            player_name = pisunchik[player_id]['player_name']
+            bot.edit_message_text(
+                f"Выберите чат для изменения очков квиза игрока {player_name}:", 
+                call.message.chat.id, 
+                call.message.message_id,
+                reply_markup=markup
             )
             
         elif action == "resetooldown":
@@ -1161,6 +1199,97 @@ def handle_admin_input(message):
             except ValueError:
                 bot.reply_to(message, "❌ Пожалуйста, введите корректное число")
                 
+        elif action == "setQuizPoints":
+            try:
+                # Извлекаем значение очков и ID чата
+                points = int(message.text)
+                chat_id = action_data.get("chat_id")
+                
+                if player_id in pisunchik:
+                    # Удаляем старую запись с очками для этого чата, если она есть
+                    pisunchik[player_id]["correct_answers"] = [
+                        entry for entry in pisunchik[player_id]["correct_answers"]
+                        if not entry.startswith(f"{chat_id}:")
+                    ]
+                    
+                    # Добавляем новую запись с очками
+                    pisunchik[player_id]["correct_answers"].append(f"{chat_id}:{points}")
+                    save_data()
+                    
+                    player_name = pisunchik[player_id]['player_name']
+                    try:
+                        chat_info = bot.get_chat(int(chat_id))
+                        chat_name = chat_info.title if chat_info.title else f"Чат {chat_id}"
+                    except:
+                        chat_name = f"Чат {chat_id}"
+                    
+                    bot.reply_to(
+                        message, 
+                        f"✅ Очки квиза для игрока {player_name} в чате {chat_name} установлены: {points}"
+                    )
+                else:
+                    bot.reply_to(message, "❌ Игрок не найден")
+            except ValueError:
+                bot.reply_to(message, "❌ Пожалуйста, введите корректное число")
+                
+        elif action == "addNewChat":
+            try:
+                # Получаем ID чата
+                chat_id = message.text.strip()
+                
+                # Проверяем, что ID чата является числом
+                int(chat_id)  # Это вызовет ValueError, если не число
+                
+                if player_id in pisunchik:
+                    # Запрашиваем ввод количества очков
+                    admin_actions[message.from_user.id] = {
+                        "action": "setPointsForNewChat",
+                        "player_id": player_id,
+                        "chat_id": chat_id
+                    }
+                    
+                    player_name = pisunchik[player_id]['player_name']
+                    bot.reply_to(
+                        message,
+                        f"Введите количество очков квиза для игрока {player_name} в новом чате:"
+                    )
+                else:
+                    bot.reply_to(message, "❌ Игрок не найден")
+            except ValueError:
+                bot.reply_to(message, "❌ Пожалуйста, введите корректный ID чата (число)")
+                
+        elif action == "setPointsForNewChat":
+            try:
+                # Получаем количество очков и ID чата
+                points = int(message.text)
+                chat_id = action_data.get("chat_id")
+                
+                if player_id in pisunchik:
+                    # Проверяем, есть ли уже запись для этого чата
+                    exists = False
+                    for i, entry in enumerate(pisunchik[player_id]["correct_answers"]):
+                        if entry.startswith(f"{chat_id}:"):
+                            # Обновляем существующую запись
+                            pisunchik[player_id]["correct_answers"][i] = f"{chat_id}:{points}"
+                            exists = True
+                            break
+                    
+                    # Если записи нет, добавляем новую
+                    if not exists:
+                        pisunchik[player_id]["correct_answers"].append(f"{chat_id}:{points}")
+                    
+                    save_data()
+                    
+                    player_name = pisunchik[player_id]['player_name']
+                    bot.reply_to(
+                        message, 
+                        f"✅ Очки квиза для игрока {player_name} в новом чате установлены: {points}"
+                    )
+                else:
+                    bot.reply_to(message, "❌ Игрок не найден")
+            except ValueError:
+                bot.reply_to(message, "❌ Пожалуйста, введите корректное число")
+                
         elif action in ["addItem", "addStatue"]:
             item_name = message.text.strip()
             if player_id in pisunchik:
@@ -1201,8 +1330,8 @@ def handle_admin_input(message):
             for player_id, player_data in pisunchik.items():
                 try:
                     if player_data.get("chat_id"):
-                        for chat_id in player_data["chat_id"]:
-                            bot.send_message(chat_id, f"📢 Объявление:\n\n{broadcast_message}")
+                        for chat in player_data["chat_id"]:
+                            bot.send_message(chat, f"📢 Объявление:\n\n{broadcast_message}")
                             success_count += 1
                 except Exception as e:
                     fail_count += 1
@@ -1215,6 +1344,10 @@ def handle_admin_input(message):
         
         # Clear the admin action after processing
         del admin_actions[message.from_user.id]
+
+
+    else:
+        bot.reply_to(message, "У вас нет доступа к админ-панели.")
 
 
 @bot.message_handler(commands=['pisunchik'])
@@ -2460,72 +2593,52 @@ while True:
 # -1001294162183 Чатик с пацанами
 # -1002491624152 чатик с любимкой
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("select_quizPlayer_"))
-def handle_quiz_player_selection(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith("chat_") or call.data.startswith("new_chat_"))
+def handle_chat_selection(call):
     if call.from_user.id in admin_ids:
-        player_id = call.data.split("_")[2]
-        markup = types.InlineKeyboardMarkup(row_width=2)
+        data_parts = call.data.split("_")
         
-        # Add buttons for each chat where the player has participated
-        for chat_id in [-1001294162183, -1002491624152]:  # Add your chat IDs here
-            chat_name = "Чатик с пацанами" if chat_id == -1001294162183 else "Чатик с любимкой"
-            button = types.InlineKeyboardButton(
-                chat_name, 
-                callback_data=f"select_quizChat_{player_id}_{chat_id}"
+        if call.data.startswith("chat_"):
+            # Извлекаем ID чата и игрока
+            chat_id = data_parts[1]
+            player_id = data_parts[2]
+            
+            # Сохраняем выбранный чат и игрока
+            admin_actions[call.from_user.id] = {
+                "action": "setQuizPoints", 
+                "player_id": player_id,
+                "chat_id": chat_id
+            }
+            
+            # Находим текущие очки
+            current_points = 0
+            for score_entry in pisunchik[player_id]["correct_answers"]:
+                if score_entry.startswith(f"{chat_id}:"):
+                    current_points = int(score_entry.split(":")[1])
+                    break
+            
+            player_name = pisunchik[player_id]['player_name']
+            bot.edit_message_text(
+                f"Введите новое количество очков квиза для игрока {player_name} в выбранном чате.\n"
+                f"Текущие очки: {current_points}", 
+                call.message.chat.id, 
+                call.message.message_id
             )
-            markup.add(button)
-        markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="action_modifyQuizScore"))
         
-        bot.edit_message_text(
-            "Выберите чат для изменения очков:", 
-            call.message.chat.id, 
-            call.message.message_id, 
-            reply_markup=markup
-        )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("select_quizChat_"))
-def handle_quiz_chat_selection(call):
-    if call.from_user.id in admin_ids:
-        _, player_id, chat_id = call.data.split("_")
-        admin_actions[call.from_user.id] = {
-            "action": "modifyQuizScore",
-            "player_id": player_id,
-            "chat_id": chat_id
-        }
-        
-        bot.edit_message_text(
-            "Введите новое количество очков для квиза:", 
-            call.message.chat.id, 
-            call.message.message_id
-        )
-
-@bot.message_handler(func=lambda message: message.from_user.id in admin_actions)
-def handle_admin_input(message):
-    if message.from_user.id in admin_ids:
-        action_data = admin_actions[message.from_user.id]
-        action = action_data.get("action")
-        player_id = action_data.get("player_id")
-        
-        if action == "modifyQuizScore":
-            try:
-                new_score = int(message.text)
-                chat_id = action_data.get("chat_id")
-                
-                # Update the player's score for the specific chat
-                player_stats = pisunchik[player_id]
-                correct_answers = player_stats.get("correct_answers", [])
-                
-                # Remove existing score for this chat if it exists
-                correct_answers = [entry for entry in correct_answers if not entry.startswith(f"{chat_id}:")]
-                
-                # Add new score
-                correct_answers.append(f"{chat_id}:{new_score}")
-                player_stats["correct_answers"] = correct_answers
-                
-                save_data()
-                bot.reply_to(
-                    message, 
-                    f"✅ Очки квиза для игрока {player_stats['player_name']} в чате {chat_id} обновлены до {new_score}"
-                )
-            except ValueError:
-                bot.reply_to(message, "❌ Пожалуйста, введите корректное число")
+        elif call.data.startswith("new_chat_"):
+            # Извлекаем ID игрока
+            player_id = data_parts[2]
+            
+            # Сохраняем состояние
+            admin_actions[call.from_user.id] = {
+                "action": "addNewChat", 
+                "player_id": player_id
+            }
+            
+            bot.edit_message_text(
+                "Введите ID чата для добавления:", 
+                call.message.chat.id, 
+                call.message.message_id
+            )
+    else:
+        bot.answer_callback_query(call.id, "У вас нет доступа к админ-панели.")
