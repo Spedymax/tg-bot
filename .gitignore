@@ -1,2 +1,10 @@
 .cache
 .idea
+__pycache__/Crypto1.cpython-311.pyc
+BotFunctions/tournament_bracket_state.json
+BotFunctions/__pycache__/cryptography.cpython-311.pyc
+BotFunctions/__pycache__/spotify_client.cpython-311.pyc
+BotFunctions/__pycache__/tournament_manager.cpython-311.pyc
+BotFunctions/__pycache__/config.cpython-311.pyc
+BotFunctions/__pycache__/trivia.cpython-311.pyc
+BotFunctions/__pycache__/db_manager.cpython-311.pyc

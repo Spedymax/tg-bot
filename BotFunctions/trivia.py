@@ -9,22 +9,22 @@ from datetime import datetime, timezone
 from BotFunctions.cryptography import clientGoogle
 
 DIFFICULTY = 'medium'
-CATEGORIES = [
-    'Шуточные темы',
-    'Шутки 18+',
-    'Иностранные языки',
-    'Dota 2',
-    'Технологии и IT',
-    'История',
-    'География', 
-    'Фильмы и сериалы',
-    'Новости',
-    'Компьютерные игры',
-    'Политика',
-    'Европа'
-    'Мемы',
-    'Социальные сети'
-]
+# CATEGORIES = [
+#     'Шуточные темы',
+#     'Шутки 18+',
+#     'Иностранные языки',
+#     'Dota 2',
+#     'Технологии и IT',
+#     'История',
+#     'География',
+#     'Фильмы и сериалы',
+#     'Новости',
+#     'Компьютерные игры',
+#     'Политика',
+#     'Европа'
+#     'Мемы',
+#     'Социальные сети'
+# ]
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
 
@@ -49,9 +49,9 @@ headers2 = {
 }
 
 
-def get_question_from_gemini(category):
+def get_question_from_gemini():
     try:
-        prompt = f"""Ты - эксперт по созданию вопросов для викторины. Создай интересный вопрос на тему "{category}".
+        prompt = f"""Ты - эксперт по созданию вопросов для викторины. Создай интересный вопрос на любую тему.
 
 Структура вопроса:
 1. Формат:
@@ -123,8 +123,7 @@ def get_question_from_gemini(category):
 
 def send_trivia_questions(chat_id, bot, cursor, conn):
     try:
-        category = random.choice(CATEGORIES)
-        question_data = get_question_from_gemini(category)
+        question_data = get_question_from_gemini()
         
         if question_data is None:
             bot.send_message(chat_id, "Извините, произошла ошибка при создании вопроса.")
@@ -155,16 +154,24 @@ def save_question_to_database(question, correct_answer, answer_options, cursor, 
 
 def send_question_with_options(chat_id, bot, question, answer_options, cursor):
     markup = types.InlineKeyboardMarkup()
-    for answer in answer_options:
-        button = types.InlineKeyboardButton(text=answer, callback_data=f"answer_{answer}")
+
+    # Use indices instead of full answer text in callback_data
+    for index, answer in enumerate(answer_options):
+        button = types.InlineKeyboardButton(text=answer, callback_data=f"ans_{index}")
         markup.add(button)
 
     bot.send_message(chat_id, "Внимание вопрос!", parse_mode='html')
     question_msg = bot.send_message(chat_id, question, reply_markup=markup, parse_mode='html', protect_content=True)
 
-    # Сохранение оригинального вопроса и пустых ответов в базу данных
-    question_messages[question_msg.message_id] = {"text": question, "players_responses": {}}
-    save_question_state(question_msg.message_id, question, {}, cursor)
+    # Store the original question, options and empty responses
+    question_data = {
+        "text": question,
+        "players_responses": {},
+        "options": answer_options  # Store the answer options to reference by index later
+    }
+
+    question_messages[question_msg.message_id] = question_data
+    save_question_state(question_msg.message_id, question, {}, cursor, answer_options)
 
 
 def clear_trivia_data(cursor):
@@ -181,22 +188,61 @@ def load_trivia_data(cursor):
     } for row in cursor.fetchall()]
 
 
-def save_question_state(message_id, question, players_responses, cursor):
+# Update save_question_state to also store answer options
+def save_question_state(message_id, question, players_responses, cursor, answer_options=None):
+    data_to_save = {
+        "players_responses": players_responses
+    }
+
+    # Add answer options to data if provided
+    if answer_options:
+        data_to_save["options"] = answer_options
+
     cursor.execute("""
-        INSERT INTO question_state (message_id, original_question, players_responses)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (message_id) DO UPDATE 
-        SET players_responses = EXCLUDED.players_responses
-    """, (message_id, question, json.dumps(players_responses)))  # Здесь мы сохраняем players_responses как JSON строку
+                   INSERT INTO question_state (message_id, original_question, players_responses)
+                   VALUES (%s, %s, %s) ON CONFLICT (message_id) DO
+                   UPDATE
+                       SET players_responses = EXCLUDED.players_responses
+                   """, (message_id, question, json.dumps(data_to_save)))
     cursor.connection.commit()
 
 
+# Update load_question_state to handle the new format
 def load_question_state(cursor):
     cursor.execute("SELECT message_id, original_question, players_responses FROM question_state")
     question_states = cursor.fetchall()
-    # Мы предполагаем, что players_responses в базе данных хранится как строка, поэтому применяем json.loads()
-    return {row[0]: {"text": row[1], "players_responses": json.loads(row[2])} for row in question_states if
-            isinstance(row[2], str)}
+
+    result = {}
+    for row in question_states:
+        message_id, original_question = row[0], row[1]
+
+        try:
+            data = json.loads(row[2]) if isinstance(row[2], str) else {}
+
+            # Handle both old and new format
+            if isinstance(data, dict) and "players_responses" in data:
+                # New format
+                result[message_id] = {
+                    "text": original_question,
+                    "players_responses": data.get("players_responses", {}),
+                    "options": data.get("options", [])
+                }
+            else:
+                # Old format
+                result[message_id] = {
+                    "text": original_question,
+                    "players_responses": data,
+                    "options": []
+                }
+        except (json.JSONDecodeError, TypeError):
+            # Fallback for any parsing errors
+            result[message_id] = {
+                "text": original_question,
+                "players_responses": {},
+                "options": []
+            }
+
+    return result
 
 
 def get_correct_answers(bot, pisunchik, cursor, chat_id):
@@ -245,10 +291,18 @@ def has_answered_question(user_id, question, cursor):
     return cursor.fetchone() is not None
 
 
+# Update answer_callback to work with the new approach
 def answer_callback(call, bot, player_stats, cursor):
     user_id = str(call.from_user.id)
     player_name = player_stats[user_id]["player_name"]
-    answer = call.data.split('_')[1]
+    callback_data = call.data.split('_')
+
+    # Extract the index from callback data
+    if len(callback_data) != 2 or not callback_data[1].isdigit():
+        bot.answer_callback_query(call.id, "Invalid callback data")
+        return
+
+    answer_index = int(callback_data[1])
     question_id = call.message.message_id
     chat_id = call.message.chat.id
 
@@ -263,10 +317,30 @@ def answer_callback(call, bot, player_stats, cursor):
         bot.send_message(chat_id, "Error: Original question not found.")
         return
 
-    original_question, players_responses = result[0], result[1]
+    original_question, stored_data = result[0], result[1]
 
-    if isinstance(players_responses, str):
-        players_responses = json.loads(players_responses)
+    # Parse the stored data
+    if isinstance(stored_data, str):
+        try:
+            stored_data = json.loads(stored_data)
+        except json.JSONDecodeError:
+            stored_data = {"players_responses": {}, "options": []}
+
+    # Handle both old and new formats
+    if isinstance(stored_data, dict) and "players_responses" in stored_data:
+        players_responses = stored_data.get("players_responses", {})
+        answer_options = stored_data.get("options", [])
+    else:
+        players_responses = stored_data
+        answer_options = []
+
+    # Make sure we have valid answer options
+    if not answer_options or answer_index >= len(answer_options):
+        bot.answer_callback_query(call.id, "Answer option not found")
+        return
+
+    # Get the actual answer text from the index
+    answer = answer_options[answer_index]
 
     cursor.execute("SELECT correct_answer, explanation FROM questions WHERE question = %s", (original_question,))
     result = cursor.fetchone()
@@ -294,14 +368,14 @@ def answer_callback(call, bot, player_stats, cursor):
             if f"{chat_id}:" in score_entry:
                 current_score = int(score_entry.split(":")[1])
                 break
-        
+
         # Обновляем или добавляем новый счет
         new_score = current_score + 1
         new_score_entry = f"{chat_id}:{new_score}"
-        
+
         # Удаляем старый счет и добавляем новый
         player_stats[user_id]["correct_answers"] = [
-            entry for entry in player_stats[user_id]["correct_answers"] 
+            entry for entry in player_stats[user_id]["correct_answers"]
             if not entry.startswith(f"{chat_id}:")
         ]
         player_stats[user_id]["correct_answers"].append(new_score_entry)
@@ -309,7 +383,7 @@ def answer_callback(call, bot, player_stats, cursor):
     # Обновляем сообщение с вопросом
     updated_text = original_question + "\n\n" + \
                    "\n".join([f"{player} {response}" for player, response in players_responses.items()])
-    
+
     # Если это личный чат, сразу показываем результат
     if is_private_chat:
         result_text = f"{'Правильно!' if is_correct else 'Неправильно!'}\nПравильный ответ: {correct_answer}\n\nОбъяснение: {explanation}"
@@ -318,7 +392,7 @@ def answer_callback(call, bot, player_stats, cursor):
         # Получаем количество активных участников в группе
         cursor.execute("SELECT COUNT(DISTINCT user_id) FROM user_activity WHERE chat_id = %s", (chat_id,))
         active_users_count = cursor.fetchone()[0]
-        
+
         # Если все активные участники ответили, показываем объяснение
         if len(players_responses) >= active_users_count:
             updated_text += f"\n\nПравильный ответ: {correct_answer}\nОбъяснение: {explanation}"
@@ -326,7 +400,18 @@ def answer_callback(call, bot, player_stats, cursor):
     bot.edit_message_text(chat_id=chat_id, message_id=question_id, text=updated_text,
                           reply_markup=call.message.reply_markup, parse_mode='html')
 
-    save_question_state(question_id, original_question, players_responses, cursor)
+    # Store the updated data
+    data_to_save = {
+        "players_responses": players_responses,
+        "options": answer_options
+    }
+
+    cursor.execute("""
+                   UPDATE question_state
+                   SET players_responses = %s
+                   WHERE message_id = %s
+                   """, (json.dumps(data_to_save), question_id))
+
     current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     cursor.execute("INSERT INTO answered_questions (user_id, question, date_added) VALUES (%s, %s, %s)",
                    (user_id, original_question, current_date))
