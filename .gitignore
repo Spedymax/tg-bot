@@ -8,3 +8,5 @@ BotFunctions/__pycache__/tournament_manager.cpython-311.pyc
 BotFunctions/__pycache__/config.cpython-311.pyc
 BotFunctions/__pycache__/trivia.cpython-311.pyc
 BotFunctions/__pycache__/db_manager.cpython-311.pyc
+memory_bot.log
+memory_backups
