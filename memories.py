@@ -372,7 +372,23 @@ class MemoryBot:
             week_start_date = None
 
             if memory_type == 'weekly':
-                week_number = now.isocalendar()[1]
+                # Получаем дату первой записи пользователя
+                cursor.execute("""
+                    SELECT MIN(created_at) 
+                    FROM memories 
+                    WHERE user_id = %s AND memory_type = 'weekly'
+                """, (user_id,))
+                
+                first_memory_date = cursor.fetchone()[0]
+                
+                if first_memory_date is None:
+                    # Если это первая запись, устанавливаем номер недели 1
+                    week_number = 1
+                else:
+                    # Вычисляем разницу в неделях между первой записью и текущей датой
+                    weeks_diff = (now.date() - first_memory_date.date()).days // 7
+                    week_number = weeks_diff + 1  # +1 потому что первая неделя должна быть 1
+                
                 days_since_monday = now.weekday()
                 week_start_date = (now - timedelta(days=days_since_monday)).date()
 
@@ -749,7 +765,7 @@ def check_password_for_weekly(message):
 
     if password != stored_password:
         msg = bot.send_message(message.chat.id,
-                               "❌ <b>Неверный пароль.</b> Попробуйте команду /weekly снова. Это сообщение будет удалено через 5 секунд",
+                               "❌ <b>Неверный пароль.</b> Попробуйте снова. Это сообщение будет удалено через 5 секунд",
                                parse_mode='HTML')
         time.sleep(5)
         bot.delete_message(message.chat.id, msg.message_id)
