@@ -1179,104 +1179,20 @@ def handle_close_memories(call):
     bot.answer_callback_query(call.id, "Воспоминания закрыты")
 
 
-def send_weekly_reminder():
-    """Отправка еженедельного напоминания всем активным пользователям с дефолтным днём (воскресенье)"""
-    # Для обратной совместимости - вызываем функцию для воскресенья
-    send_weekly_reminder_for_day("sunday")
-
-
-@bot.message_handler(commands=['setreminder'])
-def handle_set_reminder(message):
-    """Установка дня для еженедельного напоминания"""
-    keyboard = telebot.types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=True)
-    days = [
-        "Понедельник", "Вторник", "Среда", "Четверг",
-        "Пятница", "Суббота", "Воскресенье"
-    ]
-    keyboard.add(*[telebot.types.KeyboardButton(day) for day in days])
-
-    bot.reply_to(message, "📅 Выберите день недели для еженедельного напоминания:", reply_markup=keyboard)
-    bot.register_next_step_handler(message, process_reminder_day)
-
-
-def process_reminder_day(message):
-    user_id = message.from_user.id
-    day_text = message.text.strip().lower()
-
-    day_mapping = {
-        "понедельник": "monday",
-        "вторник": "tuesday",
-        "среда": "wednesday",
-        "четверг": "thursday",
-        "пятница": "friday",
-        "суббота": "saturday",
-        "воскресенье": "sunday"
-    }
-
-    if day_text not in day_mapping:
-        bot.reply_to(message, "❌ Пожалуйста, выберите день из списка.",
-                     reply_markup=telebot.types.ReplyKeyboardRemove())
-        return
-
-    day_value = day_mapping[day_text]
-
-    if memory_bot.set_reminder_day(user_id, day_value):
-        bot.reply_to(message,
-                     f"✅ Еженедельное напоминание установлено на <b>{message.text}</b> в 12:00.",
-                     parse_mode='HTML',
-                     reply_markup=telebot.types.ReplyKeyboardRemove())
-    else:
-        bot.reply_to(message,
-                     "❌ Произошла ошибка при установке дня напоминания. Попробуйте позже.",
-                     reply_markup=telebot.types.ReplyKeyboardRemove())
-
-
-def schedule_reminders():
-    """Настройка расписания напоминаний для всех дней недели"""
-    # Настраиваем расписание для каждого дня недели
-    schedule.every().monday.at("12:00").do(send_weekly_reminder_for_day, day="monday")
-    schedule.every().tuesday.at("12:00").do(send_weekly_reminder_for_day, day="tuesday")
-    schedule.every().wednesday.at("12:00").do(send_weekly_reminder_for_day, day="wednesday")
-    schedule.every().thursday.at("12:00").do(send_weekly_reminder_for_day, day="thursday")
-    schedule.every().friday.at("12:00").do(send_weekly_reminder_for_day, day="friday")
-    schedule.every().saturday.at("12:00").do(send_weekly_reminder_for_day, day="saturday")
-    schedule.every().sunday.at("12:00").do(send_weekly_reminder_for_day, day="sunday")
-
-    logger.info("Расписание напоминаний настроено для всех дней недели в 12:00")
-
-
-def send_weekly_reminder_for_day(day: str):
-    """Отправка еженедельного напоминания пользователям с выбранным днем"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Получаем пользователей, которые выбрали этот день для напоминаний
-        cursor.execute("""
-            SELECT user_id, timezone 
-            FROM memories_users 
-            WHERE is_active = TRUE 
-            AND reminder_day = %s
-        """, (day,))
-
-        users = cursor.fetchall()
-        sent_count = 0
-        failed_count = 0
-
-        for user_id, timezone in users:
-            try:
-                # Проверяем время пользователя
-                user_tz = pytz.timezone(timezone or 'UTC')
-                user_time = datetime.now(user_tz).time()
-                
-                # Отправляем напоминание только если у пользователя 12:00
-                if not (dt_time(11, 55) <= user_time <= dt_time(12, 5)):
-                    continue
-
-                if not memory_bot._should_send_reminder(user_id):
-                    continue
-
-                message_text = """
+def send_reminders_every_minute():
+    """Проверяет всех активных пользователей и отправляет напоминание, если у них сейчас 12:00 и их день недели."""
+    users = memory_bot.get_active_users()
+    for user_id in users:
+        try:
+            tz = memory_bot.get_user_timezone(user_id)
+            user_tz = pytz.timezone(tz)
+            now = datetime.now(user_tz)
+            day = now.strftime('%A').lower()  # monday, tuesday, ...
+            reminder_day = memory_bot.get_reminder_day(user_id)
+            if day == reminder_day:
+                if dt_time(11, 55) <= now.time() <= dt_time(12, 5):
+                    if memory_bot._should_send_reminder(user_id):
+                        message_text = """
 🔔 <b>Время для еженедельных размышлений!</b>
 
 Подошло время записать ваши мысли за прошедшую неделю.
@@ -1285,101 +1201,23 @@ def send_weekly_reminder_for_day(day: str):
 
 Это поможет вам лучше понять себя и сохранить важные воспоминания! 📝✨
 """
-                bot.send_message(user_id, message_text, parse_mode='HTML')
-                memory_bot._update_last_reminder(user_id)
-                sent_count += 1
-
-            except Exception as e:
-                logger.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
-                failed_count += 1
-                # Сохраняем информацию о неудачной попытке
-                memory_bot.failed_reminders[user_id] = {
-                    'day': day,
-                    'attempt_time': datetime.now(),
-                    'error': str(e)
-                }
-
-        logger.info(f"Отправлено напоминаний для дня {day}: {sent_count} успешно, {failed_count} с ошибками")
-
-        # Пробуем отправить пропущенные напоминания
-        retry_failed_reminders()
-
-    except Exception as e:
-        logger.error(f"Ошибка отправки напоминаний для дня {day}: {e}")
+                        bot.send_message(user_id, message_text, parse_mode='HTML')
+                        memory_bot._update_last_reminder(user_id)
+        except Exception as e:
+            logger.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
 
 
-def retry_failed_reminders():
-    """Повторная отправка неудачных напоминаний"""
-    current_time = datetime.now()
-    retry_after = timedelta(hours=1)  # Повторная попытка через час
-    
-    for user_id, reminder_info in list(memory_bot.failed_reminders.items()):
-        if current_time - reminder_info['attempt_time'] >= retry_after:
-            try:
-                message_text = """
-🔔 <b>Напоминание о еженедельных размышлениях</b>
-
-Не удалось отправить вам напоминание ранее. 
-Если вы еще не записали свои мысли за эту неделю, самое время это сделать!
-
-Используйте команду /weekly для записи ваших мыслей.
-"""
-                bot.send_message(user_id, message_text, parse_mode='HTML')
-                memory_bot._update_last_reminder(user_id)
-                memory_bot.failed_reminders.pop(user_id)
-                logger.info(f"Успешно отправлено пропущенное напоминание пользователю {user_id}")
-            except Exception as e:
-                logger.error(f"Ошибка повторной отправки напоминания пользователю {user_id}: {e}")
-                # Обновляем время последней попытки
-                memory_bot.failed_reminders[user_id]['attempt_time'] = current_time
-
-
-@bot.message_handler(commands=['timezone'])
-def handle_timezone(message):
-    """Установка часового пояса пользователя"""
-    keyboard = telebot.types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=True)
-    timezones = [
-        "Europe/Moscow", "Europe/London", "America/New_York", 
-        "Asia/Tokyo", "Australia/Sydney", "UTC"
-    ]
-    keyboard.add(*[telebot.types.KeyboardButton(tz) for tz in timezones])
-    
-    bot.reply_to(message, 
-        "🌍 Выберите ваш часовой пояс:\n\n"
-        "Это поможет боту отправлять напоминания в удобное для вас время.",
-        reply_markup=keyboard)
-    bot.register_next_step_handler(message, process_timezone)
-
-
-def process_timezone(message):
-    """Обработка выбора часового пояса"""
-    user_id = message.from_user.id
-    timezone = message.text.strip()
-    
-    try:
-        # Проверяем валидность часового пояса
-        pytz.timezone(timezone)
-        
-        if memory_bot.set_user_timezone(user_id, timezone):
-            bot.reply_to(message, 
-                f"✅ Часовой пояс успешно установлен: {timezone}\n\n"
-                "Теперь вы будете получать напоминания в 12:00 по вашему времени.",
-                reply_markup=telebot.types.ReplyKeyboardRemove())
-        else:
-            bot.reply_to(message, 
-                "❌ Не удалось установить часовой пояс. Пожалуйста, попробуйте позже.",
-                reply_markup=telebot.types.ReplyKeyboardRemove())
-    except pytz.exceptions.UnknownTimeZoneError:
-        bot.reply_to(message, 
-            "❌ Неверный часовой пояс. Пожалуйста, выберите из списка.",
-            reply_markup=telebot.types.ReplyKeyboardRemove())
+def schedule_reminders():
+    """Настройка расписания: проверка напоминаний каждую минуту"""
+    schedule.every(59).seconds.do(send_reminders_every_minute)
+    logger.info("Расписание напоминаний: проверка каждую минуту по времени пользователя")
 
 
 def run_schedule():
     """Запуск планировщика в отдельном потоке"""
     while True:
         schedule.run_pending()
-        time.sleep(60)  # Проверяем каждую минуту
+        time.sleep(59)  # Проверяем каждую минуту
 
 
 def main():
