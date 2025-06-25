@@ -5,13 +5,17 @@ import schedule
 import time
 import threading
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 import os
 from typing import Optional, List, Dict
 from dotenv import load_dotenv
+from typing import Optional, List, Dict, Any, Callable
+from functools import wraps
+import pytz
 
 # Load environment variables
 load_dotenv()
+
 
 # Настройка логирования
 logging.basicConfig(
@@ -37,16 +41,90 @@ DB_CONFIG = {
     'password': os.getenv('DB_PASSWORD')
 }
 
+# Максимальная длина воспоминания
+MAX_MEMORY_LENGTH = 4096  # Максимальная длина сообщения в Telegram
+
+# Таймаут для состояний аутентификации (в секундах)
+AUTH_TIMEOUT = 300  # 5 минут
+
+# Количество попыток подключения к БД
+DB_RETRY_ATTEMPTS = 3
+DB_RETRY_DELAY = 5  # секунды
+
 bot = telebot.TeleBot(BOT_TOKEN)
 global password_message
 global write_your_memories
 
+
+def retry_db_operation(max_attempts: int = DB_RETRY_ATTEMPTS, delay: int = DB_RETRY_DELAY):
+    """Декоратор для повторных попыток операций с БД"""
+    def decorator(func: Callable):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_error = None
+            for attempt in range(max_attempts):
+                try:
+                    return func(*args, **kwargs)
+                except psycopg2.OperationalError as e:
+                    last_error = e
+                    if attempt < max_attempts - 1:
+                        logger.warning(f"Попытка {attempt + 1} из {max_attempts} не удалась: {e}")
+                        time.sleep(delay)
+                    continue
+            logger.error(f"Все попытки операции с БД не удались: {last_error}")
+            raise last_error
+        return wrapper
+    return decorator
+
+
+def validate_memory_content(content: str) -> bool:
+    """Валидация содержимого воспоминания"""
+    if not content or not content.strip():
+        return False
+    if len(content) > MAX_MEMORY_LENGTH:
+        return False
+    # Проверка на наличие только специальных символов
+    if not any(c.isalnum() for c in content):
+        return False
+    return True
+
+
+def get_db_connection():
+    """Получение соединения с БД с повторными попытками"""
+    for attempt in range(DB_RETRY_ATTEMPTS):
+        try:
+            return psycopg2.connect(**DB_CONFIG)
+        except psycopg2.OperationalError as e:
+            if attempt < DB_RETRY_ATTEMPTS - 1:
+                logger.warning(f"Попытка подключения к БД {attempt + 1} из {DB_RETRY_ATTEMPTS} не удалась: {e}")
+                time.sleep(DB_RETRY_DELAY)
+            else:
+                logger.error(f"Не удалось подключиться к БД после {DB_RETRY_ATTEMPTS} попыток: {e}")
+                raise
+
+
 class MemoryBot:
     def __init__(self):
         self.init_database()
-        self.current_memory_index = {}  # Для каждого пользователя храним текущий индекс просмотра
-        self.custom_reminder_days = {}  # Хранение пользовательских дней напоминаний
+        self.current_memory_index = {}
+        self.custom_reminder_days = {}
+        self.user_states = {}
+        self.state_timestamps = {}
+        self.failed_reminders = {}  # Для хранения неудачных напоминаний
+        self.user_timezones = {}  # Для хранения часовых поясов пользователей
 
+    def cleanup_expired_states(self):
+        """Очистка устаревших состояний"""
+        current_time = time.time()
+        expired_states = [
+            user_id for user_id, timestamp in self.state_timestamps.items()
+            if current_time - timestamp > AUTH_TIMEOUT
+        ]
+        for user_id in expired_states:
+            self.user_states.pop(user_id, None)
+            self.state_timestamps.pop(user_id, None)
+
+    @retry_db_operation()
     def init_database(self):
         """Создание таблиц для хранения воспоминаний и пользователей"""
         try:
@@ -84,8 +162,9 @@ class MemoryBot:
                                reminder_day VARCHAR
                            (
                                20
-                           ) DEFAULT 'sunday'
-                               );
+                           ) DEFAULT 'sunday',
+                               timezone VARCHAR(50) DEFAULT 'UTC'
+                           );
                            """)
 
             # Таблица воспоминаний
@@ -283,8 +362,13 @@ class MemoryBot:
             logger.error(f"Ошибка получения активных пользователей: {e}")
             return []
 
+    @retry_db_operation()
     def save_memory(self, user_id: int, content: str, memory_type: str) -> bool:
         """Сохранение воспоминания в БД"""
+        if not validate_memory_content(content):
+            logger.warning(f"Попытка сохранения невалидного воспоминания от пользователя {user_id}")
+            return False
+
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
@@ -294,26 +378,71 @@ class MemoryBot:
             week_start_date = None
 
             if memory_type == 'weekly':
-                week_number = now.isocalendar()[1]
-                # Находим начало недели (понедельник)
+                # Получаем дату первой записи пользователя
+                cursor.execute("""
+                    SELECT MIN(created_at) 
+                    FROM memories 
+                    WHERE user_id = %s AND memory_type = 'weekly'
+                """, (user_id,))
+
+                first_memory_date = cursor.fetchone()[0]
+
+                if first_memory_date is None:
+                    # Если это первая запись, устанавливаем номер недели 1
+                    week_number = 1
+                else:
+                    # Вычисляем разницу в неделях между первой записью и текущей датой
+                    weeks_diff = (now.date() - first_memory_date.date()).days // 7
+                    week_number = weeks_diff + 1  # +1 потому что первая неделя должна быть 1
+
                 days_since_monday = now.weekday()
                 week_start_date = (now - timedelta(days=days_since_monday)).date()
 
             cursor.execute("""
-                           INSERT INTO memories (user_id, content, memory_type, week_number, week_start_date)
-                           VALUES (%s, %s, %s, %s, %s)
-                           """, (user_id, content, memory_type, week_number, week_start_date))
+                INSERT INTO memories (user_id, content, memory_type, week_number, week_start_date)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+            """, (user_id, content, memory_type, week_number, week_start_date))
 
+            memory_id = cursor.fetchone()[0]
             conn.commit()
             cursor.close()
             conn.close()
 
-            logger.info(f"Сохранено воспоминание пользователя {user_id}, тип: {memory_type}")
+            # Создаем бэкап важных данных
+            self._backup_memory(memory_id, user_id, content, memory_type)
+
+            logger.info(f"Сохранено воспоминание {memory_id} пользователя {user_id}, тип: {memory_type}")
             return True
 
         except Exception as e:
             logger.error(f"Ошибка сохранения воспоминания: {e}")
             return False
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if 'conn' in locals():
+                conn.close()
+
+    def _backup_memory(self, memory_id: int, user_id: int, content: str, memory_type: str):
+        """Создание бэкапа важных данных"""
+        try:
+            backup_dir = "memory_backups"
+            if not os.path.exists(backup_dir):
+                os.makedirs(backup_dir)
+
+            backup_file = os.path.join(backup_dir, f"memory_{memory_id}_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+
+            with open(backup_file, 'w', encoding='utf-8') as f:
+                f.write(f"Memory ID: {memory_id}\n")
+                f.write(f"User ID: {user_id}\n")
+                f.write(f"Type: {memory_type}\n")
+                f.write(f"Created at: {datetime.now()}\n")
+                f.write(f"Content:\n{content}\n")
+
+            logger.info(f"Создан бэкап воспоминания {memory_id}")
+        except Exception as e:
+            logger.error(f"Ошибка создания бэкапа воспоминания {memory_id}: {e}")
 
     def get_memories(self, user_id: int) -> List[Dict]:
         """Получение всех воспоминаний пользователя"""
@@ -369,6 +498,95 @@ class MemoryBot:
         except Exception as e:
             logger.error(f"Ошибка получения статистики: {e}")
             return {'total': 0, 'weekly': 0, 'extra': 0}
+
+    def set_user_timezone(self, user_id: int, timezone: str) -> bool:
+        """Установка часового пояса пользователя"""
+        try:
+            # Проверяем валидность часового пояса
+            pytz.timezone(timezone)
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                UPDATE memories_users 
+                SET timezone = %s 
+                WHERE user_id = %s
+            """, (timezone, user_id))
+
+            conn.commit()
+            self.user_timezones[user_id] = timezone
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка установки часового пояса для пользователя {user_id}: {e}")
+            return False
+
+    def get_user_timezone(self, user_id: int) -> str:
+        """Получение часового пояса пользователя"""
+        if user_id in self.user_timezones:
+            return self.user_timezones[user_id]
+
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT timezone 
+                FROM memories_users 
+                WHERE user_id = %s
+            """, (user_id,))
+
+            result = cursor.fetchone()
+            timezone = result[0] if result and result[0] else 'UTC'
+            self.user_timezones[user_id] = timezone
+            return timezone
+        except Exception as e:
+            logger.error(f"Ошибка получения часового пояса для пользователя {user_id}: {e}")
+            return 'UTC'
+
+    def _should_send_reminder(self, user_id: int) -> bool:
+        """Проверка, нужно ли отправлять напоминание пользователю"""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            # Получаем время последнего напоминания
+            cursor.execute("""
+                SELECT last_reminder 
+                FROM memories_users 
+                WHERE user_id = %s
+            """, (user_id,))
+
+            result = cursor.fetchone()
+            if not result or not result[0]:
+                return True
+
+            last_reminder = result[0]
+            user_tz = pytz.timezone(self.get_user_timezone(user_id))
+            now = datetime.now(user_tz)
+
+            # Проверяем, прошло ли 24 часа с последнего напоминания
+            return (now - last_reminder.astimezone(user_tz)) > timedelta(hours=24)
+
+        except Exception as e:
+            logger.error(f"Ошибка проверки времени напоминания для пользователя {user_id}: {e}")
+            return False
+
+    def _update_last_reminder(self, user_id: int):
+        """Обновление времени последнего напоминания"""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                UPDATE memories_users 
+                SET last_reminder = CURRENT_TIMESTAMP 
+                WHERE user_id = %s
+            """, (user_id,))
+
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Ошибка обновления времени напоминания для пользователя {user_id}: {e}")
 
 
 memory_bot = MemoryBot()
@@ -534,7 +752,8 @@ def handle_weekly_memory(message):
         return
 
     # Запрашиваем пароль
-    password_message = bot.send_message(message.chat.id, "🔐 <b>Введите ваш пароль для продолжения:</b>", parse_mode='HTML')
+    password_message = bot.send_message(message.chat.id, "🔐 <b>Введите ваш пароль для продолжения:</b>",
+                                        parse_mode='HTML')
     user_auth_states[user_id] = 'weekly_password'
     bot.register_next_step_handler(message, check_password_for_weekly)
     bot.delete_message(message.chat.id, message.message_id)
@@ -554,7 +773,9 @@ def check_password_for_weekly(message):
     stored_password = memory_bot.get_user_password(user_id)
 
     if password != stored_password:
-        msg = bot.send_message(message.chat.id, "❌ <b>Неверный пароль.</b> Попробуйте команду /weekly снова. Это сообщение будет удалено через 5 секунд", parse_mode='HTML')
+        msg = bot.send_message(message.chat.id,
+                               "❌ <b>Неверный пароль.</b> Попробуйте снова. Это сообщение будет удалено через 5 секунд",
+                               parse_mode='HTML')
         time.sleep(5)
         bot.delete_message(message.chat.id, msg.message_id)
         user_auth_states.pop(user_id, None)
@@ -567,17 +788,22 @@ def check_password_for_weekly(message):
 
 
 def save_weekly_memory(message):
-    global write_your_memories
+    """Сохранение еженедельного воспоминания"""
     user_id = message.from_user.id
+    memory_bot.cleanup_expired_states()  # Очищаем устаревшие состояния
 
-    # Удаляем состояние
-    user_auth_states.pop(user_id, None)
+    if not validate_memory_content(message.text):
+        error_msg = bot.reply_to(message,
+            "❌ Сообщение не может быть пустым, содержать только специальные символы или быть длиннее 4096 символов.")
+        time.sleep(3)
+        bot.delete_message(message.chat.id, error_msg.message_id)
+        return
 
     if memory_bot.save_memory(user_id, message.text, 'weekly'):
         # Отправляем предупреждение о удалении сообщений
         notification = bot.reply_to(message,
-                                    "✅ <b>Ваши еженедельные мысли сохранены!</b>\n\n⚠️ <i>Это сообщение будет удалено через 3 секунды...</i>",
-                                    parse_mode='HTML')
+            "✅ <b>Ваши еженедельные мысли сохранены!</b>\n\n⚠️ <i>Это сообщение будет удалено через 3 секунды...</i>",
+            parse_mode='HTML')
 
         # Отсчет времени до удаления
         for i in range(2, -1, -1):
@@ -590,12 +816,14 @@ def save_weekly_memory(message):
 
         # Удаляем все сообщения: команду пользователя, введенный текст и уведомление
         bot.delete_message(message.chat.id, message.message_id)
-        bot.delete_message(message.chat.id, write_your_memories.message_id)
+        if 'write_your_memories' in globals():
+            bot.delete_message(message.chat.id, write_your_memories.message_id)
         bot.delete_message(message.chat.id, notification.message_id)
 
         logger.info(f"Пользователь {user_id} записал еженедельные мысли")
     else:
-        error_msg = bot.reply_to(message, "❌ Произошла ошибка при сохранении. Попробуйте снова.")
+        error_msg = bot.reply_to(message,
+            "❌ Не удалось сохранить воспоминание. Возможно, превышен лимит воспоминаний на сегодня или произошла ошибка.")
         time.sleep(3)
         bot.delete_message(message.chat.id, error_msg.message_id)
 
@@ -613,7 +841,8 @@ def handle_extra_memory(message):
         return
 
     # Запрашиваем пароль
-    password_message = bot.send_message(message.chat.id, "🔐 <b>Введите ваш пароль для продолжения:</b>", parse_mode='HTML')
+    password_message = bot.send_message(message.chat.id, "🔐 <b>Введите ваш пароль для продолжения:</b>",
+                                        parse_mode='HTML')
     user_auth_states[user_id] = 'extra_password'
     bot.register_next_step_handler(message, check_password_for_extra)
     bot.delete_message(message.chat.id, message.message_id)
@@ -647,17 +876,22 @@ def check_password_for_extra(message):
 
 
 def save_extra_memory(message):
-    global write_your_memories
+    """Сохранение экстра-воспоминания"""
     user_id = message.from_user.id
+    memory_bot.cleanup_expired_states()  # Очищаем устаревшие состояния
 
-    # Удаляем состояние
-    user_auth_states.pop(user_id, None)
+    if not validate_memory_content(message.text):
+        error_msg = bot.reply_to(message,
+            "❌ Сообщение не может быть пустым, содержать только специальные символы или быть длиннее 4096 символов.")
+        time.sleep(3)
+        bot.delete_message(message.chat.id, error_msg.message_id)
+        return
 
     if memory_bot.save_memory(user_id, message.text, 'extra'):
         # Отправляем предупреждение о удалении сообщений
         notification = bot.reply_to(message,
-                                    "✅ <b>Ваша экстра-мысль сохранена!</b>\n\n⚠️ <i>Это сообщение будет удалено через 3 секунды...</i>",
-                                    parse_mode='HTML')
+            "✅ <b>Ваша экстра-мысль сохранена!</b>\n\n⚠️ <i>Это сообщение будет удалено через 3 секунды...</i>",
+            parse_mode='HTML')
 
         # Отсчет времени до удаления
         for i in range(2, -1, -1):
@@ -670,12 +904,14 @@ def save_extra_memory(message):
 
         # Удаляем все сообщения: команду пользователя, введенный текст и уведомление
         bot.delete_message(message.chat.id, message.message_id)
-        bot.delete_message(message.chat.id, write_your_memories.message_id)
+        if 'write_your_memories' in globals():
+            bot.delete_message(message.chat.id, write_your_memories.message_id)
         bot.delete_message(message.chat.id, notification.message_id)
 
         logger.info(f"Пользователь {user_id} записал экстра-мысль")
     else:
-        error_msg = bot.reply_to(message, "❌ Произошла ошибка при сохранении. Попробуйте снова.")
+        error_msg = bot.reply_to(message,
+            "❌ Не удалось сохранить воспоминание. Возможно, превышен лимит воспоминаний на сегодня или произошла ошибка.")
         time.sleep(3)
         bot.delete_message(message.chat.id, error_msg.message_id)
 
@@ -739,32 +975,32 @@ def show_memory_by_index_regular(chat_id: int, user_id: int, index: int, memorie
 
     # Создаем красивую клавиатуру для навигации
     keyboard = telebot.types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
-    
+
     # Первый ряд - основная навигация
     nav_buttons = []
-    
+
     if index > 0:
         nav_buttons.append(telebot.types.KeyboardButton("⬅️ Предыдущее"))
-    
+
     nav_buttons.append(telebot.types.KeyboardButton("❌ Закрыть"))
-    
+
     if index < len(memories) - 1:
         nav_buttons.append(telebot.types.KeyboardButton("➡️ Следующее"))
-    
+
     keyboard.row(*nav_buttons)
-    
+
     # Второй ряд - дополнительная навигация
     second_row = []
-    
+
     if index > 0:
         second_row.append(telebot.types.KeyboardButton("⏮️ Первое"))
-    
+
     if index < len(memories) - 1:
         second_row.append(telebot.types.KeyboardButton("⏭️ Последнее"))
-    
+
     if second_row:
         keyboard.row(*second_row)
-    
+
     bot.send_message(chat_id, memory_text, parse_mode='HTML', reply_markup=keyboard)
 
 
@@ -958,91 +1194,20 @@ def handle_close_memories(call):
     bot.answer_callback_query(call.id, "Воспоминания закрыты")
 
 
-def send_weekly_reminder():
-    """Отправка еженедельного напоминания всем активным пользователям с дефолтным днём (воскресенье)"""
-    # Для обратной совместимости - вызываем функцию для воскресенья
-    send_weekly_reminder_for_day("sunday")
-
-
-@bot.message_handler(commands=['setreminder'])
-def handle_set_reminder(message):
-    """Установка дня для еженедельного напоминания"""
-    keyboard = telebot.types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=True)
-    days = [
-        "Понедельник", "Вторник", "Среда", "Четверг",
-        "Пятница", "Суббота", "Воскресенье"
-    ]
-    keyboard.add(*[telebot.types.KeyboardButton(day) for day in days])
-
-    bot.reply_to(message, "📅 Выберите день недели для еженедельного напоминания:", reply_markup=keyboard)
-    bot.register_next_step_handler(message, process_reminder_day)
-
-
-def process_reminder_day(message):
-    user_id = message.from_user.id
-    day_text = message.text.strip().lower()
-
-    day_mapping = {
-        "понедельник": "monday",
-        "вторник": "tuesday",
-        "среда": "wednesday",
-        "четверг": "thursday",
-        "пятница": "friday",
-        "суббота": "saturday",
-        "воскресенье": "sunday"
-    }
-
-    if day_text not in day_mapping:
-        bot.reply_to(message, "❌ Пожалуйста, выберите день из списка.",
-                     reply_markup=telebot.types.ReplyKeyboardRemove())
-        return
-
-    day_value = day_mapping[day_text]
-
-    if memory_bot.set_reminder_day(user_id, day_value):
-        bot.reply_to(message,
-                     f"✅ Еженедельное напоминание установлено на <b>{message.text}</b> в 12:00.",
-                     parse_mode='HTML',
-                     reply_markup=telebot.types.ReplyKeyboardRemove())
-    else:
-        bot.reply_to(message,
-                     "❌ Произошла ошибка при установке дня напоминания. Попробуйте позже.",
-                     reply_markup=telebot.types.ReplyKeyboardRemove())
-
-
-def schedule_reminders():
-    """Настройка расписания напоминаний для всех дней недели"""
-    # Настраиваем расписание для каждого дня недели
-    schedule.every().monday.at("12:00").do(send_weekly_reminder_for_day, day="monday")
-    schedule.every().tuesday.at("12:00").do(send_weekly_reminder_for_day, day="tuesday")
-    schedule.every().wednesday.at("12:00").do(send_weekly_reminder_for_day, day="wednesday")
-    schedule.every().thursday.at("12:00").do(send_weekly_reminder_for_day, day="thursday")
-    schedule.every().friday.at("12:00").do(send_weekly_reminder_for_day, day="friday")
-    schedule.every().saturday.at("12:00").do(send_weekly_reminder_for_day, day="saturday")
-    schedule.every().sunday.at("12:00").do(send_weekly_reminder_for_day, day="sunday")
-
-    logger.info("Расписание напоминаний настроено для всех дней недели в 12:00")
-
-
-def send_weekly_reminder_for_day(day):
-    """Отправка еженедельного напоминания пользователям с выбранным днем"""
-    try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-
-        # Получаем пользователей, которые выбрали этот день для напоминаний
-        cursor.execute("""
-                       SELECT user_id
-                       FROM memories_users
-                       WHERE is_active = TRUE
-                         AND reminder_day = %s
-                       """, (day,))
-
-        users_for_day = [row[0] for row in cursor.fetchall()]
-        cursor.close()
-        conn.close()
-
-        message_text = """
+def send_reminders_every_minute():
+    """Проверяет всех активных пользователей и отправляет напоминание, если у них сейчас 12:00 и их день недели."""
+    users = memory_bot.get_active_users()
+    for user_id in users:
+        try:
+            tz = memory_bot.get_user_timezone(user_id)
+            user_tz = pytz.timezone(tz)
+            now = datetime.now(user_tz)
+            day = now.strftime('%A').lower()  # monday, tuesday, ...
+            reminder_day = memory_bot.get_reminder_day(user_id)
+            if day == reminder_day:
+                if dt_time(11, 55) <= now.time() <= dt_time(12, 5):
+                    if memory_bot._should_send_reminder(user_id):
+                        message_text = """
 🔔 <b>Время для еженедельных размышлений!</b>
 
 Подошло время записать ваши мысли за прошедшую неделю.
@@ -1051,26 +1216,24 @@ def send_weekly_reminder_for_day(day):
 
 Это поможет вам лучше понять себя и сохранить важные воспоминания! 📝✨
 """
-
-        sent_count = 0
-        for user_id in users_for_day:
-            try:
-                bot.send_message(user_id, message_text, parse_mode='HTML')
-                sent_count += 1
-            except Exception as e:
-                logger.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
+                        bot.send_message(user_id, message_text, parse_mode='HTML')
+                        memory_bot._update_last_reminder(user_id)
+        except Exception as e:
+            logger.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
 
         logger.info(f"Отправлено еженедельных напоминаний для дня {day}: {sent_count}")
 
-    except Exception as e:
-        logger.error(f"Ошибка отправки напоминаний для дня {day}: {e}")
+def schedule_reminders():
+    """Настройка расписания: проверка напоминаний каждую минуту"""
+    schedule.every(59).seconds.do(send_reminders_every_minute)
+    logger.info("Расписание напоминаний: проверка каждую минуту по времени пользователя")
 
 
 def run_schedule():
     """Запуск планировщика в отдельном потоке"""
     while True:
         schedule.run_pending()
-        time.sleep(60)  # Проверяем каждую минуту
+        time.sleep(59)  # Проверяем каждую минуту
 
 
 def main():
@@ -1091,44 +1254,135 @@ def main():
 
 
 # Обработчик для кнопок навигации с клавиатуры
-@bot.message_handler(func=lambda message: message.text in ["⬅️ Предыдущее", "➡️ Следующее", "⏮️ Первое", "⏭️ Последнее", "❌ Закрыть"])
+@bot.message_handler(
+    func=lambda message: message.text in ["⬅️ Предыдущее", "➡️ Следующее", "⏮️ Первое", "⏭️ Последнее", "❌ Закрыть"])
 def handle_navigation_buttons(message):
     user_id = message.from_user.id
-    
+
     if user_id not in memory_bot.current_memory_index:
         bot.reply_to(message, "🔍 Сначала начните просмотр с помощью команды /review")
         return
-    
+
     memories = memory_bot.get_memories(user_id)
     current_index = memory_bot.current_memory_index[user_id]
-    
+
     if message.text == "➡️ Следующее":
         if current_index >= len(memories) - 1:
             bot.reply_to(message, "⚠️ Вы уже просматриваете последнее воспоминание.")
             return
         new_index = current_index + 1
-        
+
     elif message.text == "⬅️ Предыдущее":
         if current_index <= 0:
             bot.reply_to(message, "⚠️ Вы уже просматриваете первое воспоминание.")
             return
         new_index = current_index - 1
-        
+
     elif message.text == "⏮️ Первое":
         new_index = 0
-        
+
     elif message.text == "⏭️ Последнее":
         new_index = len(memories) - 1
-        
+
     elif message.text == "❌ Закрыть":
         # Удаляем текущий индекс просмотра
         memory_bot.current_memory_index.pop(user_id, None)
-        bot.reply_to(message, "✅ Просмотр воспоминаний завершен.", 
-                    reply_markup=telebot.types.ReplyKeyboardRemove())
+        bot.reply_to(message, "✅ Просмотр воспоминаний завершен.",
+                     reply_markup=telebot.types.ReplyKeyboardRemove())
         return
-    
+
     memory_bot.current_memory_index[user_id] = new_index
     show_memory_by_index_regular(message.chat.id, user_id, new_index, memories)
+
+
+@bot.message_handler(commands=['backup'])
+def handle_backup(message):
+    """Создание бэкапа воспоминаний пользователя"""
+    user_id = message.from_user.id
+
+    # Проверяем пароль
+    stored_password = memory_bot.get_user_password(user_id)
+    if not stored_password:
+        bot.reply_to(message, "⚠️ Сначала необходимо установить пароль. Используйте команду /start")
+        return
+
+    # Запрашиваем пароль
+    password_message = bot.send_message(message.chat.id,
+        "🔐 <b>Введите ваш пароль для создания бэкапа:</b>",
+        parse_mode='HTML')
+    memory_bot.user_states[user_id] = 'backup_password'
+    memory_bot.state_timestamps[user_id] = time.time()
+    bot.register_next_step_handler(message, process_backup_password)
+    bot.delete_message(message.chat.id, message.message_id)
+
+def process_backup_password(message):
+    """Обработка пароля для бэкапа"""
+    user_id = message.from_user.id
+    password = message.text.strip()
+
+    # Удаляем сообщение с паролем
+    bot.delete_message(message.chat.id, message.message_id)
+
+    stored_password = memory_bot.get_user_password(user_id)
+    if password != stored_password:
+        msg = bot.send_message(message.chat.id,
+            "❌ <b>Неверный пароль.</b> Попробуйте команду /backup снова.",
+            parse_mode='HTML')
+        time.sleep(3)
+        bot.delete_message(message.chat.id, msg.message_id)
+        memory_bot.user_states.pop(user_id, None)
+        memory_bot.state_timestamps.pop(user_id, None)
+        return
+
+    # Создаем бэкап
+    try:
+        memories = memory_bot.get_memories(user_id)
+        if not memories:
+            bot.reply_to(message, "📭 У вас пока нет сохранённых воспоминаний для бэкапа.")
+            return
+
+        # Создаем временный файл
+        backup_dir = "user_backups"
+        if not os.path.exists(backup_dir):
+            os.makedirs(backup_dir)
+
+        backup_file = os.path.join(backup_dir, f"memories_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            f.write(f"Бэкап воспоминаний пользователя {user_id}\n")
+            f.write(f"Дата создания: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n")
+            f.write("=" * 50 + "\n\n")
+
+            for memory in memories:
+                created_at = memory['created_at'].strftime("%d.%m.%Y в %H:%M")
+                memory_type = "Еженедельные мысли" if memory['memory_type'] == 'weekly' else "Экстра-мысль"
+
+                f.write(f"Тип: {memory_type}\n")
+                f.write(f"Дата: {created_at}\n")
+                if memory['memory_type'] == 'weekly' and memory['week_number']:
+                    f.write(f"Неделя #{memory['week_number']}\n")
+                f.write("-" * 30 + "\n")
+                f.write(f"{memory['content']}\n")
+                f.write("=" * 50 + "\n\n")
+
+        # Отправляем файл
+        with open(backup_file, 'rb') as f:
+            bot.send_document(message.chat.id, f,
+                caption="✅ <b>Ваш бэкап воспоминаний готов!</b>\n\n"
+                       "Сохраните этот файл в надежном месте.",
+                parse_mode='HTML')
+
+        # Удаляем временный файл
+        os.remove(backup_file)
+
+        # Очищаем состояние
+        memory_bot.user_states.pop(user_id, None)
+        memory_bot.state_timestamps.pop(user_id, None)
+
+    except Exception as e:
+        logger.error(f"Ошибка создания бэкапа для пользователя {user_id}: {e}")
+        bot.reply_to(message,
+            "❌ Произошла ошибка при создании бэкапа. Пожалуйста, попробуйте позже.")
 
 
 if __name__ == "__main__":
