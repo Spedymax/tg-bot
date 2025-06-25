@@ -155,5 +155,3 @@ Thumbs.db
 BotFunctions/tournament_bracket_state.json
 memory_bot.log
 *.json.bak
-# Environment variables
-.env
