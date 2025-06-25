@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from subprocess import Popen, PIPE
 import subprocess
 import sys
+from dotenv import load_dotenv
 
 import psycopg2
 import socket
@@ -24,9 +25,12 @@ import BotFunctions.stocks as stocks
 from BotFunctions import NoNutNovember
 from BotFunctions.cryptography import client
 
+# Load environment variables
+load_dotenv()
 
 
-bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
+
+bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
 
 # Establish a database connection
 
@@ -38,10 +42,10 @@ bot_token = "1469789335:AAHtRcVSuRvphCppLp57jD14kUY-uUhG99o"
 # )
 
 conn = psycopg2.connect(
-    database="server-tg-pisunchik",
-    user="postgres",
-    host="192.168.8.2",
-    password="123"
+    database=os.getenv('DB_NAME', 'server-tg-pisunchik'),
+    user=os.getenv('DB_USER', 'postgres'),
+    host=os.getenv('DB_HOST', 'localhost'),
+    password=os.getenv('DB_PASSWORD')
 )
 
 # Create a cursor for executing SQL queries
