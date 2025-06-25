@@ -51,3 +51,4 @@ google~=3.0.0
 protobuf~=5.28.3
 python-dotenv~=1.0.0
 tenacity~=8.2.3
+psycopg2~=2.9.0
