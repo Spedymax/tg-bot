@@ -1,10 +1,8 @@
 # Telegram Bot Collection
 
+
 A collection of Telegram bots with gaming features, memory diary functionality, and various utilities.
 
-## 🚨 Security Notice
-
-**IMPORTANT**: This repository has been updated to use environment variables for sensitive data. 
 
 ### Before Running:
 1. Create a `.env` file based on `.env.example`
@@ -85,37 +83,34 @@ python main.py
 python memories.py
 ```
 
-## Security Best Practices
+## 📁 New Project Structure
 
-### ✅ Do:
-- Use environment variables for all sensitive data
-- Regularly rotate bot tokens and API keys
-- Keep your `.env` file private and secure
-- Use different credentials for development/production
-- Implement proper access controls for admin features
-
-### ❌ Don't:
-- Commit credentials to version control
-- Share bot tokens publicly
-- Use production credentials in development
-- Hardcode sensitive data in source code
-
-## Project Structure
+> **Note**: The project has been refactored! See [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) for detailed information.
 
 ```
 tg-bot/
-├── main.py              # Main gaming bot
-├── memories.py          # Memory diary bot
-├── BotFunctions/        # Modular bot functions
-│   ├── trivia.py       # Quiz functionality
-│   ├── stocks.py       # Stock trading
-│   ├── main_functions.py
-│   └── ...
-├── data/               # JSON data files
-├── requirements.txt    # Python dependencies
-├── .env.example       # Environment template
-├── .gitignore         # Git ignore rules
-└── README.md          # This file
+├── src/                     # Main source code
+│   ├── config/              # Configuration files
+│   ├── database/            # Database management
+│   ├── handlers/            # Command handlers
+│   ├── models/              # Data models
+│   ├── services/            # Business logic
+│   ├── legacy/              # Legacy code (being refactored)
+│   └── main.py              # Main bot entry point
+├── assets/                  # Static assets
+│   ├── data/                # JSON configuration files
+│   ├── images/              # Image assets
+│   └── audio/               # Audio files
+├── scripts/                 # Utility scripts
+│   ├── memories.py          # Memory diary bot
+│   └── other utilities...
+├── backups/                 # Database backups
+├── docs/                    # Documentation
+├── tests/                   # Test files
+├── run.py                   # Main entry point
+├── requirements.txt         # Python dependencies
+├── .env.example            # Environment template
+└── README.md               # This file
 ```
 
 ## Contributing
@@ -129,7 +124,3 @@ tg-bot/
 ## License
 
 This project is for educational purposes. Please respect API terms of service.
-
----
-
-**⚠️ Remember: Keep your credentials secure and never share them publicly!**
