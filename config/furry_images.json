@@ -1,0 +1,36 @@
+{
+    "furry_image_urls": [
+        "https://cdn.pixabay.com/photo/2016/12/13/05/15/puppy-1903313_960_720.jpg",
+        "https://cdn.pixabay.com/photo/2014/11/30/14/11/cat-551554_960_720.jpg",
+        "https://cdn.pixabay.com/photo/2016/07/15/15/55/dachshund-1519374_960_720.jpg",
+        "https://cdn.pixabay.com/photo/2017/05/09/21/49/husky-2299685_960_720.jpg",
+        "https://cdn.pixabay.com/photo/2016/11/29/13/14/attractive-1869761_960_720.jpg",
+        "https://cdn.pixabay.com/photo/2017/09/25/13/12/cocker-spaniel-2785074_960_720.jpg",
+        "https://cdn.pixabay.com/photo/2016/02/10/16/37/cat-1192026_960_720.jpg",
+        "https://cdn.pixabay.com/photo/2014/04/13/20/49/cat-323262_960_720.jpg",
+        "https://cdn.pixabay.com/photo/2016/12/13/05/15/puppy-1903313_960_720.jpg",
+        "https://cdn.pixabay.com/photo/2015/11/17/13/13/bulldog-1047518_960_720.jpg"
+    ],
+    "api_sources": [
+        {
+            "name": "e621_safe",
+            "url": "https://e621.net/posts.json?limit=50&tags=safe rating:safe",
+            "active": false,
+            "comment": "Disabled due to API restrictions"
+        },
+        {
+            "name": "furaffinity",
+            "url": "https://api.furaffinity.net/search.json?q=furry&perpage=20",
+            "active": false,
+            "comment": "Disabled - API not available"
+        }
+    ],
+    "scraping_sources": [
+        {
+            "name": "pixabay_animals",
+            "url": "https://pixabay.com/images/search/cute%20animals/",
+            "active": true,
+            "comment": "Free stock images of cute animals"
+        }
+    ]
+}
