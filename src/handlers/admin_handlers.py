@@ -2,6 +2,8 @@ from telebot import types
 from config.settings import Settings
 import json
 from datetime import datetime
+import socket
+from struct import pack
 
 class AdminHandlers:
     def __init__(self, bot, player_service, game_service):
@@ -9,6 +11,26 @@ class AdminHandlers:
         self.player_service = player_service
         self.game_service = game_service
         self.admin_actions = {}
+        
+    def wake_on_lan(self, mac_address, broadcast_ip='255.255.255.255'):
+        """Send a Wake-on-LAN packet to wake up a computer"""
+        try:
+            # Remove separators from MAC address
+            mac_address = mac_address.replace(':', '').replace('-', '')
+            
+            # Create WOL packet
+            magic_packet = b'\xff' * 6 + bytes.fromhex(mac_address) * 16
+            
+            # Send a packet
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.sendto(magic_packet, (broadcast_ip, 9))
+            sock.close()
+            
+            return True
+        except Exception as e:
+            print(f"Wake-on-LAN error: {e}")
+            return False
         
     def setup_handlers(self):
         """Setup all admin command handlers"""
@@ -92,6 +114,7 @@ class AdminHandlers:
                         types.InlineKeyboardButton("🔄 Перезапуск бота", callback_data="action_restartBot"),
                         types.InlineKeyboardButton("💾 Бэкап данных", callback_data="action_backupData"),
                         types.InlineKeyboardButton("📢 Рассылка", callback_data="action_broadcast"),
+                        types.InlineKeyboardButton("💻 Включить ПК", callback_data="action_wakePc"),
                         types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back")
                     ]
                     markup.add(*buttons)
@@ -116,11 +139,38 @@ class AdminHandlers:
             else:
                 self.bot.answer_callback_query(call.id, "У вас нет доступа к админ-панели.")
         
-        @self.bot.callback_query_handler(func=lambda call: call.data.startswith("action_"))
-        def handle_admin_actions(call):
-            """Handle admin action selection"""
-            if call.from_user.id in Settings.ADMIN_IDS:
-                action = call.data.split("_")[1]
+                @self.bot.callback_query_handler(func=lambda call: call.data.startswith("action_"))
+                def handle_admin_actions(call):
+                    """Handle admin action selection"""
+                    if call.from_user.id in Settings.ADMIN_IDS:
+                        action = call.data.split("_")[1]
+                        
+                        if action == "wakePc":
+                            try:
+                                self.bot.edit_message_text(
+                                    "Отправляю Wake-on-LAN пакет на ваш ПК...",
+                                    call.message.chat.id,
+                                    call.message.message_id
+                                )
+                                result = self.wake_on_lan('D8:43:AE:BD:2B:F1')
+                                if result:
+                                    self.bot.edit_message_text(
+                                        "✅ Wake-on-LAN пакет успешно отправлен! Ваш ПК должен включиться.",
+                                        call.message.chat.id,
+                                        call.message.message_id
+                                    )
+                                else:
+                                    self.bot.edit_message_text(
+                                        "❌ Не удалось отправить Wake-on-LAN пакет. Проверьте логи для деталей.",
+                                        call.message.chat.id,
+                                        call.message.message_id
+                                    )
+                            except Exception as e:
+                                self.bot.edit_message_text(
+                                    f"❌ Ошибка: {str(e)}",
+                                    call.message.chat.id,
+                                    call.message.message_id
+                                )
                 
                 if action == "backupData":
                     # Create data backup
