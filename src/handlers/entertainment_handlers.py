@@ -346,7 +346,7 @@ class EntertainmentHandlers:
     
     def send_pirate_song(self, message):
         """Send random pirate song"""
-        songs_folder = '../assets/audio/pirat-songs'
+        songs_folder = 'assets/audio/pirat-songs'
         try:
             if not os.path.exists(songs_folder):
                 self.bot.send_message(message.chat.id, "Папка с песнями не найдена")
