@@ -90,10 +90,10 @@ class ShopHandlers:
                 return
             
             item_images = {
-                'Pudginio': '../assets/images/statuetki/pudginio.jpg',
-                'Ryadovoi Rudgers': '../assets/images/statuetki/ryadovoi_rudgers.jpg',
-                'Polkovnik Buchantos': '../assets/images/statuetki/polkovnik_buchantos.jpg',
-                'General Chin-Choppa': '../assets/images/statuetki/general_chin_choppa.png'
+                'Pudginio': 'assets/images/statuetki/pudginio.jpg',
+                'Ryadovoi Rudgers': 'assets/images/statuetki/ryadovoi_rudgers.jpg',
+                'Polkovnik Buchantos': 'assets/images/statuetki/polkovnik_buchantos.jpg',
+                'General Chin-Choppa': 'assets/images/statuetki/general_chin_choppa.png'
             }
             
             statuetki_descriptions = []

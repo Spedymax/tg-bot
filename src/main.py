@@ -53,10 +53,10 @@ class TelegramBot:
         self.trivia_handlers = TriviaHandlers(self.bot, self.player_service, self.game_service, self.db_manager)
 
         # Load game data
-        self.char = self.load_json_file('../assets/data/char.json')
-        self.plot = self.load_json_file('../assets/data/plot.json')
-        self.shop = self.load_json_file('../assets/data/shop.json')
-        self.statuetki = self.load_json_file('../assets/data/statuetki.json')
+        self.char = self.load_json_file('assets/data/char.json')
+        self.plot = self.load_json_file('assets/data/plot.json')
+        self.shop = self.load_json_file('assets/data/shop.json')
+        self.statuetki = self.load_json_file('assets/data/statuetki.json')
         
         # Global state (to be refactored later)
         self.admin_actions = {}
