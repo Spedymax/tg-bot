@@ -139,71 +139,71 @@ class AdminHandlers:
             else:
                 self.bot.answer_callback_query(call.id, "У вас нет доступа к админ-панели.")
         
-                @self.bot.callback_query_handler(func=lambda call: call.data.startswith("action_"))
-                def handle_admin_actions(call):
-                    """Handle admin action selection"""
-                    if call.from_user.id in Settings.ADMIN_IDS:
-                        action = call.data.split("_")[1]
-                        
-                        if action == "wakePc":
-                            try:
-                                self.bot.edit_message_text(
-                                    "Отправляю Wake-on-LAN пакет на ваш ПК...",
-                                    call.message.chat.id,
-                                    call.message.message_id
-                                )
-                                result = self.wake_on_lan('D8:43:AE:BD:2B:F1')
-                                if result:
-                                    self.bot.edit_message_text(
-                                        "✅ Wake-on-LAN пакет успешно отправлен! Ваш ПК должен включиться.",
-                                        call.message.chat.id,
-                                        call.message.message_id
-                                    )
-                                else:
-                                    self.bot.edit_message_text(
-                                        "❌ Не удалось отправить Wake-on-LAN пакет. Проверьте логи для деталей.",
-                                        call.message.chat.id,
-                                        call.message.message_id
-                                    )
-                            except Exception as e:
-                                self.bot.edit_message_text(
-                                    f"❌ Ошибка: {str(e)}",
-                                    call.message.chat.id,
-                                    call.message.message_id
-                                )
-                
+        @self.bot.callback_query_handler(func=lambda call: call.data.startswith("action_"))
+        def handle_admin_actions(call):
+            """Handle admin action selection"""
+            if call.from_user.id in Settings.ADMIN_IDS:
+                action = call.data.split("_")[1]
+
+                if action == "wakePc":
+                    try:
+                        self.bot.edit_message_text(
+                            "Отправляю Wake-on-LAN пакет на ваш ПК...",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+                        result = self.wake_on_lan('D8:43:AE:BD:2B:F1')
+                        if result:
+                            self.bot.edit_message_text(
+                                "✅ Wake-on-LAN пакет успешно отправлен! Ваш ПК должен включиться.",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                        else:
+                            self.bot.edit_message_text(
+                                "❌ Не удалось отправить Wake-on-LAN пакет. Проверьте логи для деталей.",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                    except Exception as e:
+                        self.bot.edit_message_text(
+                            f"❌ Ошибка: {str(e)}",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+
                 if action == "backupData":
                     # Create data backup
                     try:
                         all_players = self.player_service.get_all_players()
                         backup_time = datetime.now().strftime("%Y%m%d_%H%M%S")
                         backup_filename = f"backup_{backup_time}.json"
-                        
+
                         # Convert player objects to dictionaries for JSON serialization
                         backup_data = {}
                         for player_id, player in all_players.items():
                             backup_data[str(player_id)] = player.to_db_dict()
-                        
+
                         with open(backup_filename, 'w', encoding='utf-8') as f:
                             json.dump(backup_data, f, ensure_ascii=False, indent=4, default=str)
-                        
+
                         self.bot.edit_message_text(
-                            f"✅ Бэкап успешно создан: {backup_filename}", 
-                            call.message.chat.id, 
+                            f"✅ Бэкап успешно создан: {backup_filename}",
+                            call.message.chat.id,
                             call.message.message_id
                         )
                     except Exception as e:
                         self.bot.edit_message_text(
-                            f"❌ Ошибка при создании бэкапа: {str(e)}", 
-                            call.message.chat.id, 
+                            f"❌ Ошибка при создании бэкапа: {str(e)}",
+                            call.message.chat.id,
                             call.message.message_id
                         )
-                
+
                 elif action == "broadcast":
                     self.admin_actions[call.from_user.id] = {"action": "broadcast"}
                     self.bot.edit_message_text(
-                        "Введите сообщение для рассылки всем игрокам:", 
-                        call.message.chat.id, 
+                        "Введите сообщение для рассылки всем игрокам:",
+                        call.message.chat.id,
                         call.message.message_id
                     )
         
