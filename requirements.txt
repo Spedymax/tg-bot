@@ -51,6 +51,7 @@ google~=3.0.0
 protobuf>=3.19.5,<5.0.0
 python-dotenv~=1.0.0
 tenacity~=8.2.3
+psycopg2-binary>=2.9.10
 
 # Development dependencies for improved code quality
 mypy==1.5.1

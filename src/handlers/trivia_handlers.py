@@ -46,53 +46,22 @@ class TriviaHandlers:
             self.handle_answer_callback(call)
     
     def get_question_from_gemini(self):
-        """Generate a trivia question using Gemini AI"""
-        max_attempts = 10  # Maximum attempts to generate a unique question
-        
-        for attempt in range(max_attempts):
-            try:
-                # Use TriviaService to generate question
-                question = self.trivia_service.generate_question_with_ai()
-                
-                if question:
-                    # Check if this question is a duplicate
-                    if not self.trivia_service.is_duplicate_question(question.question, question.correct_answer):
-                        return {
-                            "question": question.question,
-                            "answer": question.correct_answer,
-                            "explanation": question.explanation,
-                            "wrong_answers": question.wrong_answers
-                        }
-                    else:
-                        print(f"Attempt {attempt + 1}: Generated duplicate question, trying again...")
-                        continue
-                
-            except Exception as e:
-                print(f"Error generating question on attempt {attempt + 1}: {e}")
-        
-        # If all attempts failed, return a fallback question
-        print("All attempts to generate unique question failed, using fallback")
-        fallback_questions = [
-            {
-                "question": "Какое животное может спать стоя?",
-                "answer": "Лошадь",
-                "explanation": "Лошади могут спать стоя благодаря специальному механизму блокировки суставов.",
-                "wrong_answers": ["Корова", "Жираф", "Слон"]
-            },
-            {
-                "question": "Какой самый твёрдый природный материал на Земле?",
-                "answer": "Алмаз",
-                "explanation": "Алмаз имеет твёрдость 10 по шкале Мооса и является самым твёрдым природным материалом.",
-                "wrong_answers": ["Сталь", "Кварц", "Титан"]
-            },
-            {
-                "question": "Сколько костей у взрослого человека?",
-                "answer": "206",
-                "explanation": "У взрослого человека 206 костей, у новорожденного их около 270, но многие срастаются.",
-                "wrong_answers": ["180", "220", "195"]
-            }
-        ]
-        return random.choice(fallback_questions)
+        """Generate a trivia question using TriviaService"""
+        try:
+            result = self.trivia_service.generate_question("system", "Handler")
+            if result["success"]:
+                return {
+                    "question": result["question"]["text"],
+                    "answer": result["question"]["correct_answer"],
+                    "explanation": result["question"].get("explanation", ""),
+                    "wrong_answers": [opt for opt in result["question"]["options"] if opt != result["question"]["correct_answer"]]
+                }
+            else:
+                print(f"Error: {result['message']}")
+                return None
+        except Exception as e:
+            print(f"Error generating question: {e}")
+            return None
     
     def send_trivia_question(self, chat_id):
         """Send a trivia question to the chat"""
@@ -114,13 +83,8 @@ class TriviaHandlers:
             # Send question with inline keyboard
             self.send_question_with_options(chat_id, question_text, answer_options)
             
-            # Save question to database
-            self.save_question_to_database(
-                question_text, 
-                correct_answer, 
-                answer_options, 
-                question_data.get("explanation", "")
-            )
+            # Save question to database using TriviaService
+            # Question is already saved in the generate_question method
             
         except Exception as e:
             self.bot.send_message(chat_id, f'Ошибка при создании вопроса: {e}')
@@ -161,15 +125,29 @@ class TriviaHandlers:
             answer_index = int(call.data.split('_')[1])
             player_name = call.from_user.first_name or "Игрок"
             
-            if message_id not in self.question_messages:
+            # Try to get question from memory first, then from database
+            question_data = None
+            if message_id in self.question_messages:
+                question_data = self.question_messages[message_id]
+            else:
+                # Load from database
+                question_data = self.load_question_state_from_db(message_id)
+                if question_data:
+                    # Store in memory for future use
+                    self.question_messages[message_id] = question_data
+            
+            if not question_data:
                 self.bot.answer_callback_query(call.id, "Вопрос не найден")
                 return
-            
-            question_data = self.question_messages[message_id]
             
             # Check if user already answered
             if user_id in question_data["players_responses"]:
                 self.bot.answer_callback_query(call.id, "Вы уже ответили на этот вопрос")
+                return
+            
+            # Safety check for answer_index
+            if answer_index >= len(question_data["options"]) or answer_index < 0:
+                self.bot.answer_callback_query(call.id, "Неверный выбор ответа")
                 return
             
             # Get the selected answer
@@ -220,23 +198,6 @@ class TriviaHandlers:
             print(f"Error in answer callback: {e}")
             self.bot.answer_callback_query(call.id, "Произошла ошибка")
     
-    def save_question_to_database(self, question, correct_answer, answer_options, explanation=""):
-        """Save question to database"""
-        connection = self.db_manager.get_connection()
-        try:
-            with connection.cursor() as cursor:
-                answer_options_str = json.dumps(answer_options)
-                current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                
-                cursor.execute(
-                    "INSERT INTO questions (question, correct_answer, answer_options, date_added, explanation) VALUES (%s, %s, %s, %s, %s)",
-                    (question, correct_answer, answer_options_str, current_date, explanation)
-                )
-                connection.commit()
-        except Exception as e:
-            print(f"Error saving question to database: {e}")
-        finally:
-            self.db_manager.release_connection(connection)
     
     def update_question_message(self, message, question_data):
         """Update the question message to show player responses"""
@@ -298,6 +259,65 @@ class TriviaHandlers:
                 connection.commit()
         except Exception as e:
             print(f"Error saving question state: {e}")
+        finally:
+            self.db_manager.release_connection(connection)
+    
+    def load_question_state_from_db(self, message_id):
+        """Load question state from database"""
+        connection = self.db_manager.get_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT original_question, players_responses FROM question_state WHERE message_id = %s",
+                    (message_id,)
+                )
+                result = cursor.fetchone()
+                
+                if result:
+                    question_text, players_responses_json = result
+                    
+                    # Handle None or empty JSON
+                    if not players_responses_json:
+                        return {
+                            "text": question_text,
+                            "players_responses": {},
+                            "options": []
+                        }
+                    
+                    # Parse the JSON data
+                    try:
+                        if isinstance(players_responses_json, str):
+                            data = json.loads(players_responses_json)
+                        else:
+                            data = players_responses_json  # Already a dict
+                        
+                        # Handle different data formats
+                        if isinstance(data, dict):
+                            return {
+                                "text": question_text,
+                                "players_responses": data.get("players_responses", {}),
+                                "options": data.get("options", [])
+                            }
+                        else:
+                            # Legacy format - data is directly players_responses
+                            return {
+                                "text": question_text,
+                                "players_responses": data if isinstance(data, dict) else {},
+                                "options": []
+                            }
+                    except (json.JSONDecodeError, TypeError) as e:
+                        print(f"Error parsing question state JSON: {e}")
+                        # Return empty structure instead of None
+                        return {
+                            "text": question_text,
+                            "players_responses": {},
+                            "options": []
+                        }
+                
+                return None
+        except Exception as e:
+            print(f"Error loading question state: {e}")
+            return None
         finally:
             self.db_manager.release_connection(connection)
     
@@ -445,16 +465,3 @@ class TriviaHandlers:
             print(f"Error getting player scores: {e}")
             return "Ошибка при получении очков."
     
-    def clear_trivia_data(self):
-        """Clear all trivia data"""
-        connection = self.db_manager.get_connection()
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute("DELETE FROM answered_questions")
-                cursor.execute("DELETE FROM question_state")
-                cursor.execute("DELETE FROM questions")
-                connection.commit()
-        except Exception as e:
-            print(f"Error clearing trivia data: {e}")
-        finally:
-            self.db_manager.release_connection(connection)
