@@ -407,7 +407,7 @@
 
         <div class="slot-machine" id="slot-machine">
             <div class="slot-machine-header">
-                <img src="dog.jpg" alt="Lucky Dog" class="dog-image" id="dog-image" onerror="this.classList.add('error')">
+                <img src="miniapp/dog.jpg" alt="Lucky Dog" class="dog-image" id="dog-image" onerror="this.classList.add('error')">
             </div>
             <div class="payline-indicator" id="payline"></div>
             <div class="reels-container">
@@ -477,7 +477,7 @@
         let spinsLeft = 6;
         let isSpinning = false;
         let playerId = null;
-        let apiBaseUrl = window.location.origin;
+        let apiBaseUrl = window.location.origin + '/miniapp';
         
         // Настройки аудио
         let musicEnabled = true;
