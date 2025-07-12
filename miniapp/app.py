@@ -17,22 +17,22 @@ logger = logging.getLogger(__name__)
 # Store for player data (in production, this should be a database)
 player_data = {}
 
-@app.route('/')
+@app.route('/miniapp/')
 def index():
     """Serve the main slot machine page"""
     return send_from_directory('.', 'slot_casino.html')
 
-@app.route('/slots')
+@app.route('/miniapp/slots')
 def slots():
     """Alternative route for slot machine"""
     return send_from_directory('.', 'slot_casino.html')
 
-@app.route('/casino')
+@app.route('/miniapp/casino')
 def casino():
     """Legacy route for casino (wheel version)"""
     return send_from_directory('.', 'casino.html')
 
-@app.route('/api/player/<int:player_id>')
+@app.route('/miniapp/api/player/<int:player_id>')
 def get_player_data(player_id):
     """Get player data for the mini-app"""
     try:
@@ -73,7 +73,7 @@ def get_player_data(player_id):
         logger.error(f"Error getting player data: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/spin', methods=['POST'])
+@app.route('/miniapp/api/spin', methods=['POST'])
 def spin_wheel():
     """Handle wheel spin request"""
     try:
@@ -149,7 +149,7 @@ def spin_wheel():
         logger.error(f"Error processing spin: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/save_progress', methods=['POST'])
+@app.route('/miniapp/api/save_progress', methods=['POST'])
 def save_progress():
     """Save player progress back to main bot database"""
     try:
@@ -175,7 +175,7 @@ def save_progress():
         logger.error(f"Error saving progress: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/dog.jpg')
+@app.route('/miniapp/dog.jpg')
 def serve_dog_image():
     """Serve the dog image"""
     try:
@@ -184,7 +184,7 @@ def serve_dog_image():
         # Return 404 if dog.jpg doesn't exist
         return '', 404
 
-@app.route('/audio/<path:filename>')
+@app.route('/miniapp/audio/<path:filename>')
 def serve_audio_files(filename):
     """Serve audio files from the audio directory"""
     # Only serve audio file types for security
@@ -196,7 +196,7 @@ def serve_audio_files(filename):
             return '', 404
     return '', 404
 
-@app.route('/<path:filename>')
+@app.route('/miniapp/<path:filename>')
 def serve_static_files(filename):
     """Serve static files like images, CSS, JS"""
     # Only serve certain file types for security
@@ -208,7 +208,7 @@ def serve_static_files(filename):
             return '', 404
     return '', 404
 
-@app.route('/health')
+@app.route('/miniapp/health')
 def health_check():
     """Health check endpoint"""
     return jsonify({
