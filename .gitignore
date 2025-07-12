@@ -154,4 +154,5 @@ Thumbs.db
 # Project specific
 BotFunctions/tournament_bracket_state.json
 memory_bot.log
+memory_backups
 *.json.bak

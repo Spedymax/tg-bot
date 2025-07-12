@@ -23,6 +23,7 @@ from handlers.shop_handlers import ShopHandlers
 # Import newly created handlers
 from handlers.entertainment_handlers import EntertainmentHandlers
 from handlers.trivia_handlers import TriviaHandlers
+from services.quiz_scheduler import QuizScheduler
 
 # Configure logging
 logging.basicConfig(
@@ -51,6 +52,12 @@ class TelegramBot:
         # Initialize entertainment and trivia handlers
         self.entertainment_handlers = EntertainmentHandlers(self.bot, self.player_service, self.game_service)
         self.trivia_handlers = TriviaHandlers(self.bot, self.player_service, self.game_service, self.db_manager)
+        
+        # Initialize quiz scheduler
+        self.quiz_scheduler = QuizScheduler(self.bot, self.db_manager, self.trivia_handlers.trivia_service)
+        
+        # Set quiz scheduler reference in admin handlers
+        self.admin_handlers.set_quiz_scheduler(self.quiz_scheduler)
 
         # Load game data
         self.char = self.load_json_file('assets/data/char.json')
