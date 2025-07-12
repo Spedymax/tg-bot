@@ -69,61 +69,26 @@ class QuizScheduler:
             logger.error(f"Error sending quiz to chat {chat_id}: {e}")
     
     def _generate_question(self):
-        """Генерация вопроса с использованием существующего функционала."""
+        """Генерация вопроса с использованием TriviaService."""
         try:
-            max_attempts = 5
+            # Используем готовый метод из TriviaService
+            result = self.trivia_service.generate_question("system", "Scheduler")
             
-            for attempt in range(max_attempts):
-                # Используем существующий метод из TriviaService
-                question = self.trivia_service.generate_question_with_ai()
-                
-                if question:
-                    # Проверяем на дубликат
-                    if not self.trivia_service.is_duplicate_question(question.question, question.correct_answer):
-                        return {
-                            "question": question.question,
-                            "answer": question.correct_answer,
-                            "explanation": question.explanation,
-                            "wrong_answers": question.wrong_answers
-                        }
-                    else:
-                        logger.info(f"Attempt {attempt + 1}: Generated duplicate question, trying again...")
-                        continue
-            
-            # Если все попытки неудачны, возвращаем fallback
-            logger.warning("All attempts failed, using fallback question")
-            return self._get_fallback_question()
+            if result.get("success"):
+                question_data = result["question"]
+                return {
+                    "question": question_data["text"],
+                    "answer": question_data["correct_answer"],
+                    "explanation": question_data["explanation"],
+                    "wrong_answers": [opt for opt in question_data["options"] if opt != question_data["correct_answer"]]
+                }
+            else:
+                logger.error(f"Failed to generate question: {result.get('message')}")
+                return None
             
         except Exception as e:
             logger.error(f"Error generating question: {e}")
-            return self._get_fallback_question()
-    
-    def _get_fallback_question(self):
-        """Резервный вопрос на случай проблем с генерацией."""
-        import random
-        
-        fallback_questions = [
-            {
-                "question": "Какая самая высокая гора в мире?",
-                "answer": "Эверест",
-                "explanation": "Эверест (Джомолунгма) - самая высокая гора в мире, её высота 8848 метров.",
-                "wrong_answers": ["Килиманджаро", "Эльбрус", "Монблан"]
-            },
-            {
-                "question": "Сколько континентов на Земле?",
-                "answer": "7",
-                "explanation": "На Земле 7 континентов: Азия, Африка, Северная Америка, Южная Америка, Антарктида, Европа и Океания.",
-                "wrong_answers": ["5", "6", "8"]
-            },
-            {
-                "question": "Какой газ составляет большую часть атмосферы Земли?",
-                "answer": "Азот",
-                "explanation": "Азот составляет около 78% атмосферы Земли, кислород - около 21%.",
-                "wrong_answers": ["Кислород", "Углекислый газ", "Водород"]
-            }
-        ]
-        
-        return random.choice(fallback_questions)
+            return None
     
     def _send_quiz_message(self, chat_id: int, question_data: Dict[str, Any]):
         """Отправка сообщения с квизом."""
@@ -160,7 +125,7 @@ class QuizScheduler:
                 parse_mode='HTML',
                 protect_content=True
             )
-            
+
             # Сохраняем состояние вопроса (используя существующий функционал)
             self._save_question_state(question_msg.message_id, question_data, answer_options)
             
@@ -187,9 +152,8 @@ class QuizScheduler:
                     )
                     connection.commit()
                     
-                    # Сохраняем состояние вопроса
+                    # Сохраняем состояние вопроса в том же формате, что ожидает TriviaHandlers
                     question_state_data = {
-                        "text": question_data["question"],
                         "players_responses": {},
                         "options": answer_options
                     }
