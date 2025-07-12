@@ -60,11 +60,17 @@ class TelegramBot:
         self.admin_handlers.set_quiz_scheduler(self.quiz_scheduler)
 
         # Load game data
-        self.char = self.load_json_file('assets/data/char.json')
-        self.plot = self.load_json_file('assets/data/plot.json')
-        self.shop = self.load_json_file('assets/data/shop.json')
-        self.statuetki = self.load_json_file('assets/data/statuetki.json')
-        
+        # self.char = self.load_json_file('assets/data/char.json')
+        # self.plot = self.load_json_file('assets/data/plot.json')
+        # self.shop = self.load_json_file('assets/data/shop.json')
+        # self.statuetki = self.load_json_file('assets/data/statuetki.json')
+
+        # Load game data
+        self.char = self.load_json_file('../assets/data/char.json')
+        self.plot = self.load_json_file('../assets/data/plot.json')
+        self.shop = self.load_json_file('../assets/data/shop.json')
+        self.statuetki = self.load_json_file('../assets/data/statuetki.json')
+
         # Global state (to be refactored later)
         self.admin_actions = {}
         self.temp_user_data = {}

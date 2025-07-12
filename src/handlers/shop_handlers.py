@@ -89,11 +89,17 @@ class ShopHandlers:
                 self.bot.reply_to(message, "У вас нету статуэток:(")
                 return
             
+            # item_images = {
+            #     'Pudginio': 'assets/images/statuetki/pudginio.jpg',
+            #     'Ryadovoi Rudgers': 'assets/images/statuetki/ryadovoi_rudgers.jpg',
+            #     'Polkovnik Buchantos': 'assets/images/statuetki/polkovnik_buchantos.jpg',
+            #     'General Chin-Choppa': 'assets/images/statuetki/general_chin_choppa.png'
+            # }
             item_images = {
-                'Pudginio': 'assets/images/statuetki/pudginio.jpg',
-                'Ryadovoi Rudgers': 'assets/images/statuetki/ryadovoi_rudgers.jpg',
-                'Polkovnik Buchantos': 'assets/images/statuetki/polkovnik_buchantos.jpg',
-                'General Chin-Choppa': 'assets/images/statuetki/general_chin_choppa.png'
+                'Pudginio': '../assets/images/statuetki/pudginio.jpg',
+                'Ryadovoi Rudgers': '../assets/images/statuetki/ryadovoi_rudgers.jpg',
+                'Polkovnik Buchantos': '../assets/images/statuetki/polkovnik_buchantos.jpg',
+                'General Chin-Choppa': '../assets/images/statuetki/general_chin_choppa.png'
             }
             
             statuetki_descriptions = []
@@ -138,14 +144,23 @@ class ShopHandlers:
             # Create inline keyboard for statuetki
             markup = types.InlineKeyboardMarkup(row_width=1)
             
+            available_items = []
             for item_name, item_price in self.statuetki_data['prices'].items():
-                button_text = f"{item_name} - {item_price} BTC"
-                callback_data = f"statuetki_buy_{item_name}"
-                markup.add(types.InlineKeyboardButton(button_text, callback_data=callback_data))
+                # Only show items player doesn't own yet
+                if item_name not in player.statuetki:
+                    button_text = f"{item_name} - {item_price} BTC"
+                    callback_data = f"statuetki_buy_{item_name}"
+                    markup.add(types.InlineKeyboardButton(button_text, callback_data=callback_data))
+                    available_items.append(item_name)
+            
+            # If player has all statuetki, show a message
+            if not available_items:
+                self.bot.send_message(message.chat.id, "🎉 Поздравляем! Вы собрали все статуэтки!\n\n🏆 Используйте /statuetki чтобы активировать особое событие!")
+                return
             
             shop_message = f"🏰 Магазин статуэток 🏰\n\n"
             shop_message += f"💰 У вас есть: {player.coins} BTC\n\n"
-            shop_message += f"🗿 Ваши статуэтки: /statuetki\n\n"
+            shop_message += f"🗿 Ваши статуэтки: /statuetki ({len(player.statuetki)}/4)\n\n"
             shop_message += f"Выберите статуэтку для покупки:"
             
             self.bot.send_message(message.chat.id, shop_message, reply_markup=markup)
@@ -164,13 +179,33 @@ class ShopHandlers:
                 self.bot.reply_to(message, "Ой, у вас нету характеристик :( \nСначала купите все статуэтки используя /statuetki_shop")
                 return
             
-            characteristics_text = "Ваши характеристики:\n"
-            for characteristic in player.characteristics:
-                characteristic_name, current_level = characteristic.split(":")
-                # You'd need to load characteristic descriptions from your data files
-                characteristics_text += f"{characteristic_name}(Level {current_level})\n"
-            
-            self.bot.reply_to(message, characteristics_text)
+            try:
+                # Load characteristics descriptions
+                import json
+                with open('assets/data/char.json', 'r', encoding='utf-8') as f:
+                    char_data = json.load(f)
+                
+                characteristics_text = "🎯 Ваши характеристики:\n\n"
+                for characteristic in player.characteristics:
+                    characteristic_name, current_level = characteristic.split(":")
+                    description = char_data['description'].get(characteristic_name, "Описание не найдено")
+                    characteristics_text += f"⚡ **{characteristic_name}** (Уровень {current_level})\n"
+                    characteristics_text += f"📝 {description}\n\n"
+                
+                characteristics_text += "🔧 Используйте /upgrade_char для улучшения характеристик!"
+                
+                self.bot.reply_to(message, characteristics_text, parse_mode='Markdown')
+                
+            except FileNotFoundError:
+                # Fallback to basic display if file not found
+                characteristics_text = "Ваши характеристики:\n"
+                for characteristic in player.characteristics:
+                    characteristic_name, current_level = characteristic.split(":")
+                    characteristics_text += f"{characteristic_name} (Уровень {current_level})\n"
+                
+                self.bot.reply_to(message, characteristics_text)
+            except Exception as e:
+                self.bot.reply_to(message, f"Произошла ошибка при загрузке характеристик: {str(e)}")
         
         @self.bot.message_handler(commands=['upgrade_char'])
         def upgrade_characteristic(message):
@@ -263,6 +298,11 @@ class ShopHandlers:
             
             if item_price <= 0:
                 self.bot.answer_callback_query(call.id, "Предмет не найден")
+                return
+            
+            # Check if player already owns this statuetka
+            if item_name in player.statuetki:
+                self.bot.answer_callback_query(call.id, f"У вас уже есть эта статуэтка!")
                 return
             
             if player.coins < item_price:
@@ -391,16 +431,90 @@ class ShopHandlers:
     
     def _handle_all_statuetki_collected(self, player, message):
         """Handle special event when player collects all statuetki"""
-        # Remove all statuetki
-        player.statuetki.clear()
+        import json
+        import random
+        import time
         
-        # Load plot data and send special messages
-        # This would need to be implemented based on your plot.json file
-        
-        # Add a random characteristic
-        # This would need characteristic data loaded
-        
-        self.player_service.save_player(player)
+        try:
+            # Load plot data for the special story
+            # with open('assets/data/plot.json', 'r', encoding='utf-8') as f:
+            #     plot_data = json.load(f)
+            #
+            # # Load characteristics data
+            # with open('assets/data/char.json', 'r', encoding='utf-8') as f:
+            #     char_data = json.load(f)
+
+            # Load plot data for the special story
+            with open('../assets/data/plot.json', 'r', encoding='utf-8') as f:
+                plot_data = json.load(f)
+
+            # Load characteristics data
+            with open('../assets/data/char.json', 'r', encoding='utf-8') as f:
+                char_data = json.load(f)
+            
+            # Get the special story lines
+            story_lines = plot_data.get('strochki2', [])
+            
+            # Send the story line by line with dramatic pauses
+            for i, line in enumerate(story_lines):
+                self.bot.send_message(message.chat.id, line)
+                # Add dramatic pauses, longer for key moments
+                if "яркая вспышка" in line.lower() or "ослепляет" in line.lower():
+                    time.sleep(3)
+                elif "..." in line or "...." in line:
+                    time.sleep(2)
+                elif i < len(story_lines) - 2:  # Don't pause after the last two messages
+                    time.sleep(1.5)
+            
+            # Remove all statuetki after the story
+            player.statuetki.clear()
+            
+            # Add a random characteristic
+            available_characteristics = list(char_data['description'].keys())
+            
+            # Initialize characteristics list if it doesn't exist
+            if not hasattr(player, 'characteristics') or player.characteristics is None:
+                player.characteristics = []
+            
+            # Get characteristics player already has
+            existing_characteristics = [char.split(':')[0] for char in player.characteristics]
+            
+            # Filter out already owned characteristics
+            available_characteristics = [char for char in available_characteristics if char not in existing_characteristics]
+            
+            # If player has all characteristics, give them a random one anyway but level it up
+            if not available_characteristics:
+                selected_characteristic = random.choice(list(char_data['description'].keys()))
+                # Find existing characteristic and level it up
+                for i, char in enumerate(player.characteristics):
+                    char_name, level = char.split(':')
+                    if char_name == selected_characteristic:
+                        player.characteristics[i] = f"{char_name}:{int(level) + 1}"
+                        break
+            else:
+                # Add new characteristic with level 1
+                selected_characteristic = random.choice(available_characteristics)
+                new_characteristic = f"{selected_characteristic}:1"
+                player.characteristics.append(new_characteristic)
+            
+            # Save the player
+            self.player_service.save_player(player)
+            
+            # Send final message about the new characteristic
+            characteristic_description = char_data['description'][selected_characteristic]
+            final_message = f"🎉 Поздравляем! Вы получили новую характеристику: **{selected_characteristic}**\n\n"
+            final_message += f"📝 Описание: {characteristic_description}\n\n"
+            final_message += "✨ Используйте /characteristics чтобы посмотреть все ваши характеристики!"
+            
+            self.bot.send_message(message.chat.id, final_message, parse_mode='Markdown')
+            
+        except FileNotFoundError as e:
+            self.bot.send_message(message.chat.id, f"Ошибка: не удалось найти файл данных - {str(e)}")
+        except Exception as e:
+            self.bot.send_message(message.chat.id, f"Произошла ошибка во время особого события: {str(e)}")
+            # Still clear statuetki and save player even if story fails
+            player.statuetki.clear()
+            self.player_service.save_player(player)
         
         # Stock-related handlers
         @self.bot.message_handler(commands=['stocks_update'])
