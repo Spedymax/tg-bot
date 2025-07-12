@@ -1,0 +1,21 @@
+{
+  "name": "tg-bot-miniapp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Telegram bot mini app",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.1.0",
+    "vite": "^7.0.4"
+  },
+  "devDependencies": {},
+  "keywords": ["telegram", "bot", "miniapp"],
+  "author": "Your Name",
+  "license": "MIT"
+}
