@@ -956,8 +956,7 @@
             // Приостанавливаем фоновую музыку во время спина
             pauseBackgroundMusic();
             
-            // Воспроизводим звук вращения
-            playSound('spinSound');
+
 
             try {
                 // Отправляем запрос на спин на сервер
@@ -976,7 +975,8 @@
                 if (spinData.success) {
                     // Получаем результат спина
                     const slotResult = generateSlotResult(spinData.data.prize);
-                    
+                    // Воспроизводим звук вращения
+                    playSound('spinSound');
                     // Анимируем вращение барабанов
                     animateReels(slotResult, () => {
                         // Обновляем данные игрока
