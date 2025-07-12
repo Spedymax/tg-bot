@@ -459,6 +459,12 @@
             80%, 100% { content: '...'; }
         }
         
+        @keyframes pulse {
+            0% { transform: scale(1.05); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1.05); }
+        }
+        
         @media (max-width: 480px) {
             .loading-title {
                 font-size: 2.5em;
@@ -595,6 +601,7 @@
                 <div class="loading-progress-bar" id="loadingProgressBar"></div>
             </div>
             <div class="loading-text">Инициализация<span class="loading-dots"></span></div>
+            <div id="loadingButtonContainer" style="margin-top: 20px; height: 50px;"></div>
         </div>
     </div>
 
@@ -634,20 +641,96 @@
                 let text = 'Инициализация';
                 if (loadingSteps.player && !loadingSteps.audio) {
                     text = 'Загрузка аудио';
-                } else if (loadingSteps.player && loadingSteps.audio) {
+                } else if (loadingSteps.player && loadingSteps.audio && !loadingSteps.preload) {
                     text = 'Предзагрузка ресурсов';
                 } else if (completedSteps === totalSteps) {
                     text = 'Готово';
                 }
-                loadingText.innerHTML = text + '<span class="loading-dots"></span>';
+                
+                // Если не все завершено, добавляем анимированные точки
+                if (completedSteps < totalSteps) {
+                    loadingText.innerHTML = text + '<span class="loading-dots"></span>';
+                } else {
+                    loadingText.innerHTML = text;
+                }
             }
             
-            // Если все шаги завершены, скрываем экран загрузки
+            // Если все шаги завершены, показываем кнопку "Продолжить"
             if (completedSteps === totalSteps) {
                 setTimeout(() => {
-                    hideLoadingScreen();
+                    showContinueButton();
                 }, 800); // Небольшая задержка для показа "Готово"
             }
+        }
+        
+        function showContinueButton() {
+            console.log('Показываем кнопку Продолжить');
+            
+            const loadingTitle = document.querySelector('.loading-title');
+            const loadingSubtitle = document.querySelector('.loading-subtitle');
+            const loadingText = document.querySelector('.loading-text');
+            const buttonContainer = document.getElementById('loadingButtonContainer');
+            const progressBar = document.getElementById('loadingProgressBar');
+            
+            // Обновляем заголовок и подзаголовок
+            if (loadingTitle) {
+                loadingTitle.textContent = '✅ Готово!';
+            }
+            
+            if (loadingSubtitle) {
+                loadingSubtitle.textContent = 'Нажмите "Продолжить" для входа в казино';
+            }
+            
+            if (loadingText) {
+                loadingText.innerHTML = '✨ Все системы запущены!';
+            }
+            
+            if (progressBar) {
+                progressBar.style.width = '100%';
+            }
+            
+            // Создаем кнопку Продолжить
+            if (buttonContainer) {
+                const continueButton = document.createElement('button');
+                continueButton.textContent = '🎵 Продолжить';
+                continueButton.onclick = continueToApp;
+                continueButton.style.cssText = `
+                    background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+                    color: white;
+                    border: none;
+                    padding: 15px 30px;
+                    font-size: 1.2em;
+                    font-weight: bold;
+                    border-radius: 50px;
+                    cursor: pointer;
+                    box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+                    animation: pulse 2s infinite;
+                    transition: all 0.3s ease;
+                `;
+                
+                continueButton.addEventListener('mouseenter', function() {
+                    this.style.transform = 'translateY(-2px) scale(1.05)';
+                    this.style.boxShadow = '0 6px 20px rgba(255, 107, 107, 0.6)';
+                });
+                
+                continueButton.addEventListener('mouseleave', function() {
+                    this.style.transform = 'none';
+                    this.style.boxShadow = '0 4px 15px rgba(255, 107, 107, 0.4)';
+                });
+                
+                buttonContainer.appendChild(continueButton);
+                console.log('Кнопка Продолжить создана');
+            }
+        }
+        
+        function continueToApp() {
+            // Активируем аудио (это считается пользовательским взаимодействием)
+            if (musicEnabled) {
+                startBackgroundMusic();
+            }
+            
+            // Скрываем экран загрузки
+            hideLoadingScreen();
         }
         
         function hideLoadingScreen() {
@@ -708,15 +791,6 @@
             markStepComplete('audio');
         }
         
-        function skipLoading() {
-            console.log('Пропуск загрузки нажата');
-            Object.keys(loadingSteps).forEach(step => {
-                if (!loadingSteps[step]) {
-                    console.log(`Принудительно завершаем шаг: ${step}`);
-                    markStepComplete(step);
-                }
-            });
-        }
         
         // Функция для воспроизведения звука
         function playSound(soundName) {
@@ -1098,14 +1172,7 @@
                 window.Telegram.WebApp.expand();
             }
             
-            // Запускаем фоновую музыку после первого взаимодействия пользователя
-            document.addEventListener('click', function enableAudio() {
-                if (musicEnabled) {
-                    startBackgroundMusic();
-                }
-                // Убираем этот обработчик после первого клика
-                document.removeEventListener('click', enableAudio);
-            }, { once: true });
+            // Аудио теперь активируется через кнопку "Продолжить"
         });
     </script>
 </body>
