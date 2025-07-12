@@ -17,9 +17,11 @@ logger = logging.getLogger(__name__)
 # Store for player data (in production, this should be a database)
 player_data = {}
 
+@app.route('/miniapp')
 @app.route('/miniapp/')
 def index():
     """Serve the main slot machine page"""
+    logger.info(f"Serving slot_casino.html from {os.getcwd()}")
     return send_from_directory('.', 'slot_casino.html')
 
 @app.route('/miniapp/slots')
@@ -215,6 +217,18 @@ def health_check():
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'active_players': len(player_data)
+    })
+
+@app.route('/miniapp/debug')
+def debug_info():
+    """Debug information"""
+    import os
+    return jsonify({
+        'working_directory': os.getcwd(),
+        'files_in_directory': os.listdir('.'),
+        'slot_casino_exists': os.path.exists('slot_casino.html'),
+        'audio_directory_exists': os.path.exists('audio'),
+        'routes': [str(rule) for rule in app.url_map.iter_rules()]
     })
 
 @app.errorhandler(404)
