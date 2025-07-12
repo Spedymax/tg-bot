@@ -11,6 +11,11 @@ class AdminHandlers:
         self.player_service = player_service
         self.game_service = game_service
         self.admin_actions = {}
+        self.quiz_scheduler = None  # Will be set by main.py
+        
+    def set_quiz_scheduler(self, quiz_scheduler):
+        """Set the quiz scheduler instance"""
+        self.quiz_scheduler = quiz_scheduler
         
     def wake_on_lan(self, mac_address, broadcast_ip='255.255.255.255'):
         """Send a Wake-on-LAN packet to wake up a computer"""
@@ -115,10 +120,26 @@ class AdminHandlers:
                         types.InlineKeyboardButton("💾 Бэкап данных", callback_data="action_backupData"),
                         types.InlineKeyboardButton("📢 Рассылка", callback_data="action_broadcast"),
                         types.InlineKeyboardButton("💻 Включить ПК", callback_data="action_wakePc"),
+                        types.InlineKeyboardButton("🧠 Управление квизами", callback_data="admin_quizManagement"),
                         types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back")
                     ]
                     markup.add(*buttons)
                     self.bot.edit_message_text("⚙️ Системные функции\nВыберите действие:",
+                                            call.message.chat.id, 
+                                            call.message.message_id, 
+                                            reply_markup=markup)
+                    
+                elif category == "quizManagement":
+                    # Quiz management options
+                    buttons = [
+                        types.InlineKeyboardButton("▶️ Запустить планировщик", callback_data="action_startQuizScheduler"),
+                        types.InlineKeyboardButton("⏹️ Остановить планировщик", callback_data="action_stopQuizScheduler"),
+                        types.InlineKeyboardButton("📊 Статус планировщика", callback_data="action_quizSchedulerStatus"),
+                        types.InlineKeyboardButton("🎯 Отправить квиз сейчас", callback_data="action_sendQuizNow"),
+                        types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_system")
+                    ]
+                    markup.add(*buttons)
+                    self.bot.edit_message_text("🧠 Управление квизами\nВыберите действие:",
                                             call.message.chat.id, 
                                             call.message.message_id, 
                                             reply_markup=markup)
@@ -206,6 +227,109 @@ class AdminHandlers:
                         call.message.chat.id,
                         call.message.message_id
                     )
+                
+                # Quiz management actions
+                elif action == "startQuizScheduler":
+                    try:
+                        if hasattr(self, 'quiz_scheduler'):
+                            self.quiz_scheduler.start_scheduler()
+                            self.bot.edit_message_text(
+                                "✅ Планировщик квизов запущен!\n\n"
+                                "Квизы будут отправляться в 10:00, 15:00 и 20:00 каждый день.",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                        else:
+                            self.bot.edit_message_text(
+                                "❌ Планировщик квизов не инициализирован.",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                    except Exception as e:
+                        self.bot.edit_message_text(
+                            f"❌ Ошибка при запуске планировщика: {str(e)}",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+                
+                elif action == "stopQuizScheduler":
+                    try:
+                        if hasattr(self, 'quiz_scheduler'):
+                            self.quiz_scheduler.stop_scheduler()
+                            self.bot.edit_message_text(
+                                "⏹️ Планировщик квизов остановлен.",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                        else:
+                            self.bot.edit_message_text(
+                                "❌ Планировщик квизов не инициализирован.",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                    except Exception as e:
+                        self.bot.edit_message_text(
+                            f"❌ Ошибка при остановке планировщика: {str(e)}",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+                
+                elif action == "quizSchedulerStatus":
+                    try:
+                        if hasattr(self, 'quiz_scheduler'):
+                            status_info = self.quiz_scheduler.get_schedule_info()
+                            status_text = f"📊 Статус планировщика квизов:\n\n"
+                            status_text += f"📍 Статус: {'🟢 Запущен' if status_info['is_running'] else '🔴 Остановлен'}\n"
+                            status_text += f"⏰ Время квизов: {', '.join(status_info['quiz_times'])}\n"
+                            status_text += f"🎯 Целевой чат: {status_info['target_chat_id']}\n"
+                            status_text += f"⏳ Следующий запуск: {status_info['next_run']}"
+                            
+                            self.bot.edit_message_text(
+                                status_text,
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                        else:
+                            self.bot.edit_message_text(
+                                "❌ Планировщик квизов не инициализирован.",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                    except Exception as e:
+                        self.bot.edit_message_text(
+                            f"❌ Ошибка при получении статуса: {str(e)}",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+                
+                elif action == "sendQuizNow":
+                    try:
+                        if hasattr(self, 'quiz_scheduler'):
+                            result = self.quiz_scheduler.manual_quiz()
+                            if result['success']:
+                                self.bot.edit_message_text(
+                                    "✅ Квиз успешно отправлен в группу!",
+                                    call.message.chat.id,
+                                    call.message.message_id
+                                )
+                            else:
+                                self.bot.edit_message_text(
+                                    f"❌ Ошибка при отправке квиза: {result['message']}",
+                                    call.message.chat.id,
+                                    call.message.message_id
+                                )
+                        else:
+                            self.bot.edit_message_text(
+                                "❌ Планировщик квизов не инициализирован.",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                    except Exception as e:
+                        self.bot.edit_message_text(
+                            f"❌ Ошибка при отправке квиза: {str(e)}",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
         
         @self.bot.message_handler(func=lambda message: message.from_user.id in self.admin_actions)
         def handle_admin_text_input(message):
