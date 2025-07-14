@@ -89,18 +89,18 @@ class ShopHandlers:
                 self.bot.reply_to(message, "У вас нету статуэток:(")
                 return
             
-            # item_images = {
-            #     'Pudginio': 'assets/images/statuetki/pudginio.jpg',
-            #     'Ryadovoi Rudgers': 'assets/images/statuetki/ryadovoi_rudgers.jpg',
-            #     'Polkovnik Buchantos': 'assets/images/statuetki/polkovnik_buchantos.jpg',
-            #     'General Chin-Choppa': 'assets/images/statuetki/general_chin_choppa.png'
-            # }
             item_images = {
-                'Pudginio': '../assets/images/statuetki/pudginio.jpg',
-                'Ryadovoi Rudgers': '../assets/images/statuetki/ryadovoi_rudgers.jpg',
-                'Polkovnik Buchantos': '../assets/images/statuetki/polkovnik_buchantos.jpg',
-                'General Chin-Choppa': '../assets/images/statuetki/general_chin_choppa.png'
+                'Pudginio': 'assets/images/statuetki/pudginio.jpg',
+                'Ryadovoi Rudgers': 'assets/images/statuetki/ryadovoi_rudgers.jpg',
+                'Polkovnik Buchantos': 'assets/images/statuetki/polkovnik_buchantos.jpg',
+                'General Chin-Choppa': 'assets/images/statuetki/general_chin_choppa.png'
             }
+            # item_images = {
+            #     'Pudginio': '../assets/images/statuetki/pudginio.jpg',
+            #     'Ryadovoi Rudgers': '../assets/images/statuetki/ryadovoi_rudgers.jpg',
+            #     'Polkovnik Buchantos': '../assets/images/statuetki/polkovnik_buchantos.jpg',
+            #     'General Chin-Choppa': '../assets/images/statuetki/general_chin_choppa.png'
+            # }
             
             statuetki_descriptions = []
             for statuetka in player.statuetki:
@@ -437,20 +437,20 @@ class ShopHandlers:
         
         try:
             # Load plot data for the special story
-            # with open('assets/data/plot.json', 'r', encoding='utf-8') as f:
-            #     plot_data = json.load(f)
-            #
-            # # Load characteristics data
-            # with open('assets/data/char.json', 'r', encoding='utf-8') as f:
-            #     char_data = json.load(f)
-
-            # Load plot data for the special story
-            with open('../assets/data/plot.json', 'r', encoding='utf-8') as f:
+            with open('assets/data/plot.json', 'r', encoding='utf-8') as f:
                 plot_data = json.load(f)
 
             # Load characteristics data
-            with open('../assets/data/char.json', 'r', encoding='utf-8') as f:
+            with open('assets/data/char.json', 'r', encoding='utf-8') as f:
                 char_data = json.load(f)
+
+            # # Load plot data for the special story
+            # with open('../assets/data/plot.json', 'r', encoding='utf-8') as f:
+            #     plot_data = json.load(f)
+            #
+            # # Load characteristics data
+            # with open('../assets/data/char.json', 'r', encoding='utf-8') as f:
+            #     char_data = json.load(f)
             
             # Get the special story lines
             story_lines = plot_data.get('strochki2', [])
