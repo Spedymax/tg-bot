@@ -3,10 +3,21 @@ import os
 import sys
 import json
 import logging
-from datetime import datetime, timedelta
+import random
+from datetime import datetime, timedelta, timezone
 
 # Add the parent directory to the Python path to import from the main bot
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import the bot's database classes
+try:
+    from src.config.settings import Settings
+    from src.database.db_manager import DatabaseManager
+    from src.database.player_service import PlayerService
+except ImportError as e:
+    print(f"Warning: Could not import bot modules: {e}")
+    print("Running in standalone mode without database integration")
+    Settings = DatabaseManager = PlayerService = None
 
 app = Flask(__name__)
 
@@ -14,7 +25,21 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Store for player data (in production, this should be a database)
+# Initialize database connection if available
+if DatabaseManager and PlayerService:
+    try:
+        db_manager = DatabaseManager()
+        player_service = PlayerService(db_manager)
+        logger.info("Database integration enabled")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        db_manager = None
+        player_service = None
+else:
+    db_manager = None
+    player_service = None
+
+# Fallback store for player data when database is not available
 player_data = {}
 
 @app.route('/miniapp')
@@ -38,38 +63,63 @@ def casino():
 def get_player_data(player_id):
     """Get player data for the mini-app"""
     try:
-        # In production, this would fetch from your main bot's database
-        # For now, we'll use a simple in-memory store
-        
-        if player_id not in player_data:
-            # Initialize new player
-            player_data[player_id] = {
-                'coins': 100,
-                'daily_spins': 0,
-                'last_spin_date': datetime.now().strftime('%Y-%m-%d'),
-                'max_daily_spins': 6
-            }
-        
-        player = player_data[player_id]
-        
-        # Check if it's a new day and reset spins
-        today = datetime.now().strftime('%Y-%m-%d')
-        if player['last_spin_date'] != today:
-            player['daily_spins'] = 0
-            player['last_spin_date'] = today
-        
-        # Calculate spins left
-        spins_left = max(0, player['max_daily_spins'] - player['daily_spins'])
-        
-        return jsonify({
-            'success': True,
-            'data': {
-                'coins': player['coins'],
-                'spins_left': spins_left,
-                'daily_spins': player['daily_spins'],
-                'max_daily_spins': player['max_daily_spins']
-            }
-        })
+        if player_service:
+            # Use actual database
+            player = player_service.get_player(player_id)
+            if not player:
+                return jsonify({'success': False, 'error': 'Player not found'}), 404
+            
+            # Check if it's a new day and reset spins
+            today = datetime.now(timezone.utc).date()
+            last_spin_date = getattr(player, 'miniapp_last_spin_date', datetime.min.replace(tzinfo=timezone.utc)).date()
+            
+            if last_spin_date != today:
+                player.miniapp_daily_spins = 0
+                player.miniapp_last_spin_date = datetime.now(timezone.utc)
+                player_service.save_player(player)
+            
+            max_daily_spins = 6
+            spins_left = max(0, max_daily_spins - getattr(player, 'miniapp_daily_spins', 0))
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'coins': int(player.coins),
+                    'spins_left': spins_left,
+                    'daily_spins': getattr(player, 'miniapp_daily_spins', 0),
+                    'max_daily_spins': max_daily_spins,
+                    'total_winnings': getattr(player, 'miniapp_total_winnings', 0.0)
+                }
+            })
+        else:
+            # Fallback to in-memory store
+            if player_id not in player_data:
+                player_data[player_id] = {
+                    'coins': 100,
+                    'daily_spins': 0,
+                    'last_spin_date': datetime.now().strftime('%Y-%m-%d'),
+                    'max_daily_spins': 6
+                }
+            
+            player = player_data[player_id]
+            
+            # Check if it's a new day and reset spins
+            today = datetime.now().strftime('%Y-%m-%d')
+            if player['last_spin_date'] != today:
+                player['daily_spins'] = 0
+                player['last_spin_date'] = today
+            
+            spins_left = max(0, player['max_daily_spins'] - player['daily_spins'])
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'coins': player['coins'],
+                    'spins_left': spins_left,
+                    'daily_spins': player['daily_spins'],
+                    'max_daily_spins': player['max_daily_spins']
+                }
+            })
         
     except Exception as e:
         logger.error(f"Error getting player data: {e}")
@@ -85,67 +135,170 @@ def spin_wheel():
         if not player_id:
             return jsonify({'success': False, 'error': 'Player ID required'}), 400
         
-        if player_id not in player_data:
-            return jsonify({'success': False, 'error': 'Player not found'}), 404
-        
-        player = player_data[player_id]
-        
-        # Check if it's a new day
-        today = datetime.now().strftime('%Y-%m-%d')
-        if player['last_spin_date'] != today:
-            player['daily_spins'] = 0
-            player['last_spin_date'] = today
-        
-        # Check if player has spins left
-        if player['daily_spins'] >= player['max_daily_spins']:
+        if player_service:
+            # Use actual database
+            player = player_service.get_player(player_id)
+            if not player:
+                return jsonify({'success': False, 'error': 'Player not found'}), 404
+            
+            # Check if it's a new day and reset spins
+            today = datetime.now(timezone.utc).date()
+            last_spin_date = getattr(player, 'miniapp_last_spin_date', datetime.min.replace(tzinfo=timezone.utc)).date()
+            
+            if last_spin_date != today:
+                player.miniapp_daily_spins = 0
+                player.miniapp_last_spin_date = datetime.now(timezone.utc)
+            
+            max_daily_spins = 6
+            current_spins = getattr(player, 'miniapp_daily_spins', 0)
+            
+            # Check if player has spins left
+            if current_spins >= max_daily_spins:
+                return jsonify({
+                    'success': False, 
+                    'error': 'No spins left for today'
+                }), 400
+            
+            # Improved winning logic with multiple prize tiers and better odds
+            rand_value = random.random()
+            
+            # Better winning chances - total 25% chance to win something
+            if rand_value < 0.03:  # 3% chance for jackpot
+                selected_prize = {
+                    'text': '🎰 МЕГА ДЖЕКПОТ! ЕБААААТЬ!🎰',
+                    'type': 'jackpot', 
+                    'value': 500
+                }
+            elif rand_value < 0.08:  # 5% chance for big win
+                selected_prize = {
+                    'text': '🎉 БОЛЬШОЙ ВЫИГРЫШ!🎉',
+                    'type': 'big_win', 
+                    'value': 300
+                }
+            elif rand_value < 0.15:  # 7% chance for medium win
+                selected_prize = {
+                    'text': '✨ Хороший выигрыш! ✨', 
+                    'type': 'medium_win', 
+                    'value': 150
+                }
+            elif rand_value < 0.25:  # 10% chance for small win
+                selected_prize = {
+                    'text': '💰 Небольшой выигрыш! 💰', 
+                    'type': 'small_win', 
+                    'value': 50
+                }
+            else:  # 75% chance for no win
+                selected_prize = {
+                    'text': 'Попробуйте ещё раз! 🎲', 
+                    'type': 'lose', 
+                    'value': 0
+                }
+            
+            # Apply the prize
+            original_coins = player.coins
+            coins_gained = 0
+            
+            if selected_prize['type'] != 'lose':
+                player.coins += selected_prize['value']
+                coins_gained = selected_prize['value']
+                player.miniapp_total_winnings = getattr(player, 'miniapp_total_winnings', 0.0) + selected_prize['value']
+            
+            # Increment spin count
+            player.miniapp_daily_spins = current_spins + 1
+            player.miniapp_last_spin_date = datetime.now(timezone.utc)
+            
+            # Save player to database
+            player_service.save_player(player)
+            
+            # Calculate spins left
+            spins_left = max(0, max_daily_spins - player.miniapp_daily_spins)
+            
             return jsonify({
-                'success': False, 
-                'error': 'No spins left for today'
-            }), 400
-        
-        # Generate spin result for slot machine - simple logic
-        import random
-        
-        # Простая логика: либо выигрыш 300 BTC, либо проигрыш
-        win_probability = 0.05  # 5% шанс на выигрыш
-        
-        if random.random() < win_probability:
-            # Выигрыш!
-            selected_prize = {
-                'text': 'ПОБЕДА! Три в ряд! 🎉', 
-                'type': 'win', 
-                'value': 300
-            }
+                'success': True,
+                'data': {
+                    'prize': selected_prize,
+                    'coins': int(player.coins),
+                    'coins_gained': coins_gained,
+                    'spins_left': spins_left,
+                    'daily_spins': player.miniapp_daily_spins,
+                    'total_winnings': player.miniapp_total_winnings
+                }
+            })
         else:
-            # Проигрыш
-            selected_prize = {
-                'text': 'Попробуйте ещё раз! 🎲', 
-                'type': 'lose', 
-                'value': 0
-            }
-        
-        # Apply the prize
-        original_coins = player['coins']
-        if selected_prize['type'] == 'win':
-            player['coins'] += selected_prize['value']  # +300 BTC
-        # For 'lose' type, no coins are added
-        
-        # Increment spin count
-        player['daily_spins'] += 1
-        
-        # Calculate spins left
-        spins_left = max(0, player['max_daily_spins'] - player['daily_spins'])
-        
-        return jsonify({
-            'success': True,
-            'data': {
-                'prize': selected_prize,
-                'coins': player['coins'],
-                'coins_gained': player['coins'] - original_coins,
-                'spins_left': spins_left,
-                'daily_spins': player['daily_spins']
-            }
-        })
+            # Fallback to in-memory store
+            if player_id not in player_data:
+                return jsonify({'success': False, 'error': 'Player not found'}), 404
+            
+            player = player_data[player_id]
+            
+            # Check if it's a new day
+            today = datetime.now().strftime('%Y-%m-%d')
+            if player['last_spin_date'] != today:
+                player['daily_spins'] = 0
+                player['last_spin_date'] = today
+            
+            # Check if player has spins left
+            if player['daily_spins'] >= player['max_daily_spins']:
+                return jsonify({
+                    'success': False, 
+                    'error': 'No spins left for today'
+                }), 400
+            
+            # Improved winning logic for fallback mode too
+            rand_value = random.random()
+            
+            if rand_value < 0.03:  # 3% jackpot
+                selected_prize = {
+                    'text': '🎰 МЕГА ДЖЕКПОТ! 🎰', 
+                    'type': 'jackpot', 
+                    'value': 500
+                }
+            elif rand_value < 0.08:  # 5% big win
+                selected_prize = {
+                    'text': '🎉 БОЛЬШОЙ ВЫИГРЫШ! 🎉', 
+                    'type': 'big_win', 
+                    'value': 300
+                }
+            elif rand_value < 0.15:  # 7% medium win
+                selected_prize = {
+                    'text': '✨ Хороший выигрыш! ✨', 
+                    'type': 'medium_win', 
+                    'value': 150
+                }
+            elif rand_value < 0.25:  # 10% small win
+                selected_prize = {
+                    'text': '💰 Небольшой выигрыш! 💰', 
+                    'type': 'small_win', 
+                    'value': 50
+                }
+            else:
+                selected_prize = {
+                    'text': 'Попробуйте ещё раз! 🎲', 
+                    'type': 'lose', 
+                    'value': 0
+                }
+            
+            # Apply the prize
+            original_coins = player['coins']
+            if selected_prize['type'] != 'lose':
+                player['coins'] += selected_prize['value']
+            
+            # Increment spin count
+            player['daily_spins'] += 1
+            
+            # Calculate spins left
+            spins_left = max(0, player['max_daily_spins'] - player['daily_spins'])
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'prize': selected_prize,
+                    'coins': player['coins'],
+                    'coins_gained': player['coins'] - original_coins,
+                    'spins_left': spins_left,
+                    'daily_spins': player['daily_spins']
+                }
+            })
         
     except Exception as e:
         logger.error(f"Error processing spin: {e}")
