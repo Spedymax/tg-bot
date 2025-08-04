@@ -2,6 +2,7 @@ import schedule
 import time
 import logging
 import threading
+import pytz
 from datetime import datetime, timezone
 from typing import Dict, Any
 from config.settings import Settings
@@ -20,7 +21,7 @@ class QuizScheduler:
         self.trivia_service = trivia_service
         
         # Настройки квизов - 3 раза в день
-        self.quiz_times = ["10:00", "15:00", "20:00"]
+        self.quiz_times = ["12:00", "16:00", "20:00"]
         
         # ID чата с друзьями (из настроек)
         self.target_chat_id = Settings.CHAT_IDS['main']  # Основная группа

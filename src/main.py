@@ -266,6 +266,10 @@ class TelegramBot:
             logger.info("Setting up handlers...")
             self.setup_handlers()
             
+            # Start the quiz scheduler
+            logger.info("Starting quiz scheduler...")
+            self.quiz_scheduler.start_scheduler()
+            
             logger.info("Starting bot polling...")
             self.bot.send_message(Settings.ADMIN_IDS[0], 'Bot restarted with new architecture!')
             
@@ -282,6 +286,10 @@ class TelegramBot:
         except Exception as e:
             logger.error(f"Critical error: {e}")
         finally:
+            # Stop the quiz scheduler
+            logger.info("Stopping quiz scheduler...")
+            self.quiz_scheduler.stop_scheduler()
+            
             self.db_manager.close_all_connections()
             logger.info("Database connections closed")
 
