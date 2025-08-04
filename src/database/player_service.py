@@ -52,7 +52,8 @@ class PlayerService:
                             statuetki = %s, chat_id = %s, correct_answers = %s,
                             nnn_checkins = %s, last_used = %s, last_vor = %s,
                             last_prezervativ = %s, last_joke = %s, casino_last_used = %s,
-                            casino_usage_count = %s, ballzzz_number = %s, notified = %s
+                            casino_usage_count = %s, ballzzz_number = %s, notified = %s,
+                            miniapp_daily_spins = %s, miniapp_last_spin_date = %s, miniapp_total_winnings = %s
                         WHERE player_id = %s
                     """
                     cursor.execute(update_query, (
@@ -62,6 +63,9 @@ class PlayerService:
                         player.nnn_checkins, player.last_used, player.last_vor,
                         player.last_prezervativ, player.last_joke, player.casino_last_used,
                         player.casino_usage_count, player.ballzzz_number, player.notified,
+                        getattr(player, 'miniapp_daily_spins', 0), 
+                        getattr(player, 'miniapp_last_spin_date', datetime.min.replace(tzinfo=timezone.utc)),
+                        getattr(player, 'miniapp_total_winnings', 0.0),
                         player.player_id
                     ))
                 else:
