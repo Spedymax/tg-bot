@@ -66,11 +66,48 @@ def casino():
 def get_player_data(player_id):
     """Get player data for the mini-app"""
     try:
+        logger.info(f"Getting player data for player_id: {player_id}")
+        logger.info(f"Database integration enabled: {player_service is not None}")
+        
         if player_service:
             # Use actual database
+            logger.info(f"Attempting to get player {player_id} from database")
             player = player_service.get_player(player_id)
+            
             if not player:
-                return jsonify({'success': False, 'error': 'Player not found'}), 404
+                logger.warning(f"Player {player_id} not found in database")
+                # Create a default player in fallback mode instead of returning error
+                if player_id not in player_data:
+                    player_data[player_id] = {
+                        'coins': 100,
+                        'daily_spins': 0,
+                        'last_spin_date': datetime.now().strftime('%Y-%m-%d'),
+                        'max_daily_spins': 6
+                    }
+                    logger.info(f"Created fallback player data for {player_id}")
+                
+                player_dict = player_data[player_id]
+                
+                # Check if it's a new day and reset spins
+                today = datetime.now().strftime('%Y-%m-%d')
+                if player_dict['last_spin_date'] != today:
+                    player_dict['daily_spins'] = 0
+                    player_dict['last_spin_date'] = today
+                
+                spins_left = max(0, player_dict['max_daily_spins'] - player_dict['daily_spins'])
+                
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'coins': player_dict['coins'],
+                        'spins_left': spins_left,
+                        'daily_spins': player_dict['daily_spins'],
+                        'max_daily_spins': player_dict['max_daily_spins'],
+                        'fallback_mode': True
+                    }
+                })
+            
+            logger.info(f"Found player {player_id} in database: {player.player_name}")
             
             # Check if it's a new day and reset spins
             today = datetime.now(timezone.utc).date()
@@ -384,8 +421,47 @@ def debug_info():
         'files_in_directory': os.listdir('.'),
         'slot_casino_exists': os.path.exists('slot_casino.html'),
         'audio_directory_exists': os.path.exists('audio'),
-        'routes': [str(rule) for rule in app.url_map.iter_rules()]
+        'routes': [str(rule) for rule in app.url_map.iter_rules()],
+        'database_available': player_service is not None,
+        'fallback_players': list(player_data.keys())
     })
+
+@app.route('/miniapp/api/test_db')
+def test_database():
+    """Test database connection and show players"""
+    try:
+        if not player_service:
+            return jsonify({
+                'success': False,
+                'message': 'Database not available',
+                'fallback_players': list(player_data.keys())
+            })
+        
+        # Try to get all players to test connection
+        players = player_service.get_all_players()
+        player_list = []
+        
+        for player_id, player in players.items():
+            player_list.append({
+                'player_id': player.player_id,
+                'player_name': player.player_name,
+                'coins': player.coins,
+                'pisunchik_size': player.pisunchik_size
+            })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Database connection working',
+            'player_count': len(players),
+            'players': player_list[:5]  # Show first 5 players
+        })
+        
+    except Exception as e:
+        logger.error(f"Database test error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 @app.errorhandler(404)
 def not_found(error):
