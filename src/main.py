@@ -23,6 +23,7 @@ from handlers.shop_handlers import ShopHandlers
 # Import newly created handlers
 from handlers.entertainment_handlers import EntertainmentHandlers
 from handlers.trivia_handlers import TriviaHandlers
+from handlers.miniapp_handlers import MiniAppHandlers
 from services.quiz_scheduler import QuizScheduler
 
 # Configure logging
@@ -52,6 +53,9 @@ class TelegramBot:
         # Initialize entertainment and trivia handlers
         self.entertainment_handlers = EntertainmentHandlers(self.bot, self.player_service, self.game_service)
         self.trivia_handlers = TriviaHandlers(self.bot, self.player_service, self.game_service, self.db_manager)
+        
+        # Initialize mini-app handlers
+        self.miniapp_handlers = MiniAppHandlers(self.bot, self.player_service, self.game_service)
         
         # Initialize quiz scheduler
         self.quiz_scheduler = QuizScheduler(self.bot, self.db_manager, self.trivia_handlers.trivia_service)
@@ -109,6 +113,9 @@ class TelegramBot:
 
         # Setup trivia handlers
         self.trivia_handlers.setup_handlers()
+        
+        # Setup mini-app handlers
+        self.miniapp_handlers.setup_handlers()
 
         @self.bot.message_handler(commands=['start'])
         def start_game(message):

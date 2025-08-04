@@ -6,14 +6,17 @@ import logging
 import random
 from datetime import datetime, timedelta, timezone
 
-# Add the parent directory to the Python path to import from the main bot
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add the parent directory and src directory to the Python path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+src_dir = os.path.join(parent_dir, 'src')
+sys.path.insert(0, parent_dir)
+sys.path.insert(0, src_dir)
 
 # Import the bot's database classes
 try:
-    from src.config.settings import Settings
-    from src.database.db_manager import DatabaseManager
-    from src.database.player_service import PlayerService
+    from config.settings import Settings
+    from database.db_manager import DatabaseManager
+    from database.player_service import PlayerService
 except ImportError as e:
     print(f"Warning: Could not import bot modules: {e}")
     print("Running in standalone mode without database integration")
