@@ -145,6 +145,7 @@ class TelegramBot:
                 logger.error(f"Error in start command for user {player_id}: {e}")
                 TelegramErrorHandler.safe_reply_to(self.bot, message, "Произошла ошибка. Попробуйте позже.")
 
+
         # Registration approval callbacks
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("registration"))
         def registration_callback(call):
