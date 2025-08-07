@@ -3,6 +3,7 @@ import time
 from telebot import types
 from config.game_config import GameConfig
 from config.settings import Settings
+from services.telegram_error_handler import TelegramErrorHandler, telegram_error_handler
 
 class GameHandlers:
     def __init__(self, bot, player_service, game_service):
@@ -14,19 +15,20 @@ class GameHandlers:
         """Setup all game-related command handlers"""
         
         @self.bot.message_handler(commands=['pisunchik'])
+        @telegram_error_handler("pisunchik_command")
         def pisunchik_command(message):
             """Handle /pisunchik command"""
             player_id = message.from_user.id
             player = self.player_service.get_player(player_id)
             
             if not player:
-                self.bot.reply_to(message, "Вы не зарегистрированы как игрок, используйте /start")
+                TelegramErrorHandler.safe_reply_to(self.bot, message, "Вы не зарегистрированы как игрок, используйте /start")
                 return
             
             result = self.game_service.execute_pisunchik_command(player)
             
             if not result['success']:
-                self.bot.reply_to(message, result['message'])
+                TelegramErrorHandler.safe_reply_to(self.bot, message, result['message'])
                 return
             
             reply_message = (
@@ -38,7 +40,7 @@ class GameHandlers:
             for effect in result['effects']:
                 reply_message += f"\n{effect}"
             
-            self.bot.reply_to(message, reply_message)
+            TelegramErrorHandler.safe_reply_to(self.bot, message, reply_message)
         
         @self.bot.message_handler(commands=['kazik'])
         def casino_command(message):
