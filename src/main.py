@@ -25,6 +25,7 @@ from handlers.entertainment_handlers import EntertainmentHandlers
 from handlers.trivia_handlers import TriviaHandlers
 from handlers.miniapp_handlers import MiniAppHandlers
 from services.quiz_scheduler import QuizScheduler
+from services.telegram_error_handler import TelegramErrorHandler, telegram_error_handler
 
 # Configure logging
 logging.basicConfig(
@@ -118,6 +119,7 @@ class TelegramBot:
         self.miniapp_handlers.setup_handlers()
 
         @self.bot.message_handler(commands=['start'])
+        @telegram_error_handler("start_command")
         def start_game(message):
             """Handle the /start command with new player service"""
             player_id = message.from_user.id
@@ -127,7 +129,8 @@ class TelegramBot:
                 
                 if player:
                     # Existing player
-                    self.bot.reply_to(
+                    TelegramErrorHandler.safe_reply_to(
+                        self.bot,
                         message,
                         f"Your pisunchik: {player.pisunchik_size} cm\n"
                         f"You have {player.coins} coins!\n"
@@ -135,12 +138,12 @@ class TelegramBot:
                     )
                 else:
                     # New player registration
-                    self.bot.reply_to(message, "Добро пожаловать! Напишите ваше имя:")
-                    self.bot.register_next_step_handler(message, self.ask_where_found)
+                    if TelegramErrorHandler.safe_reply_to(self.bot, message, "Добро пожаловать! Напишите ваше имя:"):
+                        self.bot.register_next_step_handler(message, self.ask_where_found)
                     
             except Exception as e:
                 logger.error(f"Error in start command for user {player_id}: {e}")
-                self.bot.reply_to(message, "Произошла ошибка. Попробуйте позже.")
+                TelegramErrorHandler.safe_reply_to(self.bot, message, "Произошла ошибка. Попробуйте позже.")
 
         # Registration approval callbacks
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("registration"))
@@ -182,6 +185,7 @@ class TelegramBot:
                 self.bot.answer_callback_query(call.id, "Произошла ошибка.")
 
         @self.bot.message_handler(commands=['leaderboard'])
+        @telegram_error_handler("leaderboard_command")
         def show_leaderboard(message):
             """Show leaderboard using new player service"""
             try:
@@ -196,11 +200,11 @@ class TelegramBot:
                         logger.warning(f"Could not get name for player {player.player_id}: {e}")
                         leaderboard += f"{i + 1}. {player.player_name}: {player.pisunchik_size} sm🌭 и {int(player.coins)} BTC💰\n"
                 
-                self.bot.reply_to(message, leaderboard)
+                TelegramErrorHandler.safe_reply_to(self.bot, message, leaderboard)
                 
             except Exception as e:
                 logger.error(f"Error in leaderboard command: {e}")
-                self.bot.reply_to(message, "Ошибка при получении таблицы лидеров.")
+                TelegramErrorHandler.safe_reply_to(self.bot, message, "Ошибка при получении таблицы лидеров.")
 
     def apply_item_effects(self, player: Player, size_change: int, coins_change: int) -> tuple:
         """Apply item effects to size and coins changes"""
