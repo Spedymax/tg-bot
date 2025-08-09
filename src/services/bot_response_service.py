@@ -162,7 +162,7 @@ class BotResponseService:
         """Send Yura's mom joke with image."""
         bot.send_message(chat_id, "Ну ладно")
         try:
-            with open('assets/images/bezobidno.jpg', 'rb') as photo:
+            with open('/home/spedymax/tg-bot/assets/images/bezobidno.jpg', 'rb') as photo:
                 time.sleep(1)
                 bot.send_photo(chat_id, photo)
         except FileNotFoundError:

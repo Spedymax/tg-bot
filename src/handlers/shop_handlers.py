@@ -90,10 +90,10 @@ class ShopHandlers:
                 return
             
             item_images = {
-                'Pudginio': 'assets/images/statuetki/pudginio.jpg',
-                'Ryadovoi Rudgers': 'assets/images/statuetki/ryadovoi_rudgers.jpg',
-                'Polkovnik Buchantos': 'assets/images/statuetki/polkovnik_buchantos.jpg',
-                'General Chin-Choppa': 'assets/images/statuetki/general_chin_choppa.png'
+                'Pudginio': '/home/spedymax/tg-bot/assets/images/statuetki/pudginio.jpg',
+                'Ryadovoi Rudgers': '/home/spedymax/tg-bot/assets/images/statuetki/ryadovoi_rudgers.jpg',
+                'Polkovnik Buchantos': '/home/spedymax/tg-bot/assets/images/statuetki/polkovnik_buchantos.jpg',
+                'General Chin-Choppa': '/home/spedymax/tg-bot/assets/images/statuetki/general_chin_choppa.png'
             }
             # item_images = {
             #     'Pudginio': '../assets/images/statuetki/pudginio.jpg',
@@ -114,7 +114,7 @@ class ShopHandlers:
                 
                 for statuetka in player.statuetki:
                     description = self.statuetki_data['description'].get(statuetka, 'No description available')
-                    item_image_filename = item_images.get(statuetka, 'assets/images/statuetki/pudginio.jpg')
+                    item_image_filename = item_images.get(statuetka, '/home/spedymax/tg-bot/assets/images/statuetki/pudginio.jpg')
                     try:
                         with open(item_image_filename, 'rb') as photo:
                             time.sleep(1)
