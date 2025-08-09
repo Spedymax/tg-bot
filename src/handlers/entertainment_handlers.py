@@ -145,7 +145,7 @@ class EntertainmentHandlers:
                 elif prompt == "расскажи анекдот про маму Юры":
                     self.bot.send_message(message.chat.id, "Ну ладно")
                     try:
-                        with open('assets/images/bezobidno.jpg', 'rb') as photo:
+                        with open('/home/spedymax/tg-bot/assets/images/bezobidno.jpg', 'rb') as photo:
                             time.sleep(1)
                             self.bot.send_photo(message.chat.id, photo)
                     except FileNotFoundError:
@@ -346,7 +346,7 @@ class EntertainmentHandlers:
     
     def send_pirate_song(self, message):
         """Send random pirate song"""
-        songs_folder = 'assets/audio/pirat-songs'
+        songs_folder = '/home/spedymax/tg-bot/assets/audio/pirat-songs'
         try:
             if not os.path.exists(songs_folder):
                 self.bot.send_message(message.chat.id, "Папка с песнями не найдена")
