@@ -182,7 +182,7 @@ class ShopHandlers:
             try:
                 # Load characteristics descriptions
                 import json
-                with open('assets/data/char.json', 'r', encoding='utf-8') as f:
+                with open('/home/spedymax/tg-bot/assets/data/char.json', 'r', encoding='utf-8') as f:
                     char_data = json.load(f)
                 
                 characteristics_text = "🎯 Ваши характеристики:\n\n"
@@ -437,11 +437,11 @@ class ShopHandlers:
         
         try:
             # Load plot data for the special story
-            with open('assets/data/plot.json', 'r', encoding='utf-8') as f:
+            with open('/home/spedymax/tg-bot/assets/data/plot.json', 'r', encoding='utf-8') as f:
                 plot_data = json.load(f)
 
             # Load characteristics data
-            with open('assets/data/char.json', 'r', encoding='utf-8') as f:
+            with open('/home/spedymax/tg-bot/assets/data/char.json', 'r', encoding='utf-8') as f:
                 char_data = json.load(f)
 
             # # Load plot data for the special story

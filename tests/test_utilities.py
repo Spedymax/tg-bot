@@ -244,10 +244,10 @@ class TestJSONDataHandling(unittest.TestCase):
     def test_game_data_files_exist(self):
         """Test that required game data files exist"""
         required_files = [
-            'assets/data/char.json',
-            'assets/data/plot.json', 
-            'assets/data/shop.json',
-            'assets/data/statuetki.json'
+            '/home/spedymax/tg-bot/assets/data/char.json',
+            '/home/spedymax/tg-bot/assets/data/plot.json',
+            '/home/spedymax/tg-bot/assets/data/shop.json',
+            '/home/spedymax/tg-bot/assets/data/statuetki.json'
         ]
         
         for file_path in required_files:
