@@ -69,27 +69,41 @@ class QuizScheduler:
         except Exception as e:
             logger.error(f"Error sending quiz to chat {chat_id}: {e}")
     
-    def _generate_question(self):
+    def _generate_question(self, max_retries=3):
         """Генерация вопроса с использованием TriviaService."""
-        try:
-            # Используем готовый метод из TriviaService
-            result = self.trivia_service.generate_question("system", "Scheduler")
-            
-            if result.get("success"):
-                question_data = result["question"]
-                return {
-                    "question": question_data["text"],
-                    "answer": question_data["correct_answer"],
-                    "explanation": question_data["explanation"],
-                    "wrong_answers": [opt for opt in question_data["options"] if opt != question_data["correct_answer"]]
-                }
-            else:
-                logger.error(f"Failed to generate question: {result.get('message')}")
-                return None
-            
-        except Exception as e:
-            logger.error(f"Error generating question: {e}")
-            return None
+        for attempt in range(max_retries):
+            try:
+                # Используем готовый метод из TriviaService
+                result = self.trivia_service.generate_question("system", "Scheduler")
+                
+                if result.get("success"):
+                    question_data = result["question"]
+                    return {
+                        "question": question_data["text"],
+                        "answer": question_data["correct_answer"],
+                        "explanation": question_data["explanation"],
+                        "wrong_answers": [opt for opt in question_data["options"] if opt != question_data["correct_answer"]]
+                    }
+                else:
+                    error_message = result.get('message', 'Unknown error')
+                    logger.warning(f"Question generation attempt {attempt + 1} failed: {error_message}")
+                    
+                    # If it's a duplicate error and we have retries left, try again
+                    if "уже был задан ранее" in error_message and attempt < max_retries - 1:
+                        logger.info(f"Retrying question generation (attempt {attempt + 2}/{max_retries})")
+                        continue
+                    else:
+                        logger.error(f"Failed to generate question after {attempt + 1} attempts: {error_message}")
+                        return None
+                
+            except Exception as e:
+                logger.error(f"Error generating question on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying due to exception (attempt {attempt + 2}/{max_retries})")
+                    continue
+        
+        logger.error(f"Failed to generate question after {max_retries} attempts")
+        return None
     
     def _send_quiz_message(self, chat_id: int, question_data: Dict[str, Any]):
         """Отправка сообщения с квизом."""
