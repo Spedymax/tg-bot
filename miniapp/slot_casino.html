@@ -224,16 +224,40 @@
         function pauseBackgroundMusic(){if(audioElements.bgMusic&&!audioElements.bgMusic.paused){audioElements.bgMusic.pause()}}
         function resumeBackgroundMusic(){if(musicEnabled&&audioElements.bgMusic&&audioElements.bgMusic.paused){audioElements.bgMusic.play().catch(()=>{})}}
         const symbols=['🍒','💎','🍋','🔔','⭐','🍉','💰'];
-        async function initializePlayer(){
-            try{
-                if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initDataUnsafe)playerId=window.Telegram.WebApp.initDataUnsafe.user?.id;
-                if(!playerId)playerId=4321;
-                const response=await fetch(`${apiBaseUrl}/api/player/${playerId}`);
-                const data=await response.json();
-                if(data.success){currentCoins=data.data.coins;spinsLeft=data.data.spins_left;updateDisplay();markStepComplete('player')}
-                else{throw new Error(data.error||'Failed to load player data')}
-            }catch(e){currentCoins=100;spinsLeft=6;updateDisplay();markStepComplete('player')}
+        async function initializePlayer() {
+            try {
+                if (window.Telegram && window.Telegram.WebApp) {
+                    const tg = window.Telegram.WebApp;
+                    tg.ready(); // Telegram говорит, что можно работать
+                    playerId = tg.initDataUnsafe?.user?.id;
+                }
+
+                // Фоллбек для теста вне Telegram
+                if (!playerId) {
+                    console.warn('Player ID not found, using test ID');
+                    playerId = 4321;
+                }
+
+                const response = await fetch(`${apiBaseUrl}/api/player/${playerId}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    currentCoins = data.data.coins;
+                    spinsLeft = data.data.spins_left;
+                    updateDisplay();
+                    markStepComplete('player');
+                } else {
+                    throw new Error(data.error || 'Failed to load player data');
+                }
+            } catch (e) {
+                console.error('Error initializing player:', e);
+                currentCoins = 100;
+                spinsLeft = 6;
+                updateDisplay();
+                markStepComplete('player');
+            }
         }
+
         function updateDisplay(){document.getElementById('spins-left').textContent=spinsLeft;const spinBtn=document.getElementById('spin-btn');if(spinsLeft<=0){spinBtn.disabled=true;spinBtn.textContent='🚫 НЕТ СПИНОВ'}else{spinBtn.disabled=false;spinBtn.textContent='🎲 КРУТИТЬ СЛОТЫ'}}
         async function spinSlots(){
             if(isSpinning||spinsLeft<=0||!playerId)return;
