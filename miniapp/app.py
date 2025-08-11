@@ -74,6 +74,25 @@ def slots():
 def casino():
     return send_from_directory('.', 'casino.html')
 
+@app.route('/miniapp/api/players', methods=['GET'])
+def list_players():
+    if player_service:
+        players = player_service.get_all_players()
+        data = []
+        for p in players:
+            data.append({
+                'id': int(players[p].player_id),
+                'name': players[p].player_name,
+                'coins': int(players[p].coins),
+            })
+    else:
+        data = [
+            {'id': pid, 'name': pdata.get('name', name), 'coins': pdata['coins']}
+            for pid, name, pdata in player_data.items()
+        ]
+    return jsonify({'success': True, 'data': data})
+
+
 @app.route('/miniapp/api/player/<int:player_id>')
 def get_player_data(player_id):
     logger.info(f"Getting player data for player_id: {player_id}")
