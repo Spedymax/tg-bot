@@ -61,6 +61,63 @@
         @keyframes dots{0%,20%{content:''}40%{content:'.'}60%{content:'..'}80%,100%{content:'...'}}
         @keyframes pulse{0%{transform:scale(1.05)}50%{transform:scale(1.1)}100%{transform:scale(1.05)}}
         @media (max-width:480px){.loading-title{font-size:2.5em}.loading-subtitle{font-size:1em}.loading-progress{width:250px}}
+        #profiles {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 20px;
+            padding: 40px;
+        }
+
+        .profile-card {
+            background: #222;
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            text-align: center;
+            width: 300px;
+            transition: transform 0.2s;
+            box-sizing: border-box;
+        }
+
+        .profile-card:hover {
+            transform: scale(1.05);
+        }
+
+        .profile-avatar {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            overflow: hidden;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .profile-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .profile-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 1rem;
+        }
+
+        .profile-coins {
+            font-size: 0.9rem;
+            color: gold;
+        }
+
+        /* Мобильная адаптация */
+        @media (max-width: 600px) {
+            .profile-card {
+                width: 45%;
+                padding: 10px;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -84,8 +141,9 @@
         <button class="audio-btn" id="musicToggle" onclick="toggleMusic()" title="Включить/выключить музыку">🎵</button>
         <button class="audio-btn" id="soundToggle" onclick="toggleSounds()" title="Включить/выключить звуки">🔊</button>
     </div>
+    <div id="profiles"></div>
     <div class="jackpot-flash" id="jackpot-flash"></div>
-    <div class="casino-container">
+    <div id="casino-container" class="casino-container" style="display:none;">
         <h1>🎰 Слот-машина</h1>
         <p class="subtitle">Три в ряд для выигрыша!</p>
         <div class="info-panel">
@@ -141,8 +199,20 @@
         <div class="prize-table">
             <div style="text-align:center;margin-bottom:10px;font-weight:bold;">🏆 Таблица выплат</div>
             <div class="prize-row">
-                <span class="symbols-combo">🎎 Любые 3 в ряд 🎎</span>
+                <span class="symbols-combo">💰 Небольшой выигрыш! 💰</span>
+                <span class="prize-amount">50 BTC</span>
+            </div>
+            <div class="prize-row">
+                <span class="symbols-combo">✨ Хороший выигрыш! ✨</span>
+                <span class="prize-amount">150 BTC</span>
+            </div>
+            <div class="prize-row">
+                <span class="symbols-combo">🎉 БОЛЬШОЙ ВЫИГРЫШ!🎉</span>
                 <span class="prize-amount">300 BTC</span>
+            </div>
+            <div class="prize-row">
+                <span class="symbols-combo">🎰 МЕГА ДЖЕКПОТ! ЕБААААТЬ!🎰</span>
+                <span class="prize-amount">500 BTC</span>
             </div>
             <div class="prize-row">
                 <span class="symbols-combo">😕 Не совпали</span>
@@ -224,16 +294,55 @@
         function pauseBackgroundMusic(){if(audioElements.bgMusic&&!audioElements.bgMusic.paused){audioElements.bgMusic.pause()}}
         function resumeBackgroundMusic(){if(musicEnabled&&audioElements.bgMusic&&audioElements.bgMusic.paused){audioElements.bgMusic.play().catch(()=>{})}}
         const symbols=['🍒','💎','🍋','🔔','⭐','🍉','💰'];
-        async function initializePlayer(){
-            try{
-                if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initDataUnsafe)playerId=window.Telegram.WebApp.initDataUnsafe.user?.id;
-                if(!playerId)playerId=741542965;
-                const response=await fetch(`${apiBaseUrl}/api/player/${playerId}`);
-                const data=await response.json();
-                if(data.success){currentCoins=data.data.coins;spinsLeft=data.data.spins_left;updateDisplay();markStepComplete('player')}
-                else{throw new Error(data.error||'Failed to load player data')}
-            }catch(e){currentCoins=100;spinsLeft=6;updateDisplay();markStepComplete('player')}
+        async function chooseProfile() {
+            const response = await fetch(`${apiBaseUrl}/api/players`);
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error || 'Failed to load players');
+
+            const container = document.getElementById('profiles');
+            container.innerHTML = '';
+
+            data.data.forEach(player => {
+                const card = document.createElement('div');
+                card.className = 'profile-card';
+                card.innerHTML = `
+                    <div class="profile-avatar">
+                        <img src="miniapp/pfp/${player.id}.jpg" alt="${player.name}" />
+                    </div>
+                    <div class="profile-name">${player.name}</div>
+                    <div class="profile-coins">${player.coins}💰</div>
+                `;
+                card.onclick = () => {
+                    playerId = player.id;
+                    container.style.display = 'none';
+                    document.getElementById('casino-container').style.display = 'block';
+                    initializePlayer();
+                };
+                container.appendChild(card);
+            });
         }
+
+
+        async function initializePlayer(){
+            try {
+                const response = await fetch(`${apiBaseUrl}/api/player/${playerId}`);
+                const data = await response.json();
+                if (data.success) {
+                    currentCoins = data.data.coins;
+                    spinsLeft = data.data.spins_left;
+                    updateDisplay();
+                    markStepComplete('player');
+                } else {
+                    throw new Error(data.error || 'Failed to load player data');
+                }
+            } catch (e) {
+                currentCoins = 100;
+                spinsLeft = 6;
+                updateDisplay();
+                markStepComplete('player');
+            }
+        }
+
         function updateDisplay(){document.getElementById('spins-left').textContent=spinsLeft;const spinBtn=document.getElementById('spin-btn');if(spinsLeft<=0){spinBtn.disabled=true;spinBtn.textContent='🚫 НЕТ СПИНОВ'}else{spinBtn.disabled=false;spinBtn.textContent='🎲 КРУТИТЬ СЛОТЫ'}}
         async function spinSlots(){
             if(isSpinning||spinsLeft<=0||!playerId)return;
@@ -265,11 +374,21 @@
                         if(coins_gained>0){
                             if(coins_gained>=500){
                                 triggerJackpotEffect();
-                                playSound('jackpotSound');
-                            }else{
                                 playSound('winSound');
+                            }else{
+                                playSound('jackpotSound');
                             }
-                            result.textContent=`🎉 ВЫИГРЫШ! +${coins_gained} BTC`;
+
+                            if (coins_gained === 50) {
+                                result.textContent=`💰 Небольшой выигрыш! +${coins_gained} BTC`;
+
+                            }else if(coins_gained === 150) {
+                                result.textContent=`✨ Хороший выигрыш! +${coins_gained} BTC`;
+                            }else if (coins_gained === 300) {
+                                result.textContent=`🎉 БОЛЬШОЙ ВЫИГРЫШ! +${coins_gained} BTC`;
+                            } else if(coins_gained === 500) {
+                                result.textContent = `🎰 МЕГА ДЖЕКПОТ! ЕБААААТЬ! +${coins_gained} BTC`;
+                            }
                             result.classList.add('win-animation');
                             payline.classList.add('active');
                         }else{
@@ -339,7 +458,7 @@
         function sendToTelegramBot(data){if(window.Telegram&&window.Telegram.WebApp)window.Telegram.WebApp.sendData(JSON.stringify(data))}
         document.addEventListener('DOMContentLoaded',function(){
             setTimeout(()=>{Object.keys(loadingSteps).forEach(step=>{if(!loadingSteps[step])markStepComplete(step)})},10000);
-            initializePlayer();
+            chooseProfile();
             initAudio();
             setTimeout(()=>{markStepComplete('preload')},1000);
             if(window.Telegram&&window.Telegram.WebApp){window.Telegram.WebApp.ready();window.Telegram.WebApp.expand()}
