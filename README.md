@@ -42,7 +42,7 @@ pip install -r requirements.txt
 # Copy the environment template
 cp .env.example .env
 
-# Edit .env with your actual credentials
+# Edit .env with your actual credentials (add OPENAI_API_KEY if using AI features)
 # DO NOT use the example values in production!
 ```
 
@@ -61,7 +61,7 @@ cp .env.example .env
 #### External APIs (Optional)
 - `SPOTIFY_CLIENT_ID` - Spotify API client ID
 - `SPOTIFY_CLIENT_SECRET` - Spotify API client secret
-- `OPENAI_API_KEY` - OpenAI API key for AI features
+- `OPENAI_API_KEY` - OpenAI API key for AI features (loaded from .env)
 
 ### 4. Database Setup
 
