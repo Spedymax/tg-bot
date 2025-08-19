@@ -137,6 +137,7 @@ class TriviaService:
     
     def is_duplicate_question(self, question_text: str, correct_answer: str) -> bool:
         """Check if similar question already exists based on answer and keywords."""
+        conn = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
@@ -158,32 +159,27 @@ class TriviaService:
                     # Check 1: High keyword similarity (stricter threshold since answers already match)
                     if similarity > 0.7:  # Increased from 0.5 to 0.7
                         logger.info(f"Duplicate detected by keyword similarity ({similarity:.2f}): '{question_text}' similar to '{existing_question}'")
-                        cursor.close()
-                        conn.close()
                         return True
                     
                     # Check 2: Look for key shared concepts (require more matches)
                     shared_important_words = question_keywords.intersection(existing_keywords)
                     if len(shared_important_words) >= 3:  # Increased from 2 to 3 words
                         logger.info(f"Duplicate detected by shared concepts ({shared_important_words}): '{question_text}' similar to '{existing_question}'")
-                        cursor.close()
-                        conn.close()
                         return True
             
             # Check for exact question match (just in case)
             cursor.execute("SELECT 1 FROM questions WHERE LOWER(question) = LOWER(%s)", (question_text,))
             if cursor.fetchone():
                 logger.info(f"Exact duplicate question found: '{question_text}'")
-                cursor.close()
-                conn.close()
                 return True
             
-            cursor.close()
-            conn.close()
             return False
         except Exception as e:
             logger.error(f"Error checking for duplicate question: {str(e)}")
             return False
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
     
     def _extract_keywords(self, text: str) -> set:
         """Extract meaningful keywords from question text."""
@@ -237,6 +233,7 @@ class TriviaService:
     
     def save_question_to_database(self, question: Question) -> bool:
         """Save question to database."""
+        conn = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
@@ -250,13 +247,14 @@ class TriviaService:
             )
             conn.commit()
             
-            cursor.close()
-            conn.close()
             logger.info("Question saved to database successfully")
             return True
         except Exception as e:
             logger.error(f"Error saving question to database: {str(e)}")
             return False
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
     
     def create_question_state(self, message_id: int, question: Question) -> QuestionState:
         """Create and store question state."""
@@ -275,6 +273,7 @@ class TriviaService:
     
     def _save_question_state_to_db(self, question_state: QuestionState) -> bool:
         """Save question state to database."""
+        conn = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
@@ -293,15 +292,17 @@ class TriviaService:
             """, (question_state.message_id, question_state.question_text, json.dumps(data_to_save)))
             
             conn.commit()
-            cursor.close()
-            conn.close()
             return True
         except Exception as e:
             logger.error(f"Error saving question state to database: {str(e)}")
             return False
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
     
     def load_question_states_from_db(self) -> Dict[int, QuestionState]:
         """Load all question states from database."""
+        conn = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
@@ -340,13 +341,14 @@ class TriviaService:
                     logger.warning(f"Failed to parse question state for message {message_id}")
                     continue
             
-            cursor.close()
-            conn.close()
             self.active_questions = loaded_states
             return loaded_states
         except Exception as e:
             logger.error(f"Error loading question states from database: {str(e)}")
             return {}
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
     
     def process_answer(self, message_id: int, user_id: str, player_name: str, 
                       answer_index: int, chat_id: int) -> tuple[bool, str, bool]:
@@ -386,6 +388,7 @@ class TriviaService:
     
     def has_answered_question(self, user_id: str, question: str) -> bool:
         """Check if user has already answered this question today."""
+        conn = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
@@ -397,15 +400,17 @@ class TriviaService:
             )
             result = cursor.fetchone() is not None
             
-            cursor.close()
-            conn.close()
             return result
         except Exception as e:
             logger.error(f"Error checking if user answered question: {str(e)}")
             return False
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
     
     def _record_user_answer(self, user_id: str, question: str) -> bool:
         """Record that user has answered this question."""
+        conn = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
@@ -417,15 +422,17 @@ class TriviaService:
             )
             conn.commit()
             
-            cursor.close()
-            conn.close()
             return True
         except Exception as e:
             logger.error(f"Error recording user answer: {str(e)}")
             return False
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
     
     def _should_show_explanation(self, chat_id: int, question_state: QuestionState) -> bool:
         """Determine if explanation should be shown."""
+        conn = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
@@ -437,14 +444,14 @@ class TriviaService:
             )
             active_users_count = cursor.fetchone()[0]
             
-            cursor.close()
-            conn.close()
-            
             # Show explanation if all active users have answered
             return len(question_state.players_responses) >= active_users_count
         except Exception as e:
             logger.error(f"Error checking if should show explanation: {str(e)}")
             return False
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
     
     def get_question_display_text(self, message_id: int) -> str:
         """Get the formatted display text for a question."""
@@ -464,6 +471,7 @@ class TriviaService:
     
     def get_trivia_history(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get trivia question history."""
+        conn = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
@@ -482,15 +490,17 @@ class TriviaService:
                     'explanation': row[3] or ""
                 })
             
-            cursor.close()
-            conn.close()
             return history
         except Exception as e:
             logger.error(f"Error getting trivia history: {str(e)}")
             return []
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
     
     def get_today_questions(self) -> List[Dict[str, Any]]:
         """Get today's trivia questions with answers."""
+        conn = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
@@ -511,15 +521,17 @@ class TriviaService:
                     'date_added': row[3].strftime('%H:%M') if row[3] else 'N/A'
                 })
             
-            cursor.close()
-            conn.close()
             return today_questions
         except Exception as e:
             logger.error(f"Error getting today's questions: {str(e)}")
             return []
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
     
     def clear_trivia_data(self) -> bool:
         """Clear all trivia data."""
+        conn = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
@@ -527,15 +539,15 @@ class TriviaService:
             cursor.execute("DELETE FROM answered_questions")
             conn.commit()
             
-            cursor.close()
-            conn.close()
-            
             self.active_questions.clear()
             logger.info("Trivia data cleared successfully")
             return True
         except Exception as e:
             logger.error(f"Error clearing trivia data: {str(e)}")
             return False
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
     
     def update_player_score(self, user_id: str, chat_id: int, is_correct: bool, 
                           player_stats: Dict[str, Any]) -> bool:
