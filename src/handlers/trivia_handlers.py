@@ -154,9 +154,10 @@ class TriviaHandlers:
             selected_answer = question_data["options"][answer_index]
             
             # Check if answer is correct
-            connection = self.db_manager.get_connection()
+            connection = None
             is_correct = False
             try:
+                connection = self.db_manager.get_connection()
                 with connection.cursor() as cursor:
                     cursor.execute(
                         "SELECT correct_answer FROM questions WHERE question = %s ORDER BY date_added DESC LIMIT 1",
@@ -166,7 +167,8 @@ class TriviaHandlers:
                     if result:
                         is_correct = result[0] == selected_answer
             finally:
-                self.db_manager.release_connection(connection)
+                if connection:
+                    self.db_manager.release_connection(connection)
             
             # Add player name with emoji to responses
             emoji = "✅" if is_correct else "❌"
@@ -227,8 +229,9 @@ class TriviaHandlers:
     
     def save_question_state(self, message_id, question, players_responses, answer_options=None):
         """Save question state to database"""
-        connection = self.db_manager.get_connection()
+        connection = None
         try:
+            connection = self.db_manager.get_connection()
             with connection.cursor() as cursor:
                 data_to_save = {
                     "players_responses": players_responses
@@ -260,12 +263,14 @@ class TriviaHandlers:
         except Exception as e:
             print(f"Error saving question state: {e}")
         finally:
-            self.db_manager.release_connection(connection)
+            if connection:
+                self.db_manager.release_connection(connection)
     
     def load_question_state_from_db(self, message_id):
         """Load question state from database"""
-        connection = self.db_manager.get_connection()
+        connection = None
         try:
+            connection = self.db_manager.get_connection()
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT original_question, players_responses FROM question_state WHERE message_id = %s",
@@ -319,10 +324,12 @@ class TriviaHandlers:
             print(f"Error loading question state: {e}")
             return None
         finally:
-            self.db_manager.release_connection(connection)
+            if connection:
+                self.db_manager.release_connection(connection)
     
     def get_correct_answers(self, message):
         """Show today's questions with correct answers"""
+        connection = None
         try:
             connection = self.db_manager.get_connection()
             
@@ -391,16 +398,21 @@ class TriviaHandlers:
                         self.bot.reply_to(message, response_text, parse_mode='HTML')
                         
             finally:
-                self.db_manager.release_connection(connection)
+                if connection:
+                    self.db_manager.release_connection(connection)
                 
         except Exception as e:
             print(f"Error getting correct answers: {e}")
             self.bot.reply_to(message, "❌ Произошла ошибка при получении вопросов")
+        finally:
+            if connection:
+                self.db_manager.release_connection(connection)
     
     def load_trivia_data(self):
         """Load trivia data from database"""
-        connection = self.db_manager.get_connection()
+        connection = None
         try:
+            connection = self.db_manager.get_connection()
             with connection.cursor() as cursor:
                 cursor.execute("SELECT * FROM questions ORDER BY date_added DESC")
                 return [{
@@ -412,10 +424,12 @@ class TriviaHandlers:
             print(f"Error loading trivia data: {e}")
             return []
         finally:
-            self.db_manager.release_connection(connection)
+            if connection:
+                self.db_manager.release_connection(connection)
     
     def get_player_scores_for_chat(self, chat_id):
         """Get player scores for specific chat"""
+        connection = None
         try:
             connection = self.db_manager.get_connection()
             
@@ -459,9 +473,13 @@ class TriviaHandlers:
                         return "Пока никто не набрал очков в этом чате."
                         
             finally:
-                self.db_manager.release_connection(connection)
+                if connection:
+                    self.db_manager.release_connection(connection)
                 
         except Exception as e:
             print(f"Error getting player scores: {e}")
             return "Ошибка при получении очков."
+        finally:
+            if connection:
+                self.db_manager.release_connection(connection)
     
