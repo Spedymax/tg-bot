@@ -1,4 +1,5 @@
 import logging
+import os
 from openpyxl import load_workbook
 from typing import Dict, Optional
 
@@ -13,28 +14,29 @@ class CryptoService:
         self.crypto_module = crypto_module
     
     def decrypt_and_load_config(self, encrypted_file: str, decrypted_file: str) -> Dict[str, Optional[str]]:
-        """Decrypt file and load configuration from Excel."""
+        """Decrypt file and load configuration from Excel and environment."""
+        openai_api_key = os.getenv("OPENAI_API_KEY")
         try:
             # Decrypt the file
             self.crypto_module.decrypt_file(encrypted_file, decrypted_file)
-            
+
             # Load workbook
             workbook = load_workbook(filename=decrypted_file)
             sheet = workbook.active
-            
-            # Read API keys from cells
+
+            # Read API keys
             config = {
-                'openai_api_key': sheet['A1'].value,
+                'openai_api_key': openai_api_key,
                 'google_api_key': sheet['A2'].value
             }
-            
+
             logger.info("Configuration loaded successfully from decrypted file")
             return config
-            
+
         except Exception as e:
             logger.error(f"Error loading encrypted config: {str(e)}")
             return {
-                'openai_api_key': None,
+                'openai_api_key': openai_api_key,
                 'google_api_key': None
             }
     

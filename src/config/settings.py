@@ -22,6 +22,7 @@ class Settings:
     
     # AI configuration
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
     
     # Spotify configuration
     SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
