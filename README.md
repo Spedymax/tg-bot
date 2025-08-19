@@ -51,6 +51,7 @@ cp .env.example .env
 #### Bot Tokens
 - `TELEGRAM_BOT_TOKEN` - Main bot token from @BotFather
 - `MEMORY_BOT_TOKEN` - Memory bot token from @BotFather
+- `BTC_BOT_TOKEN` - Token for BTC price bot from @BotFather
 
 #### Database Configuration
 - `DB_HOST` - Database host (default: localhost)
