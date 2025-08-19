@@ -7,6 +7,8 @@ import json
 import logging
 import random
 import telebot
+import threading
+import time
 from datetime import datetime, timezone, timedelta
 
 # Import new configuration and database modules
@@ -63,6 +65,9 @@ class TelegramBot:
         
         # Set quiz scheduler reference in admin handlers
         self.admin_handlers.set_quiz_scheduler(self.quiz_scheduler)
+        
+        # Start connection pool monitoring
+        self._start_pool_monitoring()
 
         # Load game data
         self.char = self.load_json_file('/home/spedymax/tg-bot/assets/data/char.json')
@@ -95,6 +100,21 @@ class TelegramBot:
         except json.JSONDecodeError:
             logger.error(f"Invalid JSON in file: {file_path}")
             return {}
+    
+    def _start_pool_monitoring(self):
+        """Start periodic connection pool monitoring."""
+        def monitor_pool():
+            while True:
+                try:
+                    self.db_manager.log_pool_status()
+                    time.sleep(300)  # Log every 5 minutes
+                except Exception as e:
+                    logger.error(f"Error in pool monitoring: {e}")
+                    time.sleep(60)  # Wait 1 minute if error occurs
+        
+        monitoring_thread = threading.Thread(target=monitor_pool, daemon=True)
+        monitoring_thread.start()
+        logger.info("Started database connection pool monitoring")
 
     def setup_handlers(self):
         """Set up all bot command handlers"""
