@@ -1,3 +1,4 @@
+import os
 import telebot
 import requests
 import time
@@ -5,9 +6,14 @@ import json
 from threading import Thread, Event, Lock
 from collections import deque
 import random
+from dotenv import load_dotenv
 
 # Initialize bot
-bot = telebot.TeleBot('7460498911:AAGbjXFhXOOnXIr46dooSq_apvH-OM4HMP4')
+load_dotenv()
+bot_token = os.getenv("BTC_BOT_TOKEN")
+if not bot_token:
+    raise ValueError("BTC_BOT_TOKEN is not set in the environment")
+bot = telebot.TeleBot(bot_token)
 
 # API Configuration
 API_KEYS = [
