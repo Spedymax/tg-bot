@@ -3,6 +3,7 @@ import time
 from telebot import types
 from config.game_config import GameConfig
 from config.settings import Settings
+from utils.helpers import safe_split_callback, safe_int, escape_html, safe_username
 
 class GameHandlers:
     def __init__(self, bot, player_service, game_service):
@@ -65,16 +66,16 @@ class GameHandlers:
                     dice_msg = self.bot.send_dice(message.chat.id, emoji='🎰')
                     dice_value = dice_msg.dice.value
                     dice_results.append(dice_value)
-                    
+
                     # Check if this dice is a winning value
                     if dice_value in GameConfig.CASINO_JACKPOT_VALUES:
                         total_wins += 1
                         player.add_coins(GameConfig.CASINO_JACKPOT_REWARD)
-                        time.sleep(2)  # Dramatic pause
+                        time.sleep(GameConfig.CASINO_JACKPOT_DELAY)
                         self.bot.send_message(message.chat.id, f"🎰 ДЖЕКПОТ ЕБАТЬ! Вы получаете {GameConfig.CASINO_JACKPOT_REWARD} BTC!")
-                    
+
                     if i < 5:  # Don't sleep after the last dice
-                        time.sleep(1)  # Small delay between dice
+                        time.sleep(GameConfig.CASINO_DICE_DELAY)
                 
                 # Save player with updated coins
 
@@ -91,10 +92,19 @@ class GameHandlers:
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith('roll_'))
         def handle_roll_callback(call):
             """Handle roll option selection"""
-            rolls = int(call.data.split('_')[1])
+            parts = safe_split_callback(call.data, "_", 2)
+            if not parts:
+                self.bot.send_message(call.message.chat.id, "Неверный формат данных")
+                return
+
+            rolls = safe_int(parts[1], 0)
+            if rolls <= 0:
+                self.bot.send_message(call.message.chat.id, "Неверное количество бросков")
+                return
+
             player_id = call.from_user.id
             player = self.player_service.get_player(player_id)
-            
+
             if not player:
                 self.bot.send_message(call.message.chat.id, "Вы не зарегистрированы как игрок")
                 return
@@ -111,10 +121,10 @@ class GameHandlers:
             
             if result['jackpots'] > 0:
                 for i in range(result['jackpots']):
-                    time.sleep(2)
+                    time.sleep(GameConfig.ROLL_JACKPOT_DELAY)
                     if i >= 1:
                         self.bot.send_message(call.message.chat.id, "ЧТО? ЕЩЕ ОДИН?")
-                        time.sleep(2)
+                        time.sleep(GameConfig.ROLL_JACKPOT_DELAY)
                     self.bot.send_message(call.message.chat.id, "🆘🤑БОГ ТЫ МОЙ! ТЫ ВЫИГРАЛ ДЖЕКПОТ! 400 BTC ТЕБЕ НА СЧЕТ!🤑🆘")
         
         @self.bot.message_handler(commands=['vor'])
@@ -134,36 +144,44 @@ class GameHandlers:
             
             # Create theft target selection based on player ID
             markup = types.InlineKeyboardMarkup()
-            
-            # This is simplified - you'd need to add proper target selection logic
-            if str(player_id) == "742272644":  # Yura
+
+            # Use Settings.PLAYER_IDS for target selection
+            player_ids = Settings.PLAYER_IDS
+            if player_id == player_ids['YURA']:
                 markup.add(types.InlineKeyboardButton("Макс", callback_data="vor_max"))
                 markup.add(types.InlineKeyboardButton("Богдан", callback_data="vor_bogdan"))
-            elif str(player_id) == "741542965":  # Max
+            elif player_id == player_ids['MAX']:
                 markup.add(types.InlineKeyboardButton("Юра", callback_data="vor_yura"))
                 markup.add(types.InlineKeyboardButton("Богдан", callback_data="vor_bogdan"))
-            elif str(player_id) == "855951767":  # Bogdan
+            elif player_id == player_ids['BODYA']:
                 markup.add(types.InlineKeyboardButton("Макс", callback_data="vor_max"))
                 markup.add(types.InlineKeyboardButton("Юра", callback_data="vor_yura"))
             
+            # Escape username to prevent XSS
+            username = safe_username(message.from_user.username, player_id)
             self.bot.send_message(
                 message.chat.id,
-                f"<a href='tg://user?id={player_id}'>@{message.from_user.username}</a>, у кого крадём член?",
+                f"<a href='tg://user?id={player_id}'>@{username}</a>, у кого крадём член?",
                 reply_markup=markup,
                 parse_mode='html'
             )
-        
+
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("vor_"))
         def handle_theft_callback(call):
             """Handle theft target selection"""
-            target = call.data.split("_")[1]
+            parts = safe_split_callback(call.data, "_", 2)
+            if not parts:
+                self.bot.send_message(call.message.chat.id, "Неверный формат данных")
+                return
+
+            target = parts[1]
             player_id = call.from_user.id
-            
-            # Map targets to player IDs
+
+            # Map targets to player IDs from Settings
             target_ids = {
-                "yura": 742272644,
-                "max": 741542965,
-                "bogdan": 855951767
+                "yura": Settings.PLAYER_IDS['YURA'],
+                "max": Settings.PLAYER_IDS['MAX'],
+                "bogdan": Settings.PLAYER_IDS['BODYA']
             }
             
             if target not in target_ids:
@@ -247,7 +265,8 @@ class GameHandlers:
                 "Чем больше размер пожертвован, тем больше BTC выиграно. "
                 "1 см = 4 БТС + 5 БТС за каждые 5 см.\n\nВведите количество см для пожертвования:"
             )
-            self.bot.register_next_step_handler(message, lambda msg: self.handle_masturbator_input(msg, player))
+            # Pass player_id instead of player object to avoid stale data
+            self.bot.register_next_step_handler(message, lambda msg: self.handle_masturbator_input(msg, player_id))
         
         @self.bot.message_handler(commands=['zelie_pisunchika'])
         def potion_command(message):
@@ -292,16 +311,22 @@ class GameHandlers:
         def large_potion_command(message):
             self.handle_potion_command(message, 'large', 10)
         
-    def handle_masturbator_input(self, message, player):
+    def handle_masturbator_input(self, message, player_id: int):
         """Handle masturbator donation amount input"""
         try:
+            # Fetch fresh player data to avoid stale state
+            player = self.player_service.get_player(player_id)
+            if not player:
+                self.bot.reply_to(message, "Игрок не найден")
+                return
+
             donation_amount = int(message.text)
             result = self.game_service.use_masturbator(player, donation_amount)
-            
+
             if not result['success']:
                 self.bot.reply_to(message, result['message'])
                 return
-            
+
             self.bot.reply_to(
                 message,
                 f"Вы задонатили {result['donated']} см вашего писюнчика и получили {result['coins_received']} БТС взамен"

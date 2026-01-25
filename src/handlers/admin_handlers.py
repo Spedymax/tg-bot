@@ -1,9 +1,12 @@
+import logging
+import json
+import socket
+from datetime import datetime
 from telebot import types
 from config.settings import Settings
-import json
-from datetime import datetime
-import socket
-from struct import pack
+from utils.helpers import safe_split_callback
+
+logger = logging.getLogger(__name__)
 
 class AdminHandlers:
     def __init__(self, bot, player_service, game_service):
@@ -34,7 +37,7 @@ class AdminHandlers:
             
             return True
         except Exception as e:
-            print(f"Wake-on-LAN error: {e}")
+            logger.error(f"Wake-on-LAN error: {e}")
             return False
         
     def setup_handlers(self):
@@ -63,7 +66,12 @@ class AdminHandlers:
         def handle_admin_categories(call):
             """Handle admin category selection"""
             if call.from_user.id in Settings.ADMIN_IDS:
-                category = call.data.split("_")[1]
+                parts = safe_split_callback(call.data, "_", 2)
+                if not parts:
+                    self.bot.answer_callback_query(call.id, "Неверный формат данных")
+                    return
+
+                category = parts[1]
                 markup = types.InlineKeyboardMarkup(row_width=2)
                 
                 if category == "playerManagement":
@@ -164,16 +172,29 @@ class AdminHandlers:
         def handle_admin_actions(call):
             """Handle admin action selection"""
             if call.from_user.id in Settings.ADMIN_IDS:
-                action = call.data.split("_")[1]
+                parts = safe_split_callback(call.data, "_", 2)
+                if not parts:
+                    self.bot.answer_callback_query(call.id, "Неверный формат данных")
+                    return
+
+                action = parts[1]
 
                 if action == "wakePc":
                     try:
+                        if not Settings.WOL_MAC_ADDRESS:
+                            self.bot.edit_message_text(
+                                "❌ MAC адрес не настроен. Добавьте WOL_MAC_ADDRESS в .env",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                            return
+
                         self.bot.edit_message_text(
                             "Отправляю Wake-on-LAN пакет на ваш ПК...",
                             call.message.chat.id,
                             call.message.message_id
                         )
-                        result = self.wake_on_lan('D8:43:AE:BD:2B:F1')
+                        result = self.wake_on_lan(Settings.WOL_MAC_ADDRESS)
                         if result:
                             self.bot.edit_message_text(
                                 "✅ Wake-on-LAN пакет успешно отправлен! Ваш ПК должен включиться.",
@@ -353,7 +374,7 @@ class AdminHandlers:
                                     success_count += 1
                         except Exception as e:
                             fail_count += 1
-                            print(f"Failed to send broadcast to {player_id}: {e}")
+                            logger.warning(f"Failed to send broadcast to {player_id}: {e}")
                     
                     self.bot.reply_to(
                         message, 

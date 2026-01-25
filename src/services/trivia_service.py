@@ -2,6 +2,7 @@ import json
 import uuid
 import random
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
@@ -38,23 +39,16 @@ class QuestionState:
 
 class TriviaService:
     """Service for managing trivia game logic and question generation."""
-    
+
     def __init__(self, gemini_api_key: str, db_manager):
         self.db_manager = db_manager
-        
+
         # Configure Gemini AI
         genai.configure(api_key=gemini_api_key)
         self.ai_client = genai.GenerativeModel('gemini-2.5-flash')
-        
-        self.difficulty = 'medium'
+
         self.active_questions: Dict[int, QuestionState] = {}
-        
-        # Player IDs for compatibility
-        self.player_ids = {
-            'YURA': 742272644,
-            'MAX': 741542965,
-            'BODYA': 855951767
-        }
+        self._questions_lock = threading.Lock()  # Thread safety for active_questions
     
     def generate_question_with_ai(self) -> Optional[Question]:
         """Generate a trivia question using AI client."""
@@ -137,53 +131,52 @@ class TriviaService:
     
     def is_duplicate_question(self, question_text: str, correct_answer: str) -> bool:
         """Check if similar question already exists based on answer and keywords."""
+        conn = None
+        cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             # Check by exact answer match
             cursor.execute("SELECT question FROM questions WHERE LOWER(correct_answer) = LOWER(%s)", (correct_answer,))
             existing_questions = cursor.fetchall()
-            
+
             if existing_questions:
                 # Check if the question is about the same topic using keywords
                 question_keywords = self._extract_keywords(question_text)
-                
+
                 for (existing_question,) in existing_questions:
                     existing_keywords = self._extract_keywords(existing_question)
-                    
+
                     # Multiple checks for duplicates
                     similarity = self._calculate_similarity(question_keywords, existing_keywords)
-                    
+
                     # Check 1: High keyword similarity (30% threshold since answers already match)
                     if similarity > 0.5:
                         logger.info(f"Duplicate detected by keyword similarity ({similarity:.2f}): '{question_text}' similar to '{existing_question}'")
-                        cursor.close()
-                        conn.close()
                         return True
-                    
+
                     # Check 2: Look for key shared concepts
                     shared_important_words = question_keywords.intersection(existing_keywords)
                     if len(shared_important_words) >= 2:  # At least 2 important words match
                         logger.info(f"Duplicate detected by shared concepts ({shared_important_words}): '{question_text}' similar to '{existing_question}'")
-                        cursor.close()
-                        conn.close()
                         return True
-            
+
             # Check for exact question match (just in case)
             cursor.execute("SELECT 1 FROM questions WHERE LOWER(question) = LOWER(%s)", (question_text,))
             if cursor.fetchone():
                 logger.info(f"Exact duplicate question found: '{question_text}'")
-                cursor.close()
-                conn.close()
                 return True
-            
-            cursor.close()
-            conn.close()
+
             return False
         except Exception as e:
             logger.error(f"Error checking for duplicate question: {str(e)}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def _extract_keywords(self, text: str) -> set:
         """Extract meaningful keywords from question text."""
@@ -213,26 +206,31 @@ class TriviaService:
     
     def save_question_to_database(self, question: Question) -> bool:
         """Save question to database."""
+        conn = None
+        cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             answer_options_str = json.dumps(question.answer_options)
             current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
+
             cursor.execute(
                 "INSERT INTO questions (question, correct_answer, answer_options, date_added, explanation) VALUES (%s, %s, %s, %s, %s)",
                 (question.question, question.correct_answer, answer_options_str, current_date, question.explanation)
             )
             conn.commit()
-            
-            cursor.close()
-            conn.close()
+
             logger.info("Question saved to database successfully")
             return True
         except Exception as e:
             logger.error(f"Error saving question to database: {str(e)}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def create_question_state(self, message_id: int, question: Question) -> QuestionState:
         """Create and store question state."""
@@ -244,54 +242,62 @@ class TriviaService:
             correct_answer=question.correct_answer,
             explanation=question.explanation
         )
-        
-        self.active_questions[message_id] = question_state
+
+        with self._questions_lock:
+            self.active_questions[message_id] = question_state
         self._save_question_state_to_db(question_state)
         return question_state
     
     def _save_question_state_to_db(self, question_state: QuestionState) -> bool:
         """Save question state to database."""
+        conn = None
+        cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             data_to_save = {
                 "players_responses": question_state.players_responses,
                 "options": question_state.answer_options,
                 "correct_answer": question_state.correct_answer,
                 "explanation": question_state.explanation
             }
-            
+
             cursor.execute("""
                 INSERT INTO question_state (message_id, original_question, players_responses)
                 VALUES (%s, %s, %s) ON CONFLICT (message_id) DO
                 UPDATE SET players_responses = EXCLUDED.players_responses
             """, (question_state.message_id, question_state.question_text, json.dumps(data_to_save)))
-            
+
             conn.commit()
-            cursor.close()
-            conn.close()
             return True
         except Exception as e:
             logger.error(f"Error saving question state to database: {str(e)}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def load_question_states_from_db(self) -> Dict[int, QuestionState]:
         """Load all question states from database."""
+        conn = None
+        cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             cursor.execute("SELECT message_id, original_question, players_responses FROM question_state")
             question_states = cursor.fetchall()
-            
+
             loaded_states = {}
             for row in question_states:
                 message_id, original_question = row[0], row[1]
-                
+
                 try:
                     data = json.loads(row[2]) if isinstance(row[2], str) else {}
-                    
+
                     if isinstance(data, dict) and "players_responses" in data:
                         # New format
                         loaded_states[message_id] = QuestionState(
@@ -315,140 +321,256 @@ class TriviaService:
                 except (json.JSONDecodeError, TypeError):
                     logger.warning(f"Failed to parse question state for message {message_id}")
                     continue
-            
-            cursor.close()
-            conn.close()
-            self.active_questions = loaded_states
+
+            with self._questions_lock:
+                self.active_questions = loaded_states
             return loaded_states
         except Exception as e:
             logger.error(f"Error loading question states from database: {str(e)}")
             return {}
-    
-    def process_answer(self, message_id: int, user_id: str, player_name: str, 
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def get_question_state(self, message_id: int) -> Optional[QuestionState]:
+        """Get question state by message_id from memory or database."""
+        # First check memory with lock
+        with self._questions_lock:
+            if message_id in self.active_questions:
+                return self.active_questions[message_id]
+
+        # Load from database
+        conn = None
+        cursor = None
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "SELECT original_question, players_responses FROM question_state WHERE message_id = %s",
+                (message_id,)
+            )
+            result = cursor.fetchone()
+
+            if not result:
+                return None
+
+            question_text, players_responses_json = result
+
+            # Parse JSON data
+            try:
+                if isinstance(players_responses_json, str):
+                    data = json.loads(players_responses_json)
+                else:
+                    data = players_responses_json or {}
+
+                if isinstance(data, dict) and "players_responses" in data:
+                    # New format
+                    question_state = QuestionState(
+                        message_id=message_id,
+                        question_text=question_text,
+                        players_responses=data.get("players_responses", {}),
+                        answer_options=data.get("options", []),
+                        correct_answer=data.get("correct_answer", ""),
+                        explanation=data.get("explanation", "")
+                    )
+                else:
+                    # Old format compatibility
+                    question_state = QuestionState(
+                        message_id=message_id,
+                        question_text=question_text,
+                        players_responses=data if isinstance(data, dict) else {},
+                        answer_options=[],
+                        correct_answer="",
+                        explanation=""
+                    )
+
+                # Cache in memory with lock
+                with self._questions_lock:
+                    self.active_questions[message_id] = question_state
+                return question_state
+
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Failed to parse question state JSON for message {message_id}: {e}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error getting question state for message {message_id}: {str(e)}")
+            return None
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    def update_question_state(self, question_state: QuestionState) -> bool:
+        """Update question state in memory and database."""
+        with self._questions_lock:
+            self.active_questions[question_state.message_id] = question_state
+        return self._save_question_state_to_db(question_state)
+
+    def save_question_state_raw(self, message_id: int, question_text: str,
+                                players_responses: Dict, answer_options: List[str],
+                                correct_answer: str = "", explanation: str = "") -> bool:
+        """Save question state from raw data (used by handlers)."""
+        question_state = QuestionState(
+            message_id=message_id,
+            question_text=question_text,
+            players_responses=players_responses,
+            answer_options=answer_options,
+            correct_answer=correct_answer,
+            explanation=explanation
+        )
+        with self._questions_lock:
+            self.active_questions[message_id] = question_state
+        return self._save_question_state_to_db(question_state)
+
+    def process_answer(self, message_id: int, user_id: str, player_name: str,
                       answer_index: int, chat_id: int) -> tuple[bool, str, bool]:
         """
         Process a user's answer to a question.
         Returns: (is_correct, response_message, should_show_explanation)
         """
-        if message_id not in self.active_questions:
-            return False, "Question not found", False
-        
-        question_state = self.active_questions[message_id]
-        
-        # Check if user already answered
+        # Get question state with lock
+        with self._questions_lock:
+            if message_id not in self.active_questions:
+                return False, "Question not found", False
+            question_state = self.active_questions[message_id]
+
+        # Check if user already answered (DB call, no lock needed)
         if self.has_answered_question(user_id, question_state.question_text):
             return False, "Ты уже ответил.", False
-        
+
         # Validate answer index
         if answer_index >= len(question_state.answer_options):
             return False, "Answer option not found", False
-        
+
         # Get the actual answer
         selected_answer = question_state.answer_options[answer_index]
         is_correct = selected_answer == question_state.correct_answer
-        
-        # Update responses
+
+        # Update responses with lock
         emoji = "✅" if is_correct else "❌"
-        question_state.players_responses[player_name] = emoji
-        
+        with self._questions_lock:
+            question_state.players_responses[player_name] = emoji
+
         # Save to database
         self._save_question_state_to_db(question_state)
         self._record_user_answer(user_id, question_state.question_text)
-        
+
         # Check if we should show explanation
         should_show_explanation = self._should_show_explanation(chat_id, question_state)
-        
+
         return is_correct, "Vote counted!", should_show_explanation
     
     def has_answered_question(self, user_id: str, question: str) -> bool:
         """Check if user has already answered this question today."""
+        conn = None
+        cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
             cursor.execute(
                 "SELECT 1 FROM answered_questions WHERE user_id = %s AND question = %s AND date_added = %s",
                 (user_id, question, current_date)
             )
             result = cursor.fetchone() is not None
-            
-            cursor.close()
-            conn.close()
+
             return result
         except Exception as e:
             logger.error(f"Error checking if user answered question: {str(e)}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def _record_user_answer(self, user_id: str, question: str) -> bool:
         """Record that user has answered this question."""
+        conn = None
+        cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
             cursor.execute(
                 "INSERT INTO answered_questions (user_id, question, date_added) VALUES (%s, %s, %s)",
                 (user_id, question, current_date)
             )
             conn.commit()
-            
-            cursor.close()
-            conn.close()
+
             return True
         except Exception as e:
             logger.error(f"Error recording user answer: {str(e)}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def _should_show_explanation(self, chat_id: int, question_state: QuestionState) -> bool:
         """Determine if explanation should be shown."""
+        conn = None
+        cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             # Get active users count for this chat
             cursor.execute(
-                "SELECT COUNT(DISTINCT user_id) FROM user_activity WHERE chat_id = %s", 
+                "SELECT COUNT(DISTINCT user_id) FROM user_activity WHERE chat_id = %s",
                 (chat_id,)
             )
             active_users_count = cursor.fetchone()[0]
-            
-            cursor.close()
-            conn.close()
-            
+
             # Show explanation if all active users have answered
             return len(question_state.players_responses) >= active_users_count
         except Exception as e:
             logger.error(f"Error checking if should show explanation: {str(e)}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def get_question_display_text(self, message_id: int) -> str:
         """Get the formatted display text for a question."""
-        if message_id not in self.active_questions:
-            return "Question not found"
-        
-        question_state = self.active_questions[message_id]
-        text = question_state.question_text
-        
-        if question_state.players_responses:
-            text += "\n\n" + "\n".join([
-                f"{player} {response}" 
-                for player, response in question_state.players_responses.items()
-            ])
-        
-        return text
+        with self._questions_lock:
+            if message_id not in self.active_questions:
+                return "Question not found"
+
+            question_state = self.active_questions[message_id]
+            text = question_state.question_text
+
+            if question_state.players_responses:
+                text += "\n\n" + "\n".join([
+                    f"{player} {response}"
+                    for player, response in question_state.players_responses.items()
+                ])
+
+            return text
     
     def get_trivia_history(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get trivia question history."""
+        conn = None
+        cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             cursor.execute(
                 "SELECT question, correct_answer, date_added, explanation FROM questions ORDER BY date_added DESC LIMIT %s",
                 (limit,)
             )
-            
+
             history = []
             for row in cursor.fetchall():
                 history.append({
@@ -457,27 +579,32 @@ class TriviaService:
                     'date_added': row[2].strftime('%d-%m-%Y %H:%M'),
                     'explanation': row[3] or ""
                 })
-            
-            cursor.close()
-            conn.close()
+
             return history
         except Exception as e:
             logger.error(f"Error getting trivia history: {str(e)}")
             return []
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def get_today_questions(self) -> List[Dict[str, Any]]:
         """Get today's trivia questions with answers."""
+        conn = None
+        cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             cursor.execute(
                 "SELECT question, correct_answer, explanation, date_added "
                 "FROM questions "
                 "WHERE DATE(date_added) = CURRENT_DATE "
                 "ORDER BY date_added DESC"
             )
-            
+
             today_questions = []
             for row in cursor.fetchall():
                 today_questions.append({
@@ -486,32 +613,40 @@ class TriviaService:
                     'explanation': row[2] or "",
                     'date_added': row[3].strftime('%H:%M') if row[3] else 'N/A'
                 })
-            
-            cursor.close()
-            conn.close()
+
             return today_questions
         except Exception as e:
             logger.error(f"Error getting today's questions: {str(e)}")
             return []
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def clear_trivia_data(self) -> bool:
         """Clear all trivia data."""
+        conn = None
+        cursor = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             cursor.execute("DELETE FROM answered_questions")
             conn.commit()
-            
-            cursor.close()
-            conn.close()
-            
-            self.active_questions.clear()
+
+            with self._questions_lock:
+                self.active_questions.clear()
             logger.info("Trivia data cleared successfully")
             return True
         except Exception as e:
             logger.error(f"Error clearing trivia data: {str(e)}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def update_player_score(self, user_id: str, chat_id: int, is_correct: bool, 
                           player_stats: Dict[str, Any]) -> bool:

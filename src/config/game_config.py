@@ -14,6 +14,11 @@ class GameConfig:
     CASINO_DAILY_LIMIT = 5
     CASINO_JACKPOT_VALUES = {1, 22, 43, 64}
     CASINO_JACKPOT_REWARD = 300
+    CASINO_DICE_DELAY = 1  # Delay between dice rolls (seconds)
+    CASINO_JACKPOT_DELAY = 2  # Dramatic pause before jackpot message (seconds)
+
+    # Roll game animation delays
+    ROLL_JACKPOT_DELAY = 2  # Delay before jackpot announcement (seconds)
     
     # Roll game settings
     ROLL_COSTS = {

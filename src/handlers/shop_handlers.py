@@ -1,7 +1,11 @@
 import time
+import logging
 from telebot import types
 from config.game_config import GameConfig
 from services.stock_service import StockService
+from utils.helpers import safe_split_callback, safe_int
+
+logger = logging.getLogger(__name__)
 
 class ShopHandlers:
     def __init__(self, bot, player_service, game_service):
@@ -95,13 +99,7 @@ class ShopHandlers:
                 'Polkovnik Buchantos': 'assets/images/statuetki/polkovnik_buchantos.jpg',
                 'General Chin-Choppa': 'assets/images/statuetki/general_chin_choppa.png'
             }
-            # item_images = {
-            #     'Pudginio': '../assets/images/statuetki/pudginio.jpg',
-            #     'Ryadovoi Rudgers': '../assets/images/statuetki/ryadovoi_rudgers.jpg',
-            #     'Polkovnik Buchantos': '../assets/images/statuetki/polkovnik_buchantos.jpg',
-            #     'General Chin-Choppa': '../assets/images/statuetki/general_chin_choppa.png'
-            # }
-            
+
             statuetki_descriptions = []
             for statuetka in player.statuetki:
                 if statuetka in self.statuetki_data['description']:
@@ -444,14 +442,6 @@ class ShopHandlers:
             with open('assets/data/char.json', 'r', encoding='utf-8') as f:
                 char_data = json.load(f)
 
-            # # Load plot data for the special story
-            # with open('../assets/data/plot.json', 'r', encoding='utf-8') as f:
-            #     plot_data = json.load(f)
-            #
-            # # Load characteristics data
-            # with open('../assets/data/char.json', 'r', encoding='utf-8') as f:
-            #     char_data = json.load(f)
-            
             # Get the special story lines
             story_lines = plot_data.get('strochki2', [])
             
@@ -475,22 +465,29 @@ class ShopHandlers:
             # Initialize characteristics list if it doesn't exist
             if not hasattr(player, 'characteristics') or player.characteristics is None:
                 player.characteristics = []
-            
-            # Get characteristics player already has
-            existing_characteristics = [char.split(':')[0] for char in player.characteristics]
-            
+
+            # Get characteristics player already has (safely parse)
+            existing_characteristics = []
+            for char in player.characteristics:
+                parts = char.split(':')
+                if parts:
+                    existing_characteristics.append(parts[0])
+
             # Filter out already owned characteristics
             available_characteristics = [char for char in available_characteristics if char not in existing_characteristics]
-            
+
             # If player has all characteristics, give them a random one anyway but level it up
             if not available_characteristics:
                 selected_characteristic = random.choice(list(char_data['description'].keys()))
                 # Find existing characteristic and level it up
                 for i, char in enumerate(player.characteristics):
-                    char_name, level = char.split(':')
-                    if char_name == selected_characteristic:
-                        player.characteristics[i] = f"{char_name}:{int(level) + 1}"
-                        break
+                    parts = char.split(':')
+                    if len(parts) >= 2:
+                        char_name = parts[0]
+                        level = safe_int(parts[1], 1)
+                        if char_name == selected_characteristic:
+                            player.characteristics[i] = f"{char_name}:{level + 1}"
+                            break
             else:
                 # Add new characteristic with level 1
                 selected_characteristic = random.choice(available_characteristics)
@@ -633,7 +630,7 @@ class ShopHandlers:
                 return
             
             markup = types.InlineKeyboardMarkup()
-            owned_stocks = set(stock.split(':')[0] for stock in player.player_stocks)
+            owned_stocks = set(stock.split(':')[0] for stock in player.player_stocks if stock)
             for company in owned_stocks:
                 markup.add(types.InlineKeyboardButton(company, callback_data=f"sell_stocks_{company}"))
             self.bot.send_message(message.chat.id, "Выберите свою компанию:", reply_markup=markup)
@@ -642,15 +639,23 @@ class ShopHandlers:
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("buy_stocks_"))
         def handle_company_selection(call):
             """Handle company selection for stock purchase"""
-            company = call.data.split('_')[2]
+            parts = safe_split_callback(call.data, "_", 3)
+            if not parts:
+                self.bot.answer_callback_query(call.id, "Неверный формат данных")
+                return
+            company = parts[2]
             self.temp_user_data[call.from_user.id] = {'company': company}
             msg = f"Сколько акций компании {company} вы хотите купить?"
             self.bot.send_message(call.message.chat.id, msg)
-        
+
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("sell_stocks_"))
         def handle_sell_company_selection(call):
             """Handle company selection for stock sale"""
-            company = call.data.split('_')[2]
+            parts = safe_split_callback(call.data, "_", 3)
+            if not parts:
+                self.bot.answer_callback_query(call.id, "Неверный формат данных")
+                return
+            company = parts[2]
             self.temp_user_sell_data[call.from_user.id] = {'company_to_sell': company}
             msg = f"Сколько акций компании {company} вы хотите продать?"
             self.bot.send_message(call.message.chat.id, msg)
@@ -730,8 +735,14 @@ class ShopHandlers:
                 if not user_stock:
                     self.bot.reply_to(message, f"У вас нет акций компании {company}")
                     return
-                
-                current_quantity = int(user_stock.split(':')[1])
+
+                # Parse stock quantity safely
+                stock_parts = user_stock.split(':')
+                if len(stock_parts) < 2:
+                    logger.error(f"Invalid stock format: {user_stock}")
+                    self.bot.reply_to(message, "Ошибка формата данных акций")
+                    return
+                current_quantity = safe_int(stock_parts[1], 0)
                 if quantity > current_quantity:
                     self.bot.reply_to(message, f"У вас нет столько акций. У вас {current_quantity} акций.")
                     return
