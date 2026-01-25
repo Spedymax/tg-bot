@@ -28,6 +28,11 @@ class Player:
     casino_usage_count: int = 0
     ballzzz_number: Optional[int] = None
     notified: bool = False
+    
+    # Mini-app casino fields
+    miniapp_daily_spins: int = 0
+    miniapp_last_spin_date: Optional[datetime] = field(default_factory=lambda: datetime.min.replace(tzinfo=timezone.utc))
+    miniapp_total_winnings: float = 0.0
 
     @classmethod
     def from_db_row(cls, row: tuple, column_names: List[str]) -> 'Player':

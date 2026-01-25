@@ -7,6 +7,8 @@ import json
 import logging
 import random
 import telebot
+import threading
+import time
 from datetime import datetime, timezone, timedelta
 
 # Import new configuration and database modules
@@ -23,7 +25,9 @@ from handlers.shop_handlers import ShopHandlers
 # Import newly created handlers
 from handlers.entertainment_handlers import EntertainmentHandlers
 from handlers.trivia_handlers import TriviaHandlers
+from handlers.miniapp_handlers import MiniAppHandlers
 from services.quiz_scheduler import QuizScheduler
+from services.telegram_error_handler import TelegramErrorHandler, telegram_error_handler
 
 # Configure logging
 logging.basicConfig(
@@ -54,17 +58,23 @@ class TelegramBot:
         self.entertainment_handlers = EntertainmentHandlers(self.bot, self.player_service, self.game_service)
         self.trivia_handlers = TriviaHandlers(self.bot, self.player_service, self.game_service, self.db_manager)
         
+        # Initialize mini-app handlers
+        self.miniapp_handlers = MiniAppHandlers(self.bot, self.player_service, self.game_service)
+        
         # Initialize quiz scheduler
         self.quiz_scheduler = QuizScheduler(self.bot, self.db_manager, self.trivia_handlers.trivia_service)
         
         # Set quiz scheduler reference in admin handlers
         self.admin_handlers.set_quiz_scheduler(self.quiz_scheduler)
+        
+        # Start connection pool monitoring
+        self._start_pool_monitoring()
 
         # Load game data
-        self.char = self.load_json_file('assets/data/char.json')
-        self.plot = self.load_json_file('assets/data/plot.json')
-        self.shop = self.load_json_file('assets/data/shop.json')
-        self.statuetki = self.load_json_file('assets/data/statuetki.json')
+        self.char = self.load_json_file('/home/spedymax/tg-bot/assets/data/char.json')
+        self.plot = self.load_json_file('/home/spedymax/tg-bot/assets/data/plot.json')
+        self.shop = self.load_json_file('/home/spedymax/tg-bot/assets/data/shop.json')
+        self.statuetki = self.load_json_file('/home/spedymax/tg-bot/assets/data/statuetki.json')
 
         # Global state (to be refactored later)
         self.admin_actions = {}
@@ -85,6 +95,21 @@ class TelegramBot:
         except json.JSONDecodeError:
             logger.error(f"Invalid JSON in file: {file_path}")
             return {}
+    
+    def _start_pool_monitoring(self):
+        """Start periodic connection pool monitoring."""
+        def monitor_pool():
+            while True:
+                try:
+                    self.db_manager.log_pool_status()
+                    time.sleep(300)  # Log every 5 minutes
+                except Exception as e:
+                    logger.error(f"Error in pool monitoring: {e}")
+                    time.sleep(60)  # Wait 1 minute if error occurs
+        
+        monitoring_thread = threading.Thread(target=monitor_pool, daemon=True)
+        monitoring_thread.start()
+        logger.info("Started database connection pool monitoring")
 
     def setup_handlers(self):
         """Set up all bot command handlers"""
@@ -104,8 +129,12 @@ class TelegramBot:
 
         # Setup trivia handlers
         self.trivia_handlers.setup_handlers()
+        
+        # Setup mini-app handlers
+        self.miniapp_handlers.setup_handlers()
 
         @self.bot.message_handler(commands=['start'])
+        @telegram_error_handler("start_command")
         def start_game(message):
             """Handle the /start command with new player service"""
             player_id = message.from_user.id
@@ -115,7 +144,8 @@ class TelegramBot:
                 
                 if player:
                     # Existing player
-                    self.bot.reply_to(
+                    TelegramErrorHandler.safe_reply_to(
+                        self.bot,
                         message,
                         f"Your pisunchik: {player.pisunchik_size} cm\n"
                         f"You have {player.coins} coins!\n"
@@ -123,12 +153,12 @@ class TelegramBot:
                     )
                 else:
                     # New player registration
-                    self.bot.reply_to(message, "Добро пожаловать! Напишите ваше имя:")
-                    self.bot.register_next_step_handler(message, self.ask_where_found)
+                    if TelegramErrorHandler.safe_reply_to(self.bot, message, "Добро пожаловать! Напишите ваше имя:"):
+                        self.bot.register_next_step_handler(message, self.ask_where_found)
                     
             except Exception as e:
                 logger.error(f"Error in start command for user {player_id}: {e}")
-                self.bot.reply_to(message, "Произошла ошибка. Попробуйте позже.")
+                TelegramErrorHandler.safe_reply_to(self.bot, message, "Произошла ошибка. Попробуйте позже.")
 
         # Registration approval callbacks
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("registration"))
@@ -170,6 +200,7 @@ class TelegramBot:
                 self.bot.answer_callback_query(call.id, "Произошла ошибка.")
 
         @self.bot.message_handler(commands=['leaderboard'])
+        @telegram_error_handler("leaderboard_command")
         def show_leaderboard(message):
             """Show leaderboard using new player service"""
             try:
@@ -184,11 +215,11 @@ class TelegramBot:
                         logger.warning(f"Could not get name for player {player.player_id}: {e}")
                         leaderboard += f"{i + 1}. {player.player_name}: {player.pisunchik_size} sm🌭 и {int(player.coins)} BTC💰\n"
                 
-                self.bot.reply_to(message, leaderboard)
+                TelegramErrorHandler.safe_reply_to(self.bot, message, leaderboard)
                 
             except Exception as e:
                 logger.error(f"Error in leaderboard command: {e}")
-                self.bot.reply_to(message, "Ошибка при получении таблицы лидеров.")
+                TelegramErrorHandler.safe_reply_to(self.bot, message, "Ошибка при получении таблицы лидеров.")
 
     def apply_item_effects(self, player: Player, size_change: int, coins_change: int) -> tuple:
         """Apply item effects to size and coins changes"""
@@ -261,6 +292,10 @@ class TelegramBot:
             logger.info("Setting up handlers...")
             self.setup_handlers()
             
+            # Start the quiz scheduler
+            logger.info("Starting quiz scheduler...")
+            self.quiz_scheduler.start_scheduler()
+            
             logger.info("Starting bot polling...")
             self.bot.send_message(Settings.ADMIN_IDS[0], 'Bot restarted with new architecture!')
             
@@ -277,6 +312,10 @@ class TelegramBot:
         except Exception as e:
             logger.error(f"Critical error: {e}")
         finally:
+            # Stop the quiz scheduler
+            logger.info("Stopping quiz scheduler...")
+            self.quiz_scheduler.stop_scheduler()
+            
             self.db_manager.close_all_connections()
             logger.info("Database connections closed")
 

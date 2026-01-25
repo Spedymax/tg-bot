@@ -43,6 +43,7 @@ pydantic-core==2.23.4
 tqdm==4.66.1
 cryptography==43.0.1
 pycparser==2.21
+openai>=1.0.0
 openpyxl==3.1.2
 spotdl~=4.2.11
 APScheduler~=3.10.4
@@ -52,6 +53,7 @@ protobuf>=3.19.5,<5.0.0
 python-dotenv~=1.0.0
 tenacity~=8.2.3
 psycopg2-binary>=2.9.10
+pytz~=2023.3
 
 # Development dependencies for improved code quality
 mypy==1.5.1

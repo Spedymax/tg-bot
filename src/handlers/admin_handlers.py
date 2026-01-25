@@ -214,7 +214,112 @@ class AdminHandlers:
                             call.message.message_id
                         )
 
-                if action == "backupData":
+                elif action == "startQuizScheduler":
+                    # Start quiz scheduler
+                    if self.quiz_scheduler:
+                        try:
+                            self.quiz_scheduler.start_scheduler()
+                            self.bot.edit_message_text(
+                                "✅ Планировщик квизов запущен! Квизы будут отправляться в 12:00, 16:00 и 20:00.",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                        except Exception as e:
+                            self.bot.edit_message_text(
+                                f"❌ Ошибка при запуске планировщика: {str(e)}",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                    else:
+                        self.bot.edit_message_text(
+                            "❌ Планировщик квизов не инициализирован.",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+                        
+                elif action == "stopQuizScheduler":
+                    # Stop quiz scheduler
+                    if self.quiz_scheduler:
+                        try:
+                            self.quiz_scheduler.stop_scheduler()
+                            self.bot.edit_message_text(
+                                "⏹️ Планировщик квизов остановлен.",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                        except Exception as e:
+                            self.bot.edit_message_text(
+                                f"❌ Ошибка при остановке планировщика: {str(e)}",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                    else:
+                        self.bot.edit_message_text(
+                            "❌ Планировщик квизов не инициализирован.",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+                        
+                elif action == "quizSchedulerStatus":
+                    # Get quiz scheduler status
+                    if self.quiz_scheduler:
+                        try:
+                            status = self.quiz_scheduler.get_schedule_info()
+                            status_text = f"📊 Статус планировщика квизов:\n\n"
+                            status_text += f"🔄 Работает: {'Да' if status['is_running'] else 'Нет'}\n"
+                            status_text += f"⏰ Времена квизов: {', '.join(status['quiz_times'])}\n"
+                            status_text += f"📱 Целевой чат: {status['target_chat_id']}\n"
+                            status_text += f"⏳ Следующий квиз: {status['next_run']}"
+                            
+                            self.bot.edit_message_text(
+                                status_text,
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                        except Exception as e:
+                            self.bot.edit_message_text(
+                                f"❌ Ошибка при получении статуса: {str(e)}",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                    else:
+                        self.bot.edit_message_text(
+                            "❌ Планировщик квизов не инициализирован.",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+                        
+                elif action == "sendQuizNow":
+                    # Send quiz now
+                    if self.quiz_scheduler:
+                        try:
+                            result = self.quiz_scheduler.manual_quiz()
+                            if result['success']:
+                                self.bot.edit_message_text(
+                                    "✅ Квиз отправлен в целевой чат!",
+                                    call.message.chat.id,
+                                    call.message.message_id
+                                )
+                            else:
+                                self.bot.edit_message_text(
+                                    f"❌ Ошибка при отправке квиза: {result['message']}",
+                                    call.message.chat.id,
+                                    call.message.message_id
+                                )
+                        except Exception as e:
+                            self.bot.edit_message_text(
+                                f"❌ Ошибка при отправке квиза: {str(e)}",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                    else:
+                        self.bot.edit_message_text(
+                            "❌ Планировщик квизов не инициализирован.",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+                        
+                elif action == "backupData":
                     # Create data backup
                     try:
                         all_players = self.player_service.get_all_players()
@@ -248,109 +353,6 @@ class AdminHandlers:
                         call.message.chat.id,
                         call.message.message_id
                     )
-                
-                # Quiz management actions
-                elif action == "startQuizScheduler":
-                    try:
-                        if hasattr(self, 'quiz_scheduler'):
-                            self.quiz_scheduler.start_scheduler()
-                            self.bot.edit_message_text(
-                                "✅ Планировщик квизов запущен!\n\n"
-                                "Квизы будут отправляться в 10:00, 15:00 и 20:00 каждый день.",
-                                call.message.chat.id,
-                                call.message.message_id
-                            )
-                        else:
-                            self.bot.edit_message_text(
-                                "❌ Планировщик квизов не инициализирован.",
-                                call.message.chat.id,
-                                call.message.message_id
-                            )
-                    except Exception as e:
-                        self.bot.edit_message_text(
-                            f"❌ Ошибка при запуске планировщика: {str(e)}",
-                            call.message.chat.id,
-                            call.message.message_id
-                        )
-                
-                elif action == "stopQuizScheduler":
-                    try:
-                        if hasattr(self, 'quiz_scheduler'):
-                            self.quiz_scheduler.stop_scheduler()
-                            self.bot.edit_message_text(
-                                "⏹️ Планировщик квизов остановлен.",
-                                call.message.chat.id,
-                                call.message.message_id
-                            )
-                        else:
-                            self.bot.edit_message_text(
-                                "❌ Планировщик квизов не инициализирован.",
-                                call.message.chat.id,
-                                call.message.message_id
-                            )
-                    except Exception as e:
-                        self.bot.edit_message_text(
-                            f"❌ Ошибка при остановке планировщика: {str(e)}",
-                            call.message.chat.id,
-                            call.message.message_id
-                        )
-                
-                elif action == "quizSchedulerStatus":
-                    try:
-                        if hasattr(self, 'quiz_scheduler'):
-                            status_info = self.quiz_scheduler.get_schedule_info()
-                            status_text = f"📊 Статус планировщика квизов:\n\n"
-                            status_text += f"📍 Статус: {'🟢 Запущен' if status_info['is_running'] else '🔴 Остановлен'}\n"
-                            status_text += f"⏰ Время квизов: {', '.join(status_info['quiz_times'])}\n"
-                            status_text += f"🎯 Целевой чат: {status_info['target_chat_id']}\n"
-                            status_text += f"⏳ Следующий запуск: {status_info['next_run']}"
-                            
-                            self.bot.edit_message_text(
-                                status_text,
-                                call.message.chat.id,
-                                call.message.message_id
-                            )
-                        else:
-                            self.bot.edit_message_text(
-                                "❌ Планировщик квизов не инициализирован.",
-                                call.message.chat.id,
-                                call.message.message_id
-                            )
-                    except Exception as e:
-                        self.bot.edit_message_text(
-                            f"❌ Ошибка при получении статуса: {str(e)}",
-                            call.message.chat.id,
-                            call.message.message_id
-                        )
-                
-                elif action == "sendQuizNow":
-                    try:
-                        if hasattr(self, 'quiz_scheduler'):
-                            result = self.quiz_scheduler.manual_quiz()
-                            if result['success']:
-                                self.bot.edit_message_text(
-                                    "✅ Квиз успешно отправлен в группу!",
-                                    call.message.chat.id,
-                                    call.message.message_id
-                                )
-                            else:
-                                self.bot.edit_message_text(
-                                    f"❌ Ошибка при отправке квиза: {result['message']}",
-                                    call.message.chat.id,
-                                    call.message.message_id
-                                )
-                        else:
-                            self.bot.edit_message_text(
-                                "❌ Планировщик квизов не инициализирован.",
-                                call.message.chat.id,
-                                call.message.message_id
-                            )
-                    except Exception as e:
-                        self.bot.edit_message_text(
-                            f"❌ Ошибка при отправке квиза: {str(e)}",
-                            call.message.chat.id,
-                            call.message.message_id
-                        )
         
         @self.bot.message_handler(func=lambda message: message.from_user.id in self.admin_actions)
         def handle_admin_text_input(message):

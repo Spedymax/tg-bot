@@ -85,7 +85,7 @@ user_progress = {}
 start_date = datetime.date(2023, 6, 1)
 
 # Load list of reasons from love.txt
-with open('assets/data/love.txt', 'r', encoding='utf-8') as file:
+with open('/home/spedymax/tg-bot/assets/data/love.txt', 'r', encoding='utf-8') as file:
     reasons = file.read().splitlines()
 
 
