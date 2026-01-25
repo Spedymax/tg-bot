@@ -158,7 +158,7 @@ class TriviaService:
 
                     # Check 2: Look for key shared concepts
                     shared_important_words = question_keywords.intersection(existing_keywords)
-                    if len(shared_important_words) >= 2:  # At least 2 important words match
+                    if len(shared_important_words) >= 3:  # Increased from 2 to 3 words
                         logger.info(f"Duplicate detected by shared concepts ({shared_important_words}): '{question_text}' similar to '{existing_question}'")
                         return True
 
@@ -182,11 +182,35 @@ class TriviaService:
         """Extract meaningful keywords from question text."""
         # Remove common words and extract meaningful terms
         stop_words = {
-            'какой', 'какая', 'какие', 'кто', 'что', 'где', 'когда', 'почему', 'как',
-            'является', 'был', 'была', 'были', 'будет', 'это', 'этот', 'эта', 'эти',
+            # Question words
+            'какой', 'какая', 'какие', 'какую', 'какого', 'каком', 'какими',
+            'кто', 'что', 'где', 'когда', 'почему', 'как', 'зачем', 'откуда', 'куда',
+            # Common verbs
+            'является', 'был', 'была', 'были', 'будет', 'есть', 'имеет', 'может', 'мог',
+            'была', 'были', 'называется', 'считается', 'происходит',
+            # Pronouns and articles
+            'это', 'этот', 'эта', 'эти', 'тот', 'та', 'те', 'его', 'её', 'их',
+            'один', 'одна', 'одни', 'первый', 'первая', 'первые',
+            # Prepositions
             'в', 'на', 'из', 'по', 'для', 'с', 'от', 'до', 'при', 'над', 'под',
-            'и', 'или', 'но', 'а', 'же', 'ли', 'не', 'ни', 'да', 'нет',
-            'году', 'года', 'лет', 'веке', 'столетии', 'время', 'период'
+            'через', 'между', 'среди', 'около', 'возле', 'против',
+            # Conjunctions
+            'и', 'или', 'но', 'а', 'же', 'ли', 'не', 'ни', 'да', 'нет', 'если', 'чтобы',
+            # Time-related common words
+            'году', 'года', 'лет', 'веке', 'веков', 'столетии', 'время', 'период', 
+            'эпоха', 'момент', 'часы', 'дни', 'месяцы', 'годы',
+            # Very common descriptive words that appear frequently
+            'популярный', 'популярная', 'популярное', 'популярные',
+            'известный', 'известная', 'известное', 'известные',
+            'главный', 'главная', 'главное', 'главные',
+            'основной', 'основная', 'основное', 'основные',
+            'большой', 'большая', 'большое', 'большие',
+            'маленький', 'маленькая', 'маленькое', 'маленькие',
+            'новый', 'новая', 'новое', 'новые',
+            'старый', 'старая', 'старое', 'старые',
+            'современный', 'современная', 'современное', 'современные',
+            'древний', 'древняя', 'древнее', 'древние',
+            'сегодня', 'сейчас', 'теперь', 'ныне', 'часто', 'редко', 'всегда', 'никогда'
         }
         
         words = text.lower().replace('?', '').replace('.', '').replace(',', '').split()
@@ -479,7 +503,6 @@ class TriviaService:
                 (user_id, question, current_date)
             )
             result = cursor.fetchone() is not None
-
             return result
         except Exception as e:
             logger.error(f"Error checking if user answered question: {str(e)}")
@@ -504,7 +527,6 @@ class TriviaService:
                 (user_id, question, current_date)
             )
             conn.commit()
-
             return True
         except Exception as e:
             logger.error(f"Error recording user answer: {str(e)}")

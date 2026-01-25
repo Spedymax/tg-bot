@@ -5,529 +5,156 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🎰 Слот-машина Казино</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:Arial,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:10px}
+        .casino-container{text-align:center;background:rgba(255,255,255,0.1);backdrop-filter:blur(10px);border-radius:20px;padding:30px;box-shadow:0 8px 32px rgba(31,38,135,0.37);border:1px solid rgba(255,255,255,0.18);max-width:400px;width:90%}
+        h1{color:#fff;margin-bottom:10px;font-size:2.5em;text-shadow:2px 2px 4px rgba(0,0,0,0.3)}
+        .subtitle{color:#f0f0f0;margin-bottom:30px;font-size:1.1em}
+        .info-panel{background:rgba(255,255,255,0.15);border-radius:15px;padding:20px;margin:20px 0;color:#fff}
+        .info-item{display:flex;justify-content:space-between;margin:10px 0;font-size:1.1em}
+        .coins{color:#f9ca24;font-weight:bold}
+        .spins-left{color:#4ecdc4;font-weight:bold}
+        .slot-machine{background:linear-gradient(145deg,#2c2c2c,#1a1a1a);border:8px solid #444;border-radius:20px;padding:20px;margin:40px auto;box-shadow:0 10px 30px rgba(0,0,0,0.5),inset 0 2px 5px rgba(255,255,255,0.1);position:relative;max-width:320px}
+        .slot-machine-header{position:absolute;top:-45px;left:50%;transform:translateX(-50%);background:linear-gradient(145deg,#2c2c2c,#1a1a1a);padding:4px 9px;border-radius:15px;border:3px solid #444;box-shadow:0 4px 10px rgba(0,0,0,0.5)}
+        .dog-image{width:60px;height:60px;border-radius:50%;object-fit:cover;border:2px solid #666}
+        .reels-container{display:flex;justify-content:center;gap:10px;margin:20px 0;padding:15px;background:#000;border-radius:10px;border:3px solid #333;box-shadow:inset 0 2px 10px rgba(0,0,0,0.8)}
+        .reel{width:70px;height:70px;background:linear-gradient(180deg,#333,#111);border:2px solid #555;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:2.2em;position:relative;overflow:hidden;box-shadow:inset 0 2px 5px rgba(0,0,0,0.5)}
+        .reel-symbols{display:flex;flex-direction:column;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);transition:transform 2s cubic-bezier(0.25,0.46,0.45,0.94)}
+        .symbol{width:40px;height:100px;display:flex;align-items:center;justify-content:center;font-size:1.8em;line-height:1}
+        .spin-button{background:linear-gradient(45deg,#ff6b6b,#ee5a24);color:white;border:none;padding:15px 30px;font-size:1.2em;font-weight:bold;border-radius:50px;cursor:pointer;transition:all .3s ease;box-shadow:0 4px 15px rgba(255,107,107,0.4);margin:20px 0;min-width:200px}
+        .spin-button:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(255,107,107,0.6)}
+        .spin-button:disabled{background:#666;cursor:not-allowed;transform:none;box-shadow:none}
+        .result-display{background:rgba(255,255,255,0.2);border-radius:10px;padding:15px;margin:20px 0;color:#fff;font-size:1.2em;min-height:50px;display:flex;align-items:center;justify-content:center}
+        .win-animation{animation:jackpot .8s ease-in-out infinite alternate}
+        @keyframes jackpot{from{transform:scale(1);color:#fff;text-shadow:0 0 5px #fff}to{transform:scale(1.1);color:#f9ca24;text-shadow:0 0 20px #f9ca24}}
+        .loading{display:none;color:#fff;font-size:1.1em;margin:10px 0}
+        .loading.show{display:block}
+        .payline-indicator{position:absolute;top:50%;left:0;right:0;height:2px;background:#ff6b6b;transform:translateY(-50%);opacity:0;transition:opacity .3s ease}
+        .payline-indicator.active{opacity:1;box-shadow:0 0 10px #ff6b6b}
+        .prize-table{background:rgba(255,255,255,0.1);border-radius:15px;padding:15px;margin:20px 0;color:#fff;font-size:.9em}
+        .prize-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.1)}
+        .prize-row:last-child{border-bottom:none}
+        .symbols-combo{font-size:1.2em}
+        .prize-amount{color:#f9ca24;font-weight:bold}
+        .spinning .reel{animation:reel-glow .5s ease-in-out infinite alternate}
+        @keyframes reel-glow{from{box-shadow:inset 0 2px 5px rgba(0,0,0,0.5)}to{box-shadow:inset 0 2px 5px rgba(0,0,0,0.5),0 0 15px rgba(255,107,107,0.5)}}
+        .jackpot-flash{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,215,0,0.3);opacity:0;pointer-events:none;z-index:9999}
+        .jackpot-flash.active{animation:flash .5s ease-in-out 3}
+        @keyframes flash{0%,100%{opacity:0}50%{opacity:1}}
+        .audio-controls{position:fixed;top:20px;right:20px;z-index:1000;background:rgba(0,0,0,0.7);border-radius:25px;padding:10px;display:flex;gap:10px;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.2)}
+        .audio-btn{background:rgba(255,255,255,0.1);border:none;color:white;padding:8px 12px;border-radius:20px;cursor:pointer;font-size:16px;transition:all .3s ease;border:1px solid rgba(255,255,255,0.2)}
+        .audio-btn:hover{background:rgba(255,255,255,0.2);transform:scale(1.05)}
+        .audio-btn.active{background:rgba(255,107,107,0.7);box-shadow:0 0 10px rgba(255,107,107,0.5)}
+        @media (max-width:480px){.audio-controls{top:10px;right:10px;padding:8px}.audio-btn{padding:6px 10px;font-size:14px}}
+        .loading-screen{position:fixed;top:0;left:0;width:100%;height:100%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:10000;opacity:1;transition:opacity .5s ease-out}
+        .loading-screen.hidden{opacity:0;pointer-events:none}
+        .loading-content{text-align:center;color:white}
+        .loading-title{font-size:3em;margin-bottom:20px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
+        .loading-subtitle{font-size:1.2em;margin-bottom:30px;opacity:.9}
+        .loading-spinner{position:relative;width:80px;height:80px;margin:0 auto 30px}
+        .loading-spinner::before{content:'🎰';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:3em;animation:spin 2s linear infinite}
+        @keyframes spin{0%{transform:translate(-50%,-50%) rotate(0deg)}100%{transform:translate(-50%,-50%) rotate(360deg)}}
+        .loading-progress{width:300px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;overflow:hidden;margin:20px auto}
+        .loading-progress-bar{height:100%;background:linear-gradient(90deg,#ff6b6b,#f9ca24);border-radius:2px;width:0%;transition:width .3s ease}
+        .loading-text{font-size:1em;opacity:.8;margin-top:10px}
+        .loading-dots::after{content:'';animation:dots 1.5s infinite}
+        @keyframes dots{0%,20%{content:''}40%{content:'.'}60%{content:'..'}80%,100%{content:'...'}}
+        @keyframes pulse{0%{transform:scale(1.05)}50%{transform:scale(1.1)}100%{transform:scale(1.05)}}
+        @media (max-width:480px){.loading-title{font-size:2.5em}.loading-subtitle{font-size:1em}.loading-progress{width:250px}}
+        #profiles {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 20px;
+            padding: 40px;
+        }
+
+        .profile-card {
+            background: #222;
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            text-align: center;
+            width: 300px;
+            transition: transform 0.2s;
             box-sizing: border-box;
         }
 
-        body {
-            font-family: 'Arial', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 10px;
-        }
-
-        .casino-container {
-            text-align: center;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            max-width: 400px;
-            width: 90%;
-        }
-
-        h1 {
-            color: #fff;
-            margin-bottom: 10px;
-            font-size: 2.5em;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-        }
-
-        .subtitle {
-            color: #f0f0f0;
-            margin-bottom: 30px;
-            font-size: 1.1em;
-        }
-
-        .info-panel {
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 15px;
-            padding: 20px;
-            margin: 20px 0;
-            color: #fff;
-        }
-
-        .info-item {
-            display: flex;
-            justify-content: space-between;
-            margin: 10px 0;
-            font-size: 1.1em;
-        }
-
-        .coins {
-            color: #f9ca24;
-            font-weight: bold;
-        }
-
-        .spins-left {
-            color: #4ecdc4;
-            font-weight: bold;
-        }
-
-        /* Slot Machine Styles */
-        .slot-machine {
-            background: linear-gradient(145deg, #2c2c2c, #1a1a1a);
-            border: 8px solid #444;
-            border-radius: 20px;
-            padding: 20px;
-            margin: 40px auto;
-            box-shadow: 
-                0 10px 30px rgba(0, 0, 0, 0.5),
-                inset 0 2px 5px rgba(255, 255, 255, 0.1);
-            position: relative;
-            max-width: 320px;
-        }
-
-        .slot-machine-header {
-            position: absolute;
-            top: -45px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: linear-gradient(145deg, #2c2c2c, #1a1a1a);
-            padding: 4px 9px;
-            border-radius: 15px;
-            border: 3px solid #444;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
-        }
-
-        .dog-image {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            object-fit: cover;
-            border: 2px solid #666;
-        }
-
-        .dog-emoji {
-            font-size: 3em;
-            display: none;
-        }
-
-        .dog-image.error + .dog-emoji {
-            display: block;
-        }
-
-        .dog-image.error {
-            display: none;
-        }
-
-        .reels-container {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            margin: 20px 0;
-            padding: 15px;
-            background: #000;
-            border-radius: 10px;
-            border: 3px solid #333;
-            box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.8);
-        }
-
-        .reel {
-            width: 70px;
-            height: 70px;
-            background: linear-gradient(180deg, #333, #111);
-            border: 2px solid #555;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 2.2em;
-            position: relative;
-            overflow: hidden;
-            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.5);
-        }
-
-        .reel-symbols {
-            display: flex;
-            flex-direction: column;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            transition: transform 2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-        }
-
-        .symbol {
-            width: 40px;
-            height: 100px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.8em;
-            line-height: 1;
-        }
-
-        .spin-button {
-            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            font-size: 1.2em;
-            font-weight: bold;
-            border-radius: 50px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
-            margin: 20px 0;
-            min-width: 200px;
-        }
-
-        .spin-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.6);
-        }
-
-        .spin-button:disabled {
-            background: #666;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .result-display {
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 10px;
-            padding: 15px;
-            margin: 20px 0;
-            color: #fff;
-            font-size: 1.2em;
-            min-height: 50px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .win-animation {
-            animation: jackpot 0.8s ease-in-out infinite alternate;
-        }
-
-        @keyframes jackpot {
-            from { 
-                transform: scale(1); 
-                color: #fff;
-                text-shadow: 0 0 5px #fff;
-            }
-            to { 
-                transform: scale(1.1); 
-                color: #f9ca24;
-                text-shadow: 0 0 20px #f9ca24;
-            }
-        }
-
-        .loading {
-            display: none;
-            color: #fff;
-            font-size: 1.1em;
-            margin: 10px 0;
-        }
-
-        .loading.show {
-            display: block;
-        }
-
-        .payline-indicator {
-            position: absolute;
-            top: 50%;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: #ff6b6b;
-            transform: translateY(-50%);
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-
-        .payline-indicator.active {
-            opacity: 1;
-            box-shadow: 0 0 10px #ff6b6b;
-        }
-
-        .prize-table {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            padding: 15px;
-            margin: 20px 0;
-            color: #fff;
-            font-size: 0.9em;
-        }
-
-        .prize-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 5px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .prize-row:last-child {
-            border-bottom: none;
-        }
-
-        .symbols-combo {
-            font-size: 1.2em;
-        }
-
-        .prize-amount {
-            color: #f9ca24;
-            font-weight: bold;
-        }
-
-        .spinning .reel {
-            animation: reel-glow 0.5s ease-in-out infinite alternate;
-        }
-
-        @keyframes reel-glow {
-            from { box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.5); }
-            to { box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.5), 0 0 15px rgba(255, 107, 107, 0.5); }
-        }
-
-        .jackpot-flash {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(255, 215, 0, 0.3);
-            opacity: 0;
-            pointer-events: none;
-            z-index: 9999;
-        }
-
-        .jackpot-flash.active {
-            animation: flash 0.5s ease-in-out 3;
-        }
-
-        @keyframes flash {
-            0%, 100% { opacity: 0; }
-            50% { opacity: 1; }
-        }
-        /* Аудио контроллер */
-        .audio-controls {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 1000;
-            background: rgba(0, 0, 0, 0.7);
-            border-radius: 25px;
-            padding: 10px;
-            display: flex;
-            gap: 10px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .audio-btn {
-            background: rgba(255, 255, 255, 0.1);
-            border: none;
-            color: white;
-            padding: 8px 12px;
-            border-radius: 20px;
-            cursor: pointer;
-            font-size: 16px;
-            transition: all 0.3s ease;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .audio-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
+        .profile-card:hover {
             transform: scale(1.05);
         }
 
-        .audio-btn.active {
-            background: rgba(255, 107, 107, 0.7);
-            box-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
+        .profile-avatar {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            overflow: hidden;
+            border-radius: 8px;
+            margin-bottom: 10px;
         }
 
-        @media (max-width: 480px) {
-            .audio-controls {
-                top: 10px;
-                right: 10px;
-                padding: 8px;
-            }
-            
-            .audio-btn {
-                padding: 6px 10px;
-                font-size: 14px;
-            }
-        }
-        
-        /* Loading Screen */
-        .loading-screen {
-            position: fixed;
-            top: 0;
-            left: 0;
+        .profile-avatar img {
             width: 100%;
             height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 10000;
-            opacity: 1;
-            transition: opacity 0.5s ease-out;
+            object-fit: cover;
         }
-        
-        .loading-screen.hidden {
-            opacity: 0;
-            pointer-events: none;
+
+        .profile-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 1rem;
         }
-        
-        .loading-content {
-            text-align: center;
-            color: white;
+
+        .profile-coins {
+            font-size: 0.9rem;
+            color: gold;
         }
-        
-        .loading-title {
-            font-size: 3em;
-            margin-bottom: 20px;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-        }
-        
-        .loading-subtitle {
-            font-size: 1.2em;
-            margin-bottom: 30px;
-            opacity: 0.9;
-        }
-        
-        .loading-spinner {
-            position: relative;
-            width: 80px;
-            height: 80px;
-            margin: 0 auto 30px;
-        }
-        
-        .loading-spinner::before {
-            content: '🎰';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 3em;
-            animation: spin 2s linear infinite;
-        }
-        
-        @keyframes spin {
-            0% { transform: translate(-50%, -50%) rotate(0deg); }
-            100% { transform: translate(-50%, -50%) rotate(360deg); }
-        }
-        
-        .loading-progress {
-            width: 300px;
-            height: 4px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 2px;
-            overflow: hidden;
-            margin: 20px auto;
-        }
-        
-        .loading-progress-bar {
-            height: 100%;
-            background: linear-gradient(90deg, #ff6b6b, #f9ca24);
-            border-radius: 2px;
-            width: 0%;
-            transition: width 0.3s ease;
-        }
-        
-        .loading-text {
-            font-size: 1em;
-            opacity: 0.8;
-            margin-top: 10px;
-        }
-        
-        .loading-dots {
-            display: inline-block;
-        }
-        
-        .loading-dots::after {
-            content: '';
-            animation: dots 1.5s infinite;
-        }
-        
-        @keyframes dots {
-            0%, 20% { content: ''; }
-            40% { content: '.'; }
-            60% { content: '..'; }
-            80%, 100% { content: '...'; }
-        }
-        
-        @keyframes pulse {
-            0% { transform: scale(1.05); }
-            50% { transform: scale(1.1); }
-            100% { transform: scale(1.05); }
-        }
-        
-        @media (max-width: 480px) {
-            .loading-title {
-                font-size: 2.5em;
-            }
-            
-            .loading-subtitle {
-                font-size: 1em;
-            }
-            
-            .loading-progress {
-                width: 250px;
+
+        /* Мобильная адаптация */
+        @media (max-width: 600px) {
+            .profile-card {
+                width: 45%;
+                padding: 10px;
             }
         }
+
     </style>
 </head>
 <body>
-    <!-- Аудио элементы -->
     <audio id="bgMusic" loop>
-        <source src="audio/casino_ambient.mp3" type="audio/mpeg">
-        <source src="audio/casino_ambient.ogg" type="audio/ogg">
+        <source src="miniapp/audio/casino_ambient.mp3" type="audio/mpeg">
+        <source src="miniapp/audio/casino_ambient.ogg" type="audio/ogg">
     </audio>
-    
     <audio id="spinSound">
-        <source src="audio/slot_spin.mp3" type="audio/mpeg">
-        <source src="audio/slot_spin.ogg" type="audio/ogg">
+        <source src="miniapp/audio/slot_spin.mp3" type="audio/mpeg">
+        <source src="miniapp/audio/slot_spin.ogg" type="audio/ogg">
     </audio>
-    
     <audio id="winSound">
-        <source src="audio/win.mp3" type="audio/mpeg">
-        <source src="audio/win.ogg" type="audio/ogg">
+        <source src="miniapp/audio/win.mp3" type="audio/mpeg">
+        <source src="miniapp/audio/win.ogg" type="audio/ogg">
     </audio>
-    
     <audio id="jackpotSound">
-        <source src="audio/jackpot.mp3" type="audio/mpeg">
-        <source src="audio/jackpot.ogg" type="audio/ogg">
+        <source src="miniapp/audio/jackpot.mp3" type="audio/mpeg">
+        <source src="miniapp/audio/jackpot.ogg" type="audio/ogg">
     </audio>
-    
-    <!-- Контроллеры аудио -->
     <div class="audio-controls">
-        <button class="audio-btn" id="musicToggle" onclick="toggleMusic()" title="Включить/выключить музыку">
-            🎵
-        </button>
-        <button class="audio-btn" id="soundToggle" onclick="toggleSounds()" title="Включить/выключить звуки">
-            🔊
-        </button>
+        <button class="audio-btn" id="musicToggle" onclick="toggleMusic()" title="Включить/выключить музыку">🎵</button>
+        <button class="audio-btn" id="soundToggle" onclick="toggleSounds()" title="Включить/выключить звуки">🔊</button>
     </div>
-    
+    <div id="profiles"></div>
     <div class="jackpot-flash" id="jackpot-flash"></div>
-    
-    <div class="casino-container">
+    <div id="casino-container" class="casino-container" style="display:none;">
         <h1>🎰 Слот-машина</h1>
         <p class="subtitle">Три в ряд для выигрыша!</p>
-        
         <div class="info-panel">
             <div class="info-item">
                 <span>🎯 Спинов осталось:</span>
                 <span class="spins-left" id="spins-left">6</span>
             </div>
         </div>
-
         <div class="slot-machine" id="slot-machine">
             <div class="slot-machine-header">
-                <img src="dog.jpg" alt="Lucky Dog" class="dog-image" id="dog-image" onerror="this.classList.add('error')">
+                <img src="miniapp/dog.jpg" alt="Lucky Dog" class="dog-image" id="dog-image" onerror="this.classList.add('error')">
             </div>
             <div class="payline-indicator" id="payline"></div>
             <div class="reels-container">
@@ -566,24 +193,26 @@
                 </div>
             </div>
         </div>
-
-        <button class="spin-button" id="spin-btn" onclick="spinSlots()">
-            🎲 КРУТИТЬ СЛОТЫ
-        </button>
-
-        <div class="loading" id="loading">
-            ⏳ Слоты крутятся...
-        </div>
-
-        <div class="result-display" id="result">
-            Нажмите кнопку, чтобы начать игру!
-        </div>
-
+        <button class="spin-button" id="spin-btn" onclick="spinSlots()">🎲 КРУТИТЬ СЛОТЫ</button>
+        <div class="loading" id="loading">⏳ Слоты крутятся...</div>
+        <div class="result-display" id="result">Нажмите кнопку, чтобы начать игру!</div>
         <div class="prize-table">
-            <div style="text-align: center; margin-bottom: 10px; font-weight: bold;">🏆 Таблица выплат</div>
+            <div style="text-align:center;margin-bottom:10px;font-weight:bold;">🏆 Таблица выплат</div>
             <div class="prize-row">
-                <span class="symbols-combo">🎎 Любые 3 в ряд 🎎</span>
+                <span class="symbols-combo">💰 Небольшой выигрыш! 💰</span>
+                <span class="prize-amount">50 BTC</span>
+            </div>
+            <div class="prize-row">
+                <span class="symbols-combo">✨ Хороший выигрыш! ✨</span>
+                <span class="prize-amount">150 BTC</span>
+            </div>
+            <div class="prize-row">
+                <span class="symbols-combo">🎉 БОЛЬШОЙ ВЫИГРЫШ!🎉</span>
                 <span class="prize-amount">300 BTC</span>
+            </div>
+            <div class="prize-row">
+                <span class="symbols-combo">🎰 МЕГА ДЖЕКПОТ! ЕБААААТЬ!🎰</span>
+                <span class="prize-amount">500 BTC</span>
             </div>
             <div class="prize-row">
                 <span class="symbols-combo">😕 Не совпали</span>
@@ -591,8 +220,7 @@
             </div>
         </div>
     </div>
-
-    <div class="loading-screen" id="loadingScreen">
+    <div class="loading-screen" id="loadingScreen">
         <div class="loading-content">
             <div class="loading-title">Загрузка</div>
             <div class="loading-subtitle">Пожалуйста, подождите...</div>
@@ -601,305 +229,104 @@
                 <div class="loading-progress-bar" id="loadingProgressBar"></div>
             </div>
             <div class="loading-text">Инициализация<span class="loading-dots"></span></div>
-            <div id="loadingButtonContainer" style="margin-top: 20px; height: 50px;"></div>
+            <div id="loadingButtonContainer" style="margin-top:20px;height:50px"></div>
         </div>
     </div>
-
-    <script>        
+    <script>
         let currentCoins = 0;
         let spinsLeft = 6;
         let isSpinning = false;
         let playerId = null;
         let apiBaseUrl = window.location.origin + '/miniapp';
-        
-        // Настройки аудио
         let musicEnabled = true;
         let soundsEnabled = true;
         let audioElements = {};
-        
-        // Загрузка состояния
-        let loadingSteps = {
-            player: false,
-            audio: false,
-            preload: false
-        };
-        
-        // Функции для управления экраном загрузки
-        function updateLoadingProgress() {
-            const completedSteps = Object.values(loadingSteps).filter(step => step).length;
+        let loadingSteps = {player:false,audio:false,preload:false};
+        function updateLoadingProgress(){
+            const completedSteps = Object.values(loadingSteps).filter(Boolean).length;
             const totalSteps = Object.keys(loadingSteps).length;
-            const progress = (completedSteps / totalSteps) * 100;
-            
+            const progress = (completedSteps/totalSteps)*100;
             const progressBar = document.getElementById('loadingProgressBar');
-            if (progressBar) {
-                progressBar.style.width = progress + '%';
-            }
-            
-            // Обновляем текст загрузки
+            if(progressBar)progressBar.style.width=progress+'%';
             const loadingText = document.querySelector('.loading-text');
-            if (loadingText) {
-                let text = 'Инициализация';
-                if (loadingSteps.player && !loadingSteps.audio) {
-                    text = 'Загрузка аудио';
-                } else if (loadingSteps.player && loadingSteps.audio && !loadingSteps.preload) {
-                    text = 'Предзагрузка ресурсов';
-                } else if (completedSteps === totalSteps) {
-                    text = 'Готово';
-                }
-                
-                // Если не все завершено, добавляем анимированные точки
-                if (completedSteps < totalSteps) {
-                    loadingText.innerHTML = text + '<span class="loading-dots"></span>';
-                } else {
-                    loadingText.innerHTML = text;
-                }
+            if(loadingText){
+                let text='Инициализация';
+                if(loadingSteps.player && !loadingSteps.audio)text='Загрузка аудио';
+                else if(loadingSteps.player && loadingSteps.audio && !loadingSteps.preload)text='Предзагрузка ресурсов';
+                else if(completedSteps===totalSteps)text='Готово';
+                if(completedSteps<totalSteps)loadingText.innerHTML=text+'<span class="loading-dots"></span>'; else loadingText.innerHTML=text;
             }
-            
-            // Если все шаги завершены, показываем кнопку "Продолжить"
-            if (completedSteps === totalSteps) {
-                setTimeout(() => {
-                    showContinueButton();
-                }, 800); // Небольшая задержка для показа "Готово"
-            }
+            if(completedSteps===totalSteps)setTimeout(showContinueButton,800);
         }
-        
-        function showContinueButton() {
-            console.log('Показываем кнопку Продолжить');
-            
-            const loadingTitle = document.querySelector('.loading-title');
-            const loadingSubtitle = document.querySelector('.loading-subtitle');
-            const loadingText = document.querySelector('.loading-text');
-            const buttonContainer = document.getElementById('loadingButtonContainer');
-            const progressBar = document.getElementById('loadingProgressBar');
-            
-            // Обновляем заголовок и подзаголовок
-            if (loadingTitle) {
-                loadingTitle.textContent = '✅ Готово!';
-            }
-            
-            if (loadingSubtitle) {
-                loadingSubtitle.textContent = 'Нажмите "Продолжить" для входа в казино';
-            }
-            
-            if (loadingText) {
-                loadingText.innerHTML = '✨ Все системы запущены!';
-            }
-            
-            if (progressBar) {
-                progressBar.style.width = '100%';
-            }
-            
-            // Создаем кнопку Продолжить
-            if (buttonContainer) {
-                const continueButton = document.createElement('button');
-                continueButton.textContent = '🎵 Продолжить';
-                continueButton.onclick = continueToApp;
-                continueButton.style.cssText = `
-                    background: linear-gradient(45deg, #ff6b6b, #ee5a24);
-                    color: white;
-                    border: none;
-                    padding: 15px 30px;
-                    font-size: 1.2em;
-                    font-weight: bold;
-                    border-radius: 50px;
-                    cursor: pointer;
-                    box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
-                    animation: pulse 2s infinite;
-                    transition: all 0.3s ease;
-                `;
-                
-                continueButton.addEventListener('mouseenter', function() {
-                    this.style.transform = 'translateY(-2px) scale(1.05)';
-                    this.style.boxShadow = '0 6px 20px rgba(255, 107, 107, 0.6)';
-                });
-                
-                continueButton.addEventListener('mouseleave', function() {
-                    this.style.transform = 'none';
-                    this.style.boxShadow = '0 4px 15px rgba(255, 107, 107, 0.4)';
-                });
-                
+        function showContinueButton(){
+            const buttonContainer=document.getElementById('loadingButtonContainer');
+            if(buttonContainer){
+                const continueButton=document.createElement('button');
+                continueButton.textContent='🎵 Продолжить';
+                continueButton.onclick=continueToApp;
+                continueButton.style.cssText="background:linear-gradient(45deg,#ff6b6b,#ee5a24);color:white;border:none;padding:15px 30px;font-size:1.2em;font-weight:bold;border-radius:50px;cursor:pointer;box-shadow:0 4px 15px rgba(255,107,107,0.4);animation:pulse 2s infinite;transition:all .3s ease";
+                continueButton.addEventListener('mouseenter',function(){this.style.transform='translateY(-2px) scale(1.05)';this.style.boxShadow='0 6px 20px rgba(255,107,107,0.6)'});continueButton.addEventListener('mouseleave',function(){this.style.transform='none';this.style.boxShadow='0 4px 15px rgba(255,107,107,0.4)'});
                 buttonContainer.appendChild(continueButton);
-                console.log('Кнопка Продолжить создана');
             }
         }
-        
-        function continueToApp() {
-            // Активируем аудио (это считается пользовательским взаимодействием)
-            if (musicEnabled) {
-                startBackgroundMusic();
-            }
-            
-            // Скрываем экран загрузки
-            hideLoadingScreen();
-        }
-        
-        function hideLoadingScreen() {
-            const loadingScreen = document.getElementById('loadingScreen');
-            if (loadingScreen) {
-                loadingScreen.classList.add('hidden');
-                // Удаляем элемент из DOM через некоторое время
-                setTimeout(() => {
-                    loadingScreen.remove();
-                }, 500);
-            }
-        }
-        
-        function markStepComplete(step) {
-            console.log(`Отмечаем шаг как завершенный: ${step}`);
-            loadingSteps[step] = true;
-            updateLoadingProgress();
-            console.log('Текущее состояние загрузки:', loadingSteps);
-        }
-        
-        // Инициализация аудио
-        function initAudio() {
-            audioElements = {
-                bgMusic: document.getElementById('bgMusic'),
-                spinSound: document.getElementById('spinSound'),
-                winSound: document.getElementById('winSound'),
-                jackpotSound: document.getElementById('jackpotSound')
-            };
-            
-            // Настройка громкости
-            if (audioElements.bgMusic) {
-                audioElements.bgMusic.volume = 0.3; // 30% громкости для фона
-            }
-            if (audioElements.spinSound) {
-                audioElements.spinSound.volume = 0.5;
-            }
-            if (audioElements.winSound) {
-                audioElements.winSound.volume = 0.7;
-            }
-            if (audioElements.jackpotSound) {
-                audioElements.jackpotSound.volume = 0.8;
-            }
-            
-            // Загружаем настройки из localStorage
-            const savedMusicSetting = localStorage.getItem('casinoMusicEnabled');
-            const savedSoundsSetting = localStorage.getItem('casinoSoundsEnabled');
-            
-            if (savedMusicSetting !== null) {
-                musicEnabled = savedMusicSetting === 'true';
-            }
-            if (savedSoundsSetting !== null) {
-                soundsEnabled = savedSoundsSetting === 'true';
-            }
-            
+        function continueToApp(){if(musicEnabled)startBackgroundMusic();hideLoadingScreen()}
+        function hideLoadingScreen(){const loadingScreen=document.getElementById('loadingScreen');if(loadingScreen){loadingScreen.classList.add('hidden');setTimeout(()=>{loadingScreen.remove()},500)}}
+        function markStepComplete(step){loadingSteps[step]=true;updateLoadingProgress()}
+        function initAudio(){
+            audioElements={bgMusic:document.getElementById('bgMusic'),spinSound:document.getElementById('spinSound'),winSound:document.getElementById('winSound'),jackpotSound:document.getElementById('jackpotSound')};
+            if(audioElements.bgMusic)audioElements.bgMusic.volume=0.3;
+            if(audioElements.spinSound)audioElements.spinSound.volume=0.5;
+            if(audioElements.winSound)audioElements.winSound.volume=0.7;
+            if(audioElements.jackpotSound)audioElements.jackpotSound.volume=0.8;
+            const savedMusicSetting=localStorage.getItem('casinoMusicEnabled');
+            const savedSoundsSetting=localStorage.getItem('casinoSoundsEnabled');
+            if(savedMusicSetting!==null)musicEnabled=savedMusicSetting==='true';
+            if(savedSoundsSetting!==null)soundsEnabled=savedSoundsSetting==='true';
             updateAudioButtons();
-
-            // Отмечаем как завершенный шаг
             markStepComplete('audio');
         }
-        
-        
-        // Функция для воспроизведения звука
-        function playSound(soundName) {
-            if (!soundsEnabled || !audioElements[soundName]) {
-                return;
-            }
-            
-            try {
-                audioElements[soundName].currentTime = 0;
-                audioElements[soundName].play().catch(e => {
-                    console.log('Не удалось воспроизвести звук:', soundName, e);
-                });
-            } catch (error) {
-                console.log('Ошибка воспроизведения звука:', soundName, error);
-            }
-        }
-        
-        // Функция для управления фоновой музыкой
-        function toggleMusic() {
-            musicEnabled = !musicEnabled;
-            localStorage.setItem('casinoMusicEnabled', musicEnabled.toString());
-            
-            if (musicEnabled) {
-                startBackgroundMusic();
-            } else {
-                stopBackgroundMusic();
-            }
-            
-            updateAudioButtons();
-        }
-        
-        // Функция для управления звуками
-        function toggleSounds() {
-            soundsEnabled = !soundsEnabled;
-            localStorage.setItem('casinoSoundsEnabled', soundsEnabled.toString());
-            updateAudioButtons();
-        }
-        
-        // Обновление кнопок управления аудио
-        function updateAudioButtons() {
-            const musicBtn = document.getElementById('musicToggle');
-            const soundBtn = document.getElementById('soundToggle');
-            
-            if (musicBtn) {
-                musicBtn.classList.toggle('active', musicEnabled);
-                musicBtn.textContent = musicEnabled ? '🎵' : '🔇';
-            }
-            
-            if (soundBtn) {
-                soundBtn.classList.toggle('active', soundsEnabled);
-                soundBtn.textContent = soundsEnabled ? '🔊' : '🔇';
-            }
-        }
-        
-        // Запуск фоновой музыки
-        function startBackgroundMusic() {
-            if (musicEnabled && audioElements.bgMusic && !isSpinning) {
-                audioElements.bgMusic.play().catch(e => {
-                    console.log('Не удалось запустить фоновую музыку:', e);
-                });
-            }
-        }
-        
-        // Остановка фоновой музыки
-        function stopBackgroundMusic() {
-            if (audioElements.bgMusic) {
-                audioElements.bgMusic.pause();
-            }
-        }
-        
-        // Пауза фоновой музыки во время спина
-        function pauseBackgroundMusic() {
-            if (audioElements.bgMusic && !audioElements.bgMusic.paused) {
-                audioElements.bgMusic.pause();
-            }
-        }
-        
-        // Возобновление фоновой музыки после спина
-        function resumeBackgroundMusic() {
-            if (musicEnabled && audioElements.bgMusic && audioElements.bgMusic.paused) {
-                audioElements.bgMusic.play().catch(e => {
-                    console.log('Не удалось возобновить фоновую музыку:', e);
-                });
-            }
+        function playSound(soundName){if(!soundsEnabled||!audioElements[soundName])return;try{audioElements[soundName].currentTime=0;audioElements[soundName].play().catch(()=>{})}catch(e){}}
+        function toggleMusic(){musicEnabled=!musicEnabled;localStorage.setItem('casinoMusicEnabled',musicEnabled.toString());if(musicEnabled)startBackgroundMusic();else stopBackgroundMusic();updateAudioButtons()}
+        function toggleSounds(){soundsEnabled=!soundsEnabled;localStorage.setItem('casinoSoundsEnabled',soundsEnabled.toString());updateAudioButtons()}
+        function updateAudioButtons(){const musicBtn=document.getElementById('musicToggle');const soundBtn=document.getElementById('soundToggle');if(musicBtn){musicBtn.classList.toggle('active',musicEnabled);musicBtn.textContent=musicEnabled?'🎵':'🔇'}if(soundBtn){soundBtn.classList.toggle('active',soundsEnabled);soundBtn.textContent=soundsEnabled?'🔊':'🔇'}}
+        function startBackgroundMusic(){if(musicEnabled&&audioElements.bgMusic&&!isSpinning){audioElements.bgMusic.play().catch(()=>{})}}
+        function stopBackgroundMusic(){if(audioElements.bgMusic)audioElements.bgMusic.pause()}
+        function pauseBackgroundMusic(){if(audioElements.bgMusic&&!audioElements.bgMusic.paused){audioElements.bgMusic.pause()}}
+        function resumeBackgroundMusic(){if(musicEnabled&&audioElements.bgMusic&&audioElements.bgMusic.paused){audioElements.bgMusic.play().catch(()=>{})}}
+        const symbols=['🍒','💎','🍋','🔔','⭐','🍉','💰'];
+        async function chooseProfile() {
+            const response = await fetch(`${apiBaseUrl}/api/players`);
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error || 'Failed to load players');
+
+            const container = document.getElementById('profiles');
+            container.innerHTML = '';
+
+            data.data.forEach(player => {
+                const card = document.createElement('div');
+                card.className = 'profile-card';
+                card.innerHTML = `
+                    <div class="profile-avatar">
+                        <img src="miniapp/pfp/${player.id}.jpg" alt="${player.name}" />
+                    </div>
+                    <div class="profile-name">${player.name}</div>
+                    <div class="profile-coins">${player.coins}💰</div>
+                `;
+                card.onclick = () => {
+                    playerId = player.id;
+                    container.style.display = 'none';
+                    document.getElementById('casino-container').style.display = 'block';
+                    initializePlayer();
+                };
+                container.appendChild(card);
+            });
         }
 
-        // Символы слот-машины
-        const symbols = ['🍒', '💎', '🍋', '🔔', '⭐', '🍉', '💰'];
-        
-        // Простая таблица выплат: 300 BTC за любые 3 в ряд
-        const WIN_AMOUNT = 300;
 
-        // Инициализация данных игрока
-        async function initializePlayer() {
+        async function initializePlayer(){
             try {
-                // Получаем ID игрока из Telegram WebApp
-                if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe) {
-                    playerId = window.Telegram.WebApp.initDataUnsafe.user?.id;
-                }
-                
-                // Для демонстрации используем тестовый ID
-                if (!playerId) {
-                    playerId = 123456789; // Тестовый ID
-                }
-                
-                // Загружаем данные игрока с сервера
                 const response = await fetch(`${apiBaseUrl}/api/player/${playerId}`);
                 const data = await response.json();
-                
                 if (data.success) {
                     currentCoins = data.data.coins;
                     spinsLeft = data.data.spins_left;
@@ -908,9 +335,7 @@
                 } else {
                     throw new Error(data.error || 'Failed to load player data');
                 }
-            } catch (error) {
-                console.error('Error initializing player:', error);
-                // Fallback to demo data
+            } catch (e) {
                 currentCoins = 100;
                 spinsLeft = 6;
                 updateDisplay();
@@ -918,261 +343,125 @@
             }
         }
 
-        function updateDisplay() {
-            document.getElementById('spins-left').textContent = spinsLeft;
-            
-            const spinBtn = document.getElementById('spin-btn');
-            if (spinsLeft <= 0) {
-                spinBtn.disabled = true;
-                spinBtn.textContent = '🚫 НЕТ СПИНОВ';
-            } else {
-                spinBtn.disabled = false;
-                spinBtn.textContent = '🎲 КРУТИТЬ СЛОТЫ';
-            }
-        }
-
-        async function spinSlots() {
-            console.log('spinSlots called', {isSpinning, spinsLeft, playerId});
-            if (isSpinning || spinsLeft <= 0 || !playerId) {
-                console.log('spinSlots blocked:', {isSpinning, spinsLeft, playerId});
-                return;
-            }
-
-            console.log('Starting spin animation');
-            isSpinning = true;
-            const spinBtn = document.getElementById('spin-btn');
-            const loading = document.getElementById('loading');
-            const result = document.getElementById('result');
-            const slotMachine = document.getElementById('slot-machine');
-            const payline = document.getElementById('payline');
-
-            // Показываем загрузку и анимацию
+        function updateDisplay(){document.getElementById('spins-left').textContent=spinsLeft;const spinBtn=document.getElementById('spin-btn');if(spinsLeft<=0){spinBtn.disabled=true;spinBtn.textContent='🚫 НЕТ СПИНОВ'}else{spinBtn.disabled=false;spinBtn.textContent='🎲 КРУТИТЬ СЛОТЫ'}}
+        async function spinSlots(){
+            if(isSpinning||spinsLeft<=0||!playerId)return;
+            isSpinning=true;
+            const spinBtn=document.getElementById('spin-btn');
+            const loading=document.getElementById('loading');
+            const result=document.getElementById('result');
+            const slotMachine=document.getElementById('slot-machine');
+            const payline=document.getElementById('payline');
             loading.classList.add('show');
-            spinBtn.disabled = true;
-            result.textContent = '';
+            spinBtn.disabled=true;
+            result.textContent='';
             slotMachine.classList.add('spinning');
             payline.classList.add('active');
-            
-            // Приостанавливаем фоновую музыку во время спина
             pauseBackgroundMusic();
-            
-
-
-            try {
-                // Отправляем запрос на спин на сервер
-                const response = await fetch(`${apiBaseUrl}/api/spin`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        player_id: playerId
-                    })
-                });
-                
-                const spinData = await response.json();
-                
-                if (spinData.success) {
-                    // Получаем результат спина
-                    const slotResult = generateSlotResult(spinData.data.prize);
-                    // Воспроизводим звук вращения
+            try{
+                const response=await fetch(`${apiBaseUrl}/api/spin`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId})});
+                const spinData=await response.json();
+                if(spinData.success){
+                    const slotResult=generateSlotResult(spinData.data.prize);
                     playSound('spinSound');
-                    // Анимируем вращение барабанов
-                    animateReels(slotResult, () => {
-                        // Обновляем данные игрока
-                        currentCoins = spinData.data.coins;
-                        spinsLeft = spinData.data.spins_left;
-                        
-                        // Проверяем выигрыш
-                        const winAmount = checkWin(slotResult);
-                        
-                        // Скрываем загрузку и показываем результат
+                    animateReels(slotResult,()=>{
+                        currentCoins=spinData.data.coins;
+                        spinsLeft=spinData.data.spins_left;
+                        const coins_gained = spinData.data.coins_gained || 0;
                         loading.classList.remove('show');
                         slotMachine.classList.remove('spinning');
                         payline.classList.remove('active');
-                        
-                        if (winAmount > 0) {
-                            if (winAmount >= 50) {
-                                // Джекпот эффект
+                        if(coins_gained>0){
+                            if(coins_gained>=500){
                                 triggerJackpotEffect();
-                                playSound('jackpotSound');
-                            } else {
-                                // Обычный выигрыш
                                 playSound('winSound');
+                            }else{
+                                playSound('jackpotSound');
                             }
-                            result.textContent = `🎉 ВЫИГРЫШ! +${winAmount} BTC`;
+
+                            if (coins_gained === 50) {
+                                result.textContent=`💰 Небольшой выигрыш! +${coins_gained} BTC`;
+
+                            }else if(coins_gained === 150) {
+                                result.textContent=`✨ Хороший выигрыш! +${coins_gained} BTC`;
+                            }else if (coins_gained === 300) {
+                                result.textContent=`🎉 БОЛЬШОЙ ВЫИГРЫШ! +${coins_gained} BTC`;
+                            } else if(coins_gained === 500) {
+                                result.textContent = `🎰 МЕГА ДЖЕКПОТ! ЕБААААТЬ! +${coins_gained} BTC`;
+                            }
                             result.classList.add('win-animation');
                             payline.classList.add('active');
-                        } else {
-                            result.textContent = spinData.data.prize.text;
+                        }else{
+                            result.textContent=spinData.data.prize?.text||'Попробуйте ещё раз! 🎲';
                         }
-                        
-                        setTimeout(() => {
-                            result.classList.remove('win-animation');
-                            payline.classList.remove('active');
-                        }, 2000);
-
+                        setTimeout(()=>{result.classList.remove('win-animation');payline.classList.remove('active')},2000);
                         updateDisplay();
-                        isSpinning = false;
-                        
-                        // Возобновляем фоновую музыку после завершения спина
-                        setTimeout(() => {
-                            resumeBackgroundMusic();
-                        }, 500); // Небольшая задержка для плавного перехода
+                        isSpinning=false;
+                        setTimeout(()=>{resumeBackgroundMusic()},500);
                     });
-                } else {
-                    throw new Error(spinData.error || 'Spin failed');
+                }else{
+                    throw new Error(spinData.error||'Spin failed');
                 }
-            } catch (error) {
-                console.error('Error spinning slots:', error);
+            }catch(error){
                 loading.classList.remove('show');
                 slotMachine.classList.remove('spinning');
                 payline.classList.remove('active');
-                result.textContent = `❌ Ошибка: ${error.message}`;
-                isSpinning = false;
-                spinBtn.disabled = false;
-                
-                // Возобновляем музыку даже при ошибке
-                setTimeout(() => {
-                    resumeBackgroundMusic();
-                }, 500);
+                document.getElementById('result').textContent=`❌ Ошибка: ${error.message}`;
+                isSpinning=false;
+                spinBtn.disabled=false;
+                setTimeout(()=>{resumeBackgroundMusic()},500);
             }
         }
-
-        function generateSlotResult(prizeData) {
-            // Генерируем результат слота на основе приза
-            if (prizeData.type === 'win') {
-                // Для выигрыша - случайные 3 одинаковых символа
-                const randomSymbol = symbols[Math.floor(Math.random() * symbols.length)];
-                return [randomSymbol, randomSymbol, randomSymbol];
-            } else {
-                // Для проигрыша - разные символы
-                const shuffled = [...symbols].sort(() => Math.random() - 0.5);
-                return [shuffled[0], shuffled[1], shuffled[2]];
+        function generateSlotResult(prizeData){
+            if(prizeData && prizeData.type && prizeData.type!=='lose'){
+                const randomSymbol=symbols[Math.floor(Math.random()*symbols.length)];
+                return [randomSymbol,randomSymbol,randomSymbol];
+            }else{
+                const shuffled=[...symbols].sort(()=>Math.random()-0.5);
+                return [shuffled[0],shuffled[1],shuffled[2]];
             }
         }
-
-        function animateReels(finalResult, callback) {
-            const reels = [
-                document.getElementById('symbols1'),
-                document.getElementById('symbols2'),
-                document.getElementById('symbols3')
-            ];
-
-            let completedReels = 0;
-
-            reels.forEach((reel, index) => {
-                if (!reel) {
-                    console.error(`Reel ${index + 1} not found`);
-                    return;
-                }
-                
-                // Простая анимация вращения
-                const rotations = 55; // 15-25 смен символов
-                
-                // Анимируем вращение с задержкой
-                setTimeout(() => {
-                    // Показываем анимацию вращения
-                    let currentRotation = 0;
-                    const rotationInterval = setInterval(() => {
-                        // Меняем символ на случайный
-                        const randomSymbol = symbols[Math.floor(Math.random() * symbols.length)];
-                        const symbolElements = reel.querySelectorAll('.symbol');
-                        
-                        // Обновляем все символы в барабане
-                        symbolElements.forEach(symbolEl => {
-                            symbolEl.textContent = randomSymbol;
-                        });
-                        
+        function animateReels(finalResult,callback){
+            const reels=[document.getElementById('symbols1'),document.getElementById('symbols2'),document.getElementById('symbols3')];
+            let completedReels=0;
+            reels.forEach((reel,index)=>{
+                if(!reel)return;
+                const rotations=55;
+                setTimeout(()=>{
+                    let currentRotation=0;
+                    const rotationInterval=setInterval(()=>{
+                        const randomSymbol=symbols[Math.floor(Math.random()*symbols.length)];
+                        const symbolElements=reel.querySelectorAll('.symbol');
+                        symbolElements.forEach(symbolEl=>{symbolEl.textContent=randomSymbol});
                         currentRotation++;
-                        if (currentRotation >= rotations) {
+                        if(currentRotation>=rotations){
                             clearInterval(rotationInterval);
-                            
-                            // Устанавливаем финальный символ
-                            setReelSymbol(index + 1, finalResult[index]);
+                            setReelSymbol(index+1,finalResult[index]);
                             completedReels++;
-                            
-                            if (completedReels === 3) {
-                                callback();
-                            }
+                            if(completedReels===3)callback();
                         }
-                    }, 80); // Меняем символ каждые 80мс для более плавной анимации
-                }, index * 200); // Задержка между барабанами
+                    },80);
+                },index*200);
             });
         }
-
-        function setReelSymbol(reelNumber, symbol) {
-            const reel = document.getElementById(`symbols${reelNumber}`);
-            if (!reel) {
-                console.error(`Reel symbols${reelNumber} not found`);
-                return;
-            }
-            
-            const symbolElements = reel.querySelectorAll('.symbol');
-            
-            // Устанавливаем символ во всех позициях для стабильности
-            symbolElements.forEach(symbolEl => {
-                symbolEl.textContent = symbol;
-            });
+        function setReelSymbol(reelNumber,symbol){
+            const reel=document.getElementById(`symbols${reelNumber}`);
+            if(!reel)return;
+            const symbolElements=reel.querySelectorAll('.symbol');
+            symbolElements.forEach(symbolEl=>{symbolEl.textContent=symbol});
         }
-
-        function checkWin(result) {
-            // Проверяем, если все 3 символа одинаковы
-            if (result[0] === result[1] && result[1] === result[2]) {
-                return WIN_AMOUNT; // 300 BTC
-            }
-            return 0; // Нет выигрыша
-        }
-
-        function triggerJackpotEffect() {
-            const flash = document.getElementById('jackpot-flash');
+        function triggerJackpotEffect(){
+            const flash=document.getElementById('jackpot-flash');
             flash.classList.add('active');
-            
-            setTimeout(() => {
-                flash.classList.remove('active');
-            }, 1500);
+            setTimeout(()=>{flash.classList.remove('active')},1500);
         }
-
-        // Функция для отправки данных в Telegram бот
-        function sendToTelegramBot(data) {
-            if (window.Telegram && window.Telegram.WebApp) {
-                window.Telegram.WebApp.sendData(JSON.stringify(data));
-            }
-        }
-
-        // Инициализация при загрузке страницы
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM загружен, начинаем инициализацию');
-            
-            // Добавляем таймаут для принудительного завершения загрузки
-            setTimeout(() => {
-                console.log('Принудительное завершение загрузки через 10 секунд');
-                // Отмечаем все шаги как завершенные
-                Object.keys(loadingSteps).forEach(step => {
-                    if (!loadingSteps[step]) {
-                        console.log(`Принудительно завершаем шаг: ${step}`);
-                        markStepComplete(step);
-                    }
-                });
-            }, 10000);
-            
-            // Запускаем инициализацию
-            initializePlayer();
+        function sendToTelegramBot(data){if(window.Telegram&&window.Telegram.WebApp)window.Telegram.WebApp.sendData(JSON.stringify(data))}
+        document.addEventListener('DOMContentLoaded',function(){
+            setTimeout(()=>{Object.keys(loadingSteps).forEach(step=>{if(!loadingSteps[step])markStepComplete(step)})},10000);
+            chooseProfile();
             initAudio();
-            
-            // Симулируем завершение preload шага через небольшую задержку
-            setTimeout(() => {
-                console.log('Завершаем preload шаг');
-                markStepComplete('preload');
-            }, 1000);
-            
-            // Инициализация Telegram WebApp
-            if (window.Telegram && window.Telegram.WebApp) {
-                window.Telegram.WebApp.ready();
-                window.Telegram.WebApp.expand();
-            }
-            
-            // Аудио теперь активируется через кнопку "Продолжить"
+            setTimeout(()=>{markStepComplete('preload')},1000);
+            if(window.Telegram&&window.Telegram.WebApp){window.Telegram.WebApp.ready();window.Telegram.WebApp.expand()}
         });
     </script>
 </body>
