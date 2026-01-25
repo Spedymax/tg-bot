@@ -90,7 +90,12 @@ class Player:
         """Get the level of a specific characteristic"""
         for char in self.characteristics:
             if char.startswith(f"{characteristic_name}:"):
-                return int(char.split(":")[1])
+                parts = char.split(":")
+                if len(parts) >= 2:
+                    try:
+                        return int(parts[1])
+                    except ValueError:
+                        return 0
         return 0
 
     def update_characteristic_level(self, characteristic_name: str, level: int):
@@ -116,7 +121,12 @@ class Player:
         """Get quiz score for a specific chat"""
         for entry in self.correct_answers:
             if entry.startswith(f"{chat_id}:"):
-                return int(entry.split(":")[1])
+                parts = entry.split(":")
+                if len(parts) >= 2:
+                    try:
+                        return int(parts[1])
+                    except ValueError:
+                        return 0
         return 0
 
     def update_quiz_score(self, chat_id: int, score: int):

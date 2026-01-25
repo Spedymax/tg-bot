@@ -1,35 +1,71 @@
 import json
+import logging
 from typing import Dict, Optional, List
 from datetime import datetime, timezone
 from models.player import Player
 from database.db_manager import DatabaseManager
 
+logger = logging.getLogger(__name__)
+
+# Whitelist of allowed field names to prevent SQL injection
+ALLOWED_PLAYER_FIELDS = {
+    'player_name', 'pisunchik_size', 'coins', 'items', 'characteristics',
+    'player_stocks', 'statuetki', 'chat_id', 'correct_answers', 'nnn_checkins',
+    'last_used', 'last_vor', 'last_prezervativ', 'last_joke', 'casino_last_used',
+    'casino_usage_count', 'ballzzz_number', 'notified'
+}
+
 class PlayerService:
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
-        self._cache: Dict[int, Player] = {}
-        self._cache_expiry = 300  # 5 minutes cache expiry
+        self._cache: Dict[int, dict] = {}  # {player_id: {"player": Player, "cached_at": datetime}}
+        self._cache_expiry_seconds = 300  # 5 minutes cache expiry
+
+    def _is_cache_valid(self, player_id: int) -> bool:
+        """Check if cache entry is still valid."""
+        if player_id not in self._cache:
+            return False
+        cached_at = self._cache[player_id].get("cached_at")
+        if not cached_at:
+            return False
+        age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+        return age < self._cache_expiry_seconds
+
+    def _cache_player(self, player: Player):
+        """Cache a player with timestamp."""
+        self._cache[player.player_id] = {
+            "player": player,
+            "cached_at": datetime.now(timezone.utc)
+        }
+
+    def _get_cached_player(self, player_id: int) -> Optional[Player]:
+        """Get player from cache if valid."""
+        if self._is_cache_valid(player_id):
+            return self._cache[player_id]["player"]
+        return None
 
     def get_player(self, player_id: int) -> Optional[Player]:
         """Get a player by ID, first checking cache, then database"""
-        if player_id in self._cache:
-            return self._cache[player_id]
-        
+        # Check cache first
+        cached_player = self._get_cached_player(player_id)
+        if cached_player:
+            return cached_player
+
         connection = self.db.get_connection()
         try:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT * FROM pisunchik_data WHERE player_id = %s", (player_id,))
                 row = cursor.fetchone()
-                
+
                 if row:
                     # Get column names
                     column_names = [desc[0] for desc in cursor.description]
                     player = Player.from_db_row(row, column_names)
-                    self._cache[player_id] = player
+                    self._cache_player(player)
                     return player
                 return None
         except Exception as e:
-            print(f"Error getting player {player_id}: {e}")
+            logger.error(f"Error getting player {player_id}: {e}")
             return None
         finally:
             self.db.release_connection(connection)
@@ -85,11 +121,11 @@ class PlayerService:
                     ))
                 
                 connection.commit()
-                self._cache[player.player_id] = player
+                self._cache_player(player)
                 return True
                 
         except Exception as e:
-            print(f"Error saving player {player.player_id}: {e}")
+            logger.error(f"Error saving player {player.player_id}: {e}")
             connection.rollback()
             return False
         finally:
@@ -125,7 +161,7 @@ class PlayerService:
                 cursor.execute("SELECT 1 FROM pisunchik_data WHERE player_id = %s", (player_id,))
                 return cursor.fetchone() is not None
         except Exception as e:
-            print(f"Error checking if player exists {player_id}: {e}")
+            logger.error(f"Error checking if player exists {player_id}: {e}")
             return False
         finally:
             self.db.release_connection(connection)
@@ -143,31 +179,36 @@ class PlayerService:
                 for row in rows:
                     player = Player.from_db_row(row, column_names)
                     players[player.player_id] = player
-                    self._cache[player.player_id] = player
-                
+                    self._cache_player(player)
+
                 return players
         except Exception as e:
-            print(f"Error getting all players: {e}")
+            logger.error(f"Error getting all players: {e}")
             return {}
         finally:
             self.db.release_connection(connection)
 
     def update_player_field(self, player_id: int, field_name: str, value) -> bool:
         """Update a specific field for a player"""
+        # Validate field_name against whitelist to prevent SQL injection
+        if field_name not in ALLOWED_PLAYER_FIELDS:
+            logger.error(f"Invalid field name: {field_name}")
+            return False
+
         connection = self.db.get_connection()
         try:
             with connection.cursor() as cursor:
+                # Safe because field_name is validated against whitelist
                 query = f"UPDATE pisunchik_data SET {field_name} = %s WHERE player_id = %s"
                 cursor.execute(query, (value, player_id))
                 connection.commit()
-                
-                # Update cache if player is cached
-                if player_id in self._cache:
-                    setattr(self._cache[player_id], field_name, value)
-                
+
+                # Invalidate cache to force reload on next access
+                self.remove_from_cache(player_id)
+
                 return True
         except Exception as e:
-            print(f"Error updating player field {field_name} for player {player_id}: {e}")
+            logger.error(f"Error updating player field {field_name} for player {player_id}: {e}")
             connection.rollback()
             return False
         finally:
@@ -188,7 +229,7 @@ class PlayerService:
                 
                 return [Player.from_db_row(row, column_names) for row in rows]
         except Exception as e:
-            print(f"Error getting leaderboard: {e}")
+            logger.error(f"Error getting leaderboard: {e}")
             return []
         finally:
             self.db.release_connection(connection)

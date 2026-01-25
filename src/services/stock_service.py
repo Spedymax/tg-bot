@@ -1,11 +1,11 @@
 import random
-from typing import Dict, Set, Tuple
-from psycopg2.extensions import cursor
+from typing import Dict, Set, Tuple, Any
+
 
 class StockService:
     """Service to manage stock price updates and transactions."""
-    
-    def update_stock_prices(self, cursor: cursor):
+
+    def update_stock_prices(self, cursor: Any):
         """Fetch and update stock prices randomly."""
         query = "SELECT company_name, price FROM stocks"
         cursor.execute(query)
@@ -25,7 +25,7 @@ class StockService:
             cursor.execute(update_query, (new_price, company))
 
 
-    def get_stock_data(self, cursor: cursor) -> Dict[str, float]:
+    def get_stock_data(self, cursor: Any) -> Dict[str, float]:
         """Retrieve all stock data from the database."""
         query = "SELECT company_name, price FROM stocks"
         cursor.execute(query)
@@ -44,7 +44,12 @@ class StockService:
         original_quantity, updated_stocks = (0, participant_stocks)
 
         if stock_record:
-            original_quantity = int(stock_record.split(':')[1])
+            parts = stock_record.split(':')
+            if len(parts) >= 2:
+                try:
+                    original_quantity = int(parts[1])
+                except ValueError:
+                    original_quantity = 0
             participant_stocks.remove(stock_record)
 
         new_quantity = max(0, original_quantity + (quantity * factor))
@@ -57,7 +62,11 @@ class StockService:
     
     def calculate_price_change(self, old_price: float, new_price: float) -> Tuple[float, str]:
         """Calculate price change and determine arrow direction."""
-        change = ((new_price - old_price) / old_price) * 100
+        if old_price == 0:
+            # Avoid division by zero
+            change = 100.0 if new_price > 0 else 0.0
+        else:
+            change = ((new_price - old_price) / old_price) * 100
         arrow = '⬆️' if change > 0 else '⬇️'
         return change, arrow
 

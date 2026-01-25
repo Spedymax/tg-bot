@@ -6,7 +6,8 @@ import subprocess
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from tenacity import retry, stop_after_attempt, wait_exponential
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -71,43 +72,57 @@ class SpotifyService:
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=5))
     def download_song(self, track_uri: str) -> Optional[str]:
         """Download a song from Spotify using spotdl."""
+        unique_dir = None
         try:
             # Create a unique directory for this download
             unique_dir = os.path.join(self.download_dir, str(uuid.uuid4()))
             os.makedirs(unique_dir, exist_ok=True)
-            
+
             # Run spotdl command
             cmd = ["spotdl", "--output", unique_dir, "--bitrate", "320k", track_uri]
             logger.info(f"Downloading song {track_uri} to {unique_dir}")
-            
+
             result = subprocess.run(
-                cmd, 
-                capture_output=True, 
-                text=True, 
-                encoding="utf-8", 
-                errors="replace", 
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=120
             )
-            
+
             if result.returncode != 0:
                 logger.error(f"Failed to download {track_uri}: {result.stderr}")
+                self._cleanup_directory(unique_dir)
                 return None
-            
+
             # Get the downloaded file
             files = os.listdir(unique_dir)
             if not files:
                 logger.error(f"No files found after download for {track_uri}")
+                self._cleanup_directory(unique_dir)
                 return None
-            
+
             file_path = os.path.join(unique_dir, files[0])
             return file_path
-            
+
         except Exception as e:
             logger.exception(f"Exception during download of {track_uri}: {str(e)}")
+            if unique_dir:
+                self._cleanup_directory(unique_dir)
             return None
 
+    def _cleanup_directory(self, dir_path: str) -> None:
+        """Safely remove a directory and all its contents."""
+        try:
+            if dir_path and os.path.exists(dir_path):
+                shutil.rmtree(dir_path)
+                logger.debug(f"Cleaned up directory: {dir_path}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup directory {dir_path}: {str(e)}")
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    def get_track_info(self, track_uri: str) -> Dict[str, any]:
+    def get_track_info(self, track_uri: str) -> Dict[str, Any]:
         """Get track information from Spotify."""
         try:
             # Extract track ID from URI or URL

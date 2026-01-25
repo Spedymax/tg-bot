@@ -40,6 +40,7 @@ class TelegramBot:
     def __init__(self):
         """Initialize the Telegram bot with new architecture"""
         self.bot = telebot.TeleBot(Settings.TELEGRAM_BOT_TOKEN)
+        logger.info("Starting connection to database...")
         self.db_manager = DatabaseManager()
         self.player_service = PlayerService(self.db_manager)
         self.game_service = GameService(self.player_service)
@@ -64,12 +65,6 @@ class TelegramBot:
         self.plot = self.load_json_file('assets/data/plot.json')
         self.shop = self.load_json_file('assets/data/shop.json')
         self.statuetki = self.load_json_file('assets/data/statuetki.json')
-
-        # Load game data
-        # self.char = self.load_json_file('../assets/data/char.json')
-        # self.plot = self.load_json_file('../assets/data/plot.json')
-        # self.shop = self.load_json_file('../assets/data/shop.json')
-        # self.statuetki = self.load_json_file('../assets/data/statuetki.json')
 
         # Global state (to be refactored later)
         self.admin_actions = {}

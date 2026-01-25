@@ -1,6 +1,11 @@
+import logging
+from contextlib import contextmanager
 import psycopg2
 from psycopg2 import pool
 from config.settings import Settings
+
+logger = logging.getLogger(__name__)
+
 
 class DatabaseManager:
     def __init__(self):
@@ -15,6 +20,15 @@ class DatabaseManager:
     def close_all_connections(self):
         self.connection_pool.closeall()
 
+    @contextmanager
+    def get_connection_context(self):
+        """Context manager for safe connection handling."""
+        connection = self.get_connection()
+        try:
+            yield connection
+        finally:
+            self.release_connection(connection)
+
     def execute_query(self, query, params=None):
         connection = self.get_connection()
         try:
@@ -24,13 +38,8 @@ class DatabaseManager:
             connection.commit()
             return result
         except (Exception, psycopg2.DatabaseError) as error:
-            print(f"Error executing query: {error}")
+            logger.error(f"Error executing query: {error}")
+            connection.rollback()
             return None
         finally:
             self.release_connection(connection)
-
-    def update_player_data(self, player_id, data):
-        # Example method to update player data
-        query = "UPDATE players SET data = %s WHERE player_id = %s"
-        params = (data, player_id)
-        self.execute_query(query, params)
