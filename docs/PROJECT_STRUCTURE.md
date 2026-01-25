@@ -133,7 +133,7 @@ tg-bot/
 2. **Set up environment:**
    ```bash
    cp .env.example .env
-   # Edit .env with your credentials
+   # Edit .env with your credentials (include OPENAI_API_KEY for AI features)
    ```
 
 3. **Run the bot:**
