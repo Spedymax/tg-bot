@@ -1,3 +1,4 @@
+import random
 import schedule
 import time
 import logging
@@ -13,22 +14,22 @@ logger = logging.getLogger(__name__)
 
 class QuizScheduler:
     """Сервис для автоматической отправки квизов по расписанию."""
-    
+
     def __init__(self, bot, db_manager, trivia_service: TriviaService):
         self.bot = bot
         self.db_manager = db_manager
         self.trivia_service = trivia_service
-        
-        # Настройки квизов - 3 раза в день
-        self.quiz_times = ["10:00", "15:00", "20:00"]
-        
+
+        # Настройки квизов из Settings
+        self.quiz_times = Settings.TRIVIA_HOURS
+
         # ID чата с друзьями (из настроек)
         self.target_chat_id = Settings.CHAT_IDS['main']  # Основная группа
-        
+
         # Флаг для остановки планировщика
         self.is_running = False
         self.scheduler_thread = None
-        
+
         # Настройка расписания
         self.setup_schedule()
         
@@ -95,28 +96,27 @@ class QuizScheduler:
         try:
             # Создаем варианты ответов
             answer_options = [question_data["answer"]] + question_data["wrong_answers"][:3]
-            
+
             # Перемешиваем варианты
-            import random
             random.shuffle(answer_options)
-            
+
             # Создаем клавиатуру
             markup = types.InlineKeyboardMarkup()
-            
+
             for index, answer in enumerate(answer_options):
                 button = types.InlineKeyboardButton(
                     text=answer,
                     callback_data=f"ans_{index}"
                 )
                 markup.add(button)
-            
+
             # Отправляем объявление
             self.bot.send_message(
                 chat_id,
                 "🧠 Время квиза! Проверим ваши знания!",
                 parse_mode='HTML'
             )
-            
+
             # Отправляем вопрос
             question_msg = self.bot.send_message(
                 chat_id,
@@ -126,49 +126,20 @@ class QuizScheduler:
                 protect_content=True
             )
 
-            # Сохраняем состояние вопроса (используя существующий функционал)
-            self._save_question_state(question_msg.message_id, question_data, answer_options)
-            
+            # Сохраняем состояние вопроса используя TriviaService
+            self.trivia_service.save_question_state_raw(
+                question_msg.message_id,
+                question_data["question"],
+                {},  # players_responses
+                answer_options,
+                question_data["answer"],  # correct_answer
+                question_data["explanation"]  # explanation
+            )
+
             logger.info(f"Quiz sent to chat {chat_id}, message_id: {question_msg.message_id}")
-            
+
         except Exception as e:
             logger.error(f"Error sending quiz message: {e}")
-    
-    def _save_question_state(self, message_id: int, question_data: Dict[str, Any], answer_options: list):
-        """Сохранение состояния квиза в базе данных."""
-        try:
-            # Сохраняем вопрос в базу данных
-            connection = self.db_manager.get_connection()
-            
-            try:
-                with connection.cursor() as cursor:
-                    import json
-                    answer_options_str = json.dumps(answer_options)
-                    current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    cursor.execute(
-                        "INSERT INTO questions (question, correct_answer, answer_options, date_added, explanation) VALUES (%s, %s, %s, %s, %s)",
-                        (question_data["question"], question_data["answer"], answer_options_str, current_date, question_data["explanation"])
-                    )
-                    connection.commit()
-                    
-                    # Сохраняем состояние вопроса в том же формате, что ожидает TriviaHandlers
-                    question_state_data = {
-                        "players_responses": {},
-                        "options": answer_options
-                    }
-                    
-                    cursor.execute(
-                        "INSERT INTO question_state (message_id, original_question, players_responses) VALUES (%s, %s, %s)",
-                        (message_id, question_data["question"], json.dumps(question_state_data))
-                    )
-                    connection.commit()
-                    
-            finally:
-                self.db_manager.release_connection(connection)
-            
-        except Exception as e:
-            logger.error(f"Error saving question state: {e}")
     
     def start_scheduler(self):
         """Запуск планировщика в отдельном потоке."""

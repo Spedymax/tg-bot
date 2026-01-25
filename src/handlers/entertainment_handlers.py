@@ -1,6 +1,7 @@
 import random
 import time
 import os
+import logging
 from telebot import types
 from datetime import datetime, timezone, timedelta
 import re
@@ -8,6 +9,9 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import json
+from utils.helpers import safe_split_callback, safe_int, escape_html, safe_username
+
+logger = logging.getLogger(__name__)
 
 class EntertainmentHandlers:
     def __init__(self, bot, player_service, game_service):
@@ -50,7 +54,7 @@ class EntertainmentHandlers:
             with open(config_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"Error loading config: {e}")
+            logger.warning(f"Error loading config: {e}")
             # Return default config if file doesn't exist
             return {
                 'furry_image_urls': [
@@ -136,12 +140,12 @@ class EntertainmentHandlers:
                     self.bot.send_message(message.chat.id, "Отсылаю 9999 каринок фурри в личку Богдану :)")
                     for i in range(1, 15):
                         self.send_furry_pics(855951767)  # Bogdan's ID
-                        print(f'Отправлено: {i}')
+                        logger.debug(f'Отправлено: {i}')
                 elif prompt == "давай ещё разок":
                     self.bot.send_message(message.chat.id, "Отсылаю ещё 9999 каринок фурри в личку Богдану :)")
                     for i in range(1, 15):
                         self.send_furry_pics(855951767)
-                        print(f'Отправлено: {i}')
+                        logger.debug(f'Отправлено: {i}')
                 elif prompt == "расскажи анекдот про маму Юры":
                     self.bot.send_message(message.chat.id, "Ну ладно")
                     try:
@@ -172,7 +176,7 @@ class EntertainmentHandlers:
                 self.bot.send_message(message.chat.id, "?")
                 
         except Exception as e:
-            print(f"Error in bot conversation: {e}")
+            logger.error(f"Error in bot conversation: {e}")
             self.bot.send_message(message.chat.id, "Произошла ошибка при обработке команды.")
 
     def parse_furry_images(self, source, source_type='url'):
@@ -201,7 +205,16 @@ class EntertainmentHandlers:
                 html_content = source
                 base_url = ''
             elif source_type == 'file':
-                with open(source, 'r', encoding='utf-8') as f:
+                # Validate file path to prevent path traversal
+                safe_base = os.path.abspath('assets')
+                abs_source = os.path.abspath(source)
+                if not abs_source.startswith(safe_base):
+                    logger.warning(f"Attempted path traversal: {source}")
+                    return image_urls
+                if not os.path.isfile(abs_source):
+                    logger.warning(f"File not found: {source}")
+                    return image_urls
+                with open(abs_source, 'r', encoding='utf-8') as f:
                     html_content = f.read()
                 base_url = ''
 
@@ -253,7 +266,7 @@ class EntertainmentHandlers:
             return filtered_urls
 
         except Exception as e:
-            print(f"Error parsing images: {e}")
+            logger.error(f"Error parsing images: {e}")
             return []
 
     def get_furry_images_from_multiple_sources(self):
@@ -282,13 +295,14 @@ class EntertainmentHandlers:
                         for submission in data['submissions']:
                             if 'thumbnail' in submission:
                                 image_urls.append(submission['thumbnail'])
-            except:
+            except Exception as e:
+                logger.debug(f"Failed to fetch from {source}: {e}")
                 continue
-        
-        # If no images found from APIs, use fallback
+
+        # If no images found from APIs, use fallback from config
         if not image_urls:
-            image_urls = fallback_urls
-            
+            image_urls = self.image_urls
+
         return image_urls
 
     def send_furry_pics(self, chat_id):
@@ -303,8 +317,8 @@ class EntertainmentHandlers:
                 filtered = self.parse_furry_images('https://www.furaffinity.net/browse/', 'url')
                 if filtered:
                     image_urls = filtered
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to parse furaffinity: {e}")
         
         # Final fallback: use pre-configured URLs from config
         if not image_urls:
@@ -328,7 +342,7 @@ class EntertainmentHandlers:
                         self.bot.send_animation(chat_id, animation=url)
                     time.sleep(0.5)  # Small delay between sends
             except Exception as e:
-                print(f"Error sending image {url}: {e}")
+                logger.debug(f"Error sending image {url}: {e}")
                 continue
     
     def is_valid_image_url(self, url):
@@ -337,11 +351,11 @@ class EntertainmentHandlers:
             parsed = urlparse(url)
             if not parsed.scheme or not parsed.netloc:
                 return False
-            
+
             # Check if it's a valid image extension
             valid_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg']
             return any(url.lower().endswith(ext) for ext in valid_extensions)
-        except:
+        except (ValueError, TypeError):
             return False
     
     def send_pirate_song(self, message):
@@ -366,7 +380,7 @@ class EntertainmentHandlers:
                 self.bot.send_audio(message.chat.id, audio_file)
                 
         except Exception as e:
-            print(f"Error sending pirate song: {e}")
+            logger.error(f"Error sending pirate song: {e}")
             self.bot.send_message(message.chat.id, "Ошибка при отправке песни")
     
     def send_dad_joke(self, message):
@@ -389,28 +403,39 @@ class EntertainmentHandlers:
         # Create inline keyboard for target selection
         markup = types.InlineKeyboardMarkup()
         
-        # Add buttons for different targets (customize based on your player IDs)
+        # Add buttons for different targets using Settings
+        from config.settings import Settings
         targets = [
-            ("Юра", "otsos_742272644"),
-            ("Макс", "otsos_741542965"), 
-            ("Богдан", "otsos_855951767")
+            ("Юра", f"otsos_{Settings.PLAYER_IDS['YURA']}"),
+            ("Макс", f"otsos_{Settings.PLAYER_IDS['MAX']}"),
+            ("Богдан", f"otsos_{Settings.PLAYER_IDS['BODYA']}")
         ]
         
         for name, callback_data in targets:
             button = types.InlineKeyboardButton(name, callback_data=callback_data)
             markup.add(button)
         
+        # Escape username to prevent XSS
+        username = safe_username(message.from_user.username, player_id)
         self.bot.send_message(
             message.chat.id,
-            f"<a href='tg://user?id={player_id}'>@{message.from_user.username}</a>, у кого отсасываем?",
+            f"<a href='tg://user?id={player_id}'>@{username}</a>, у кого отсасываем?",
             reply_markup=markup,
             parse_mode='html'
         )
-    
+
     def handle_otsos_callback(self, call):
         """Handle otsos target selection"""
         try:
-            target_id = int(call.data.split('_')[1])
+            parts = safe_split_callback(call.data, "_", 2)
+            if not parts:
+                self.bot.send_message(call.message.chat.id, "Неверный формат данных")
+                return
+
+            target_id = safe_int(parts[1], 0)
+            if target_id == 0:
+                self.bot.send_message(call.message.chat.id, "Неверный ID игрока")
+                return
             
             # Remove the keyboard
             self.bot.edit_message_reply_markup(
@@ -436,11 +461,13 @@ class EntertainmentHandlers:
             self.player_service.save_player(player)
             self.player_service.save_player(target)
             
+            # Escape player name to prevent XSS
+            target_name = escape_html(target.player_name or "игрока")
             self.bot.send_message(
-                call.message.chat.id, 
-                f"Вы отсосали {stolen_amount} см у {target.player_name}!"
+                call.message.chat.id,
+                f"Вы отсосали {stolen_amount} см у {target_name}!"
             )
             
         except Exception as e:
-            print(f"Error in otsos callback: {e}")
+            logger.error(f"Error in otsos callback: {e}")
             self.bot.send_message(call.message.chat.id, "Произошла ошибка")
