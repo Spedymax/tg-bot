@@ -5,6 +5,7 @@ from telebot import types
 from datetime import datetime, timezone, timedelta
 from config.settings import Settings
 from services.trivia_service import TriviaService
+from services.pet_service import PetService
 from utils.helpers import safe_split_callback, safe_int, escape_html
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,9 @@ class TriviaHandlers:
 
         # Initialize TriviaService for AI question generation
         self.trivia_service = TriviaService(Settings.GEMINI_API_KEY, db_manager)
+
+        # Initialize PetService for pet XP integration
+        self.pet_service = PetService()
 
         # Store questions with timestamps: {message_id: {"data": ..., "created_at": datetime}}
         self.question_messages = {}
@@ -258,20 +262,97 @@ class TriviaHandlers:
                 question_data["options"]
             )
             
-            # Update player score if correct
-            if is_correct:
-                player = self.player_service.get_player(user_id)
-                if player:
-                    chat_id = call.message.chat.id
+            # Update player score and pet system
+            player = self.player_service.get_player(user_id)
+            if player:
+                chat_id = call.message.chat.id
+
+                # Update quiz score if correct
+                if is_correct:
                     current_score = player.get_quiz_score(chat_id)
                     player.update_quiz_score(chat_id, current_score + 1)
-                    self.player_service.save_player(player)
-                
+
+                # Update pet system (XP, streak, titles)
+                pet_notifications = self._update_pet_on_trivia(player, is_correct, chat_id)
+                self.player_service.save_player(player)
+
+                # Send pet notifications
+                if pet_notifications:
+                    username = call.from_user.username
+                    player_name = player.player_name or call.from_user.first_name
+                    pet_name = escape_html(player.pet.get('name', 'Улюбленець')) if player.pet else 'Улюбленець'
+
+                    if username:
+                        mention = f"@{username}"
+                    else:
+                        mention = f'<a href="tg://user?id={call.from_user.id}">{escape_html(player_name)}</a>'
+
+                    for notif_type, value in pet_notifications:
+                        try:
+                            if notif_type == 'title':
+                                msg = f"{mention}, 🏷 Ти отримав титул \"{escape_html(value)}\"! Серія правильних відповідей!"
+                            elif notif_type == 'level':
+                                msg = f"{mention}, 🎉 {pet_name} досяг рівня {value}!"
+                            elif notif_type == 'evolution':
+                                stage_name = self.pet_service.get_stage_name(value)
+                                msg = f"{mention}, ✨ {pet_name} еволюціонував у {stage_name}! Натисни /pet щоб налаштувати."
+                            else:
+                                continue
+                            self.bot.send_message(chat_id, msg, parse_mode='HTML')
+                        except Exception as e:
+                            logger.error(f"Error sending pet notification: {e}")
+
         except Exception as e:
             logger.error(f"Error in answer callback: {e}")
             self.bot.answer_callback_query(call.id, "Произошла ошибка")
-    
-    
+
+    def _update_pet_on_trivia(self, player, is_correct: bool, chat_id: int) -> list:
+        """
+        Update pet XP and streak after trivia answer.
+        Returns list of notification tuples to send: ('title', name), ('level', level), ('evolution', stage)
+        """
+        notifications = []
+
+        pet = getattr(player, 'pet', None)
+        if not pet or not pet.get('is_alive') or not pet.get('is_locked'):
+            return notifications
+
+        # Update last trivia date
+        player.last_trivia_date = datetime.now(timezone.utc)
+
+        # Add XP: 1 for participation, +3 bonus for correct
+        xp_gain = 1
+        if is_correct:
+            xp_gain += 3
+            # Update streak
+            player.trivia_streak = getattr(player, 'trivia_streak', 0) + 1
+
+            # Check for title reward (every 3 streak)
+            new_title = self.pet_service.check_streak_reward(
+                player.trivia_streak,
+                getattr(player, 'pet_titles', [])
+            )
+            if new_title:
+                if not hasattr(player, 'pet_titles') or player.pet_titles is None:
+                    player.pet_titles = []
+                player.pet_titles.append(new_title)
+                notifications.append(('title', new_title))
+        else:
+            # Reset streak on wrong answer
+            player.trivia_streak = 0
+
+        # Add XP and check for level up / evolution
+        pet, leveled_up, evolved = self.pet_service.add_xp(pet, xp_gain)
+        player.pet = pet
+
+        if leveled_up and not evolved:
+            notifications.append(('level', pet['level']))
+
+        if evolved:
+            notifications.append(('evolution', pet['stage']))
+
+        return notifications
+
     def update_question_message(self, message, question_data):
         """Update the question message to show player responses"""
         try:
