@@ -34,20 +34,30 @@ class Player:
     miniapp_last_spin_date: Optional[datetime] = field(default_factory=lambda: datetime.min.replace(tzinfo=timezone.utc))
     miniapp_total_winnings: float = 0.0
 
+    # Pet system fields
+    pet: Optional[Dict[str, Any]] = field(default_factory=lambda: None)
+    pet_titles: List[str] = field(default_factory=list)
+    pet_active_title: Optional[str] = None
+    pet_revives_used: int = 0
+    pet_revives_reset_date: Optional[datetime] = None
+    trivia_streak: int = 0
+    last_trivia_date: Optional[datetime] = None
+
     @classmethod
     def from_db_row(cls, row: tuple, column_names: List[str]) -> 'Player':
         """Create a Player instance from a database row"""
         data = dict(zip(column_names, row))
         
         # Handle JSON fields
-        for field_name in ['items', 'characteristics', 'player_stocks', 'statuetki', 
-                          'chat_id', 'correct_answers', 'nnn_checkins']:
+        for field_name in ['items', 'characteristics', 'player_stocks', 'statuetki',
+                          'chat_id', 'correct_answers', 'nnn_checkins', 'pet', 'pet_titles']:
             if field_name in data and data[field_name]:
                 if isinstance(data[field_name], str):
                     try:
                         data[field_name] = json.loads(data[field_name])
                     except (json.JSONDecodeError, TypeError):
-                        data[field_name] = []
+                        # pet should be None on parse failure, lists should be empty
+                        data[field_name] = None if field_name == 'pet' else []
                 elif data[field_name] is None:
                     data[field_name] = []
         
@@ -62,10 +72,10 @@ class Player:
         """Convert Player instance to a dictionary for database storage"""
         data = self.__dict__.copy()
         
-        # Convert lists to JSON strings for database storage
-        for field_name in ['items', 'characteristics', 'player_stocks', 'statuetki', 
-                          'chat_id', 'correct_answers', 'nnn_checkins']:
-            if isinstance(data[field_name], list):
+        # Convert lists/dicts to JSON strings for database storage
+        for field_name in ['items', 'characteristics', 'player_stocks', 'statuetki',
+                          'chat_id', 'correct_answers', 'nnn_checkins', 'pet', 'pet_titles']:
+            if isinstance(data[field_name], (list, dict)):
                 data[field_name] = json.dumps(data[field_name])
         
         return data
