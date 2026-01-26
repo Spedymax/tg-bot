@@ -12,7 +12,9 @@ ALLOWED_PLAYER_FIELDS = {
     'player_name', 'pisunchik_size', 'coins', 'items', 'characteristics',
     'player_stocks', 'statuetki', 'chat_id', 'correct_answers', 'nnn_checkins',
     'last_used', 'last_vor', 'last_prezervativ', 'last_joke', 'casino_last_used',
-    'casino_usage_count', 'ballzzz_number', 'notified'
+    'casino_usage_count', 'ballzzz_number', 'notified',
+    'pet', 'pet_titles', 'pet_active_title', 'pet_revives_used',
+    'pet_revives_reset_date', 'trivia_streak', 'last_trivia_date'
 }
 
 class PlayerService:
@@ -82,14 +84,16 @@ class PlayerService:
                 if exists:
                     # Update existing player
                     update_query = """
-                        UPDATE pisunchik_data SET 
+                        UPDATE pisunchik_data SET
                             player_name = %s, pisunchik_size = %s, coins = %s,
                             items = %s, characteristics = %s, player_stocks = %s,
                             statuetki = %s, chat_id = %s, correct_answers = %s,
                             nnn_checkins = %s, last_used = %s, last_vor = %s,
                             last_prezervativ = %s, last_joke = %s, casino_last_used = %s,
                             casino_usage_count = %s, ballzzz_number = %s, notified = %s,
-                            miniapp_daily_spins = %s, miniapp_last_spin_date = %s, miniapp_total_winnings = %s
+                            miniapp_daily_spins = %s, miniapp_last_spin_date = %s, miniapp_total_winnings = %s,
+                            pet = %s, pet_titles = %s, pet_active_title = %s, pet_revives_used = %s,
+                            pet_revives_reset_date = %s, trivia_streak = %s, last_trivia_date = %s
                         WHERE player_id = %s
                     """
                     cursor.execute(update_query, (
@@ -99,9 +103,16 @@ class PlayerService:
                         player.nnn_checkins, player.last_used, player.last_vor,
                         player.last_prezervativ, player.last_joke, player.casino_last_used,
                         player.casino_usage_count, player.ballzzz_number, player.notified,
-                        getattr(player, 'miniapp_daily_spins', 0), 
+                        getattr(player, 'miniapp_daily_spins', 0),
                         getattr(player, 'miniapp_last_spin_date', datetime.min.replace(tzinfo=timezone.utc)),
                         getattr(player, 'miniapp_total_winnings', 0.0),
+                        json.dumps(getattr(player, 'pet', None)) if getattr(player, 'pet', None) else None,
+                        json.dumps(getattr(player, 'pet_titles', [])),
+                        getattr(player, 'pet_active_title', None),
+                        getattr(player, 'pet_revives_used', 0),
+                        getattr(player, 'pet_revives_reset_date', None),
+                        getattr(player, 'trivia_streak', 0),
+                        getattr(player, 'last_trivia_date', None),
                         player.player_id
                     ))
                 else:
@@ -112,8 +123,10 @@ class PlayerService:
                             items, characteristics, player_stocks, statuetki,
                             chat_id, correct_answers, nnn_checkins, last_used,
                             last_vor, last_prezervativ, last_joke, casino_last_used,
-                            casino_usage_count, ballzzz_number, notified
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            casino_usage_count, ballzzz_number, notified,
+                            pet, pet_titles, pet_active_title, pet_revives_used,
+                            pet_revives_reset_date, trivia_streak, last_trivia_date
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
                     cursor.execute(insert_query, (
                         player.player_id, player.player_name, player.pisunchik_size, player.coins,
@@ -121,7 +134,14 @@ class PlayerService:
                         player.statuetki, player.chat_id, player.correct_answers,
                         player.nnn_checkins, player.last_used, player.last_vor,
                         player.last_prezervativ, player.last_joke, player.casino_last_used,
-                        player.casino_usage_count, player.ballzzz_number, player.notified
+                        player.casino_usage_count, player.ballzzz_number, player.notified,
+                        json.dumps(getattr(player, 'pet', None)) if getattr(player, 'pet', None) else None,
+                        json.dumps(getattr(player, 'pet_titles', [])),
+                        getattr(player, 'pet_active_title', None),
+                        getattr(player, 'pet_revives_used', 0),
+                        getattr(player, 'pet_revives_reset_date', None),
+                        getattr(player, 'trivia_streak', 0),
+                        getattr(player, 'last_trivia_date', None)
                     ))
                 
                 connection.commit()
