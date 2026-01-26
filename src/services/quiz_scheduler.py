@@ -8,6 +8,7 @@ from typing import Dict, Any
 from config.settings import Settings
 from services.trivia_service import TriviaService
 from telebot import types
+from utils.helpers import escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -15,10 +16,11 @@ logger = logging.getLogger(__name__)
 class QuizScheduler:
     """Сервис для автоматической отправки квизов по расписанию."""
 
-    def __init__(self, bot, db_manager, trivia_service: TriviaService):
+    def __init__(self, bot, db_manager, trivia_service: TriviaService, player_service=None):
         self.bot = bot
         self.db_manager = db_manager
         self.trivia_service = trivia_service
+        self.player_service = player_service
 
         # Настройки квизов из Settings
         self.quiz_times = Settings.TRIVIA_HOURS
@@ -36,10 +38,14 @@ class QuizScheduler:
     def setup_schedule(self):
         """Настройка расписания для отправки квизов."""
         logger.info("Setting up quiz schedule...")
-        
+
         for quiz_time in self.quiz_times:
             schedule.every().day.at(quiz_time).do(self.send_scheduled_quiz)
             logger.info(f"Quiz scheduled at {quiz_time}")
+
+        # Add daily pet death check at midnight
+        schedule.every().day.at("00:00").do(self.check_pet_deaths)
+        logger.info("Pet death check scheduled at 00:00")
     
     def send_scheduled_quiz(self):
         """Отправка запланированного квиза."""
@@ -216,16 +222,90 @@ class QuizScheduler:
         try:
             # Очищаем старое расписание
             schedule.clear()
-            
+
             # Обновляем времена
             self.quiz_times = new_times
-            
+
             # Настраиваем новое расписание
             self.setup_schedule()
-            
+
             logger.info(f"Quiz schedule updated to: {new_times}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error updating schedule: {e}")
             return False
+
+    def check_pet_deaths(self):
+        """Check for pets that should die due to inactivity."""
+        if not self.player_service:
+            logger.warning("Player service not available for pet death check")
+            return
+
+        try:
+            logger.info("Running daily pet death check...")
+            now = datetime.now(timezone.utc)
+            today = now.date()
+
+            # Get all players
+            players = self.player_service.get_all_players()
+            deaths = []
+
+            for player_id, player in players.items():
+                pet = getattr(player, 'pet', None)
+                if not pet or not pet.get('is_alive') or not pet.get('is_locked'):
+                    continue
+
+                # Check last trivia date
+                last_trivia = getattr(player, 'last_trivia_date', None)
+                if last_trivia is None:
+                    # Pet was never fed, check creation date
+                    created_str = pet.get('created_at')
+                    if created_str:
+                        try:
+                            created = datetime.fromisoformat(created_str.replace('Z', '+00:00'))
+                            if created.date() < today:
+                                # Pet created before today and never fed
+                                deaths.append((player_id, player, pet.get('name', 'Улюбленець')))
+                        except:
+                            pass
+                    continue
+
+                # Check if last trivia was before today
+                if last_trivia.date() < today:
+                    deaths.append((player_id, player, pet.get('name', 'Улюбленець')))
+
+            # Process deaths (escape pet_name for HTML safety)
+            for player_id, player, pet_name in deaths:
+                pet_name = escape_html(pet_name)
+                try:
+                    player.pet['is_alive'] = False
+                    self.player_service.save_player(player)
+
+                    # Send death notification
+                    username = None
+                    try:
+                        chat = self.bot.get_chat(player_id)
+                        username = chat.username
+                    except:
+                        pass
+
+                    if username:
+                        mention = f"@{username}"
+                    else:
+                        mention = f'<a href="tg://user?id={player_id}">{escape_html(player.player_name)}</a>'
+
+                    msg = f"{mention}, 💀 {pet_name} помер... Ти пропустив день. /pet щоб відродити."
+
+                    # Send to main chat
+                    self.bot.send_message(self.target_chat_id, msg, parse_mode='HTML')
+
+                    logger.info(f"Pet died for player {player_id}")
+
+                except Exception as e:
+                    logger.error(f"Error processing pet death for {player_id}: {e}")
+
+            logger.info(f"Pet death check complete. {len(deaths)} pets died.")
+
+        except Exception as e:
+            logger.error(f"Error in pet death check: {e}")
