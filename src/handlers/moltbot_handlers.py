@@ -4,7 +4,7 @@ import httpx
 from datetime import datetime, timezone
 from config.settings import Settings
 
-CHAT_SUMMARY_PATH = "/root/.openclaw/workspace/memory/chat-summary.md"
+CHAT_SUMMARY_PATH = os.path.expanduser("~/.openclaw/workspace/memory/chat-summary.md")
 
 
 def _load_chat_summary() -> str:
@@ -41,7 +41,6 @@ class MoltbotHandlers:
         self.db = db_manager
         self._bot_username = None  # lazily cached
         self._history_reset_time: dict[int, datetime] = {}  # chat_id → reset timestamp
-        self._user_key_suffix: dict[int, str] = {}  # chat_id → suffix added after reset
 
     def _get_bot_username(self) -> str:
         if not self._bot_username:
@@ -51,17 +50,6 @@ class MoltbotHandlers:
     def _resolve_sender_name(self, user) -> str:
         """Return friendly name for known members, otherwise first_name."""
         return KNOWN_MEMBERS.get(user.id, user.first_name or "Кто-то")
-
-    def _resolve_user_key(self, message) -> str:
-        """Return a stable key for MoltBot's per-conversation memory.
-        After a reset, a timestamp suffix is appended to start a fresh thread."""
-        chat = message.chat
-        if chat.type == 'private':
-            base = f"tg-private-{message.from_user.id}"
-        else:
-            base = CHAT_KEYS.get(chat.id, f"tg-group-{chat.id}")
-        suffix = self._user_key_suffix.get(chat.id, "")
-        return f"{base}{suffix}" if suffix else base
 
     def _get_chat_context(self, message) -> str:
         """Return a human-readable description of where the message was sent from."""
@@ -131,9 +119,9 @@ class MoltbotHandlers:
             return []
 
     def _ask_moltbot(self, sender_name: str, user_text: str,
-                     chat_context: str, user_key: str,
+                     chat_context: str,
                      history: list[str] | None = None) -> str:
-        """Call the local MoltBot/OpenClaw API synchronously."""
+        """Call the local MoltBot/OpenClaw API synchronously. Stateless per request."""
         context_prefix = f"[Сообщение отправлено из: {chat_context}]\n" if chat_context else ""
 
         summary = _load_chat_summary()
@@ -156,7 +144,6 @@ class MoltbotHandlers:
                 headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
                 json={
                     "model": "openclaw:main",
-                    "user": user_key,
                     "messages": [
                         {"role": "user", "content": user_content},
                     ],
@@ -172,7 +159,6 @@ class MoltbotHandlers:
             sender_name = self._resolve_sender_name(message.from_user)
             user_text = self._extract_user_text(message)
             chat_context = self._get_chat_context(message)
-            user_key = self._resolve_user_key(message)
 
             # Fetch group history only for group chats
             history = None
@@ -180,7 +166,7 @@ class MoltbotHandlers:
                 history = self._get_recent_group_messages(limit=50, chat_id=message.chat.id)
 
             try:
-                reply = self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
+                reply = self._ask_moltbot(sender_name, user_text, chat_context, history)
                 self.bot.reply_to(message, reply)
             except Exception as e:
                 logger.error(f"MoltBot API error: {e}")
@@ -188,9 +174,7 @@ class MoltbotHandlers:
 
         @self.bot.message_handler(commands=['мут_сброс', 'mut_reset'])
         def handle_reset(message):
-            """Reset chat history context and OpenClaw thread for this chat."""
-            now = datetime.now(timezone.utc)
-            self._history_reset_time[message.chat.id] = now
-            self._user_key_suffix[message.chat.id] = f"-{int(now.timestamp())}"
+            """Reset chat history context for this chat."""
+            self._history_reset_time[message.chat.id] = datetime.now(timezone.utc)
             logger.info(f"MoltBot: history reset for chat {message.chat.id} by {message.from_user.id}")
             self.bot.reply_to(message, "⚙️ Контекст сброшен. Начинаю с чистого листа.")
