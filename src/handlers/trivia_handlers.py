@@ -1,11 +1,14 @@
 import random
 import json
 import html
+import logging
 from telebot import types
 from datetime import datetime, timezone, timedelta
 import google.generativeai as genai
 from config.settings import Settings
 from services.trivia_service import TriviaService
+
+logger = logging.getLogger(__name__)
 
 class TriviaHandlers:
     def __init__(self, bot, player_service, game_service, db_manager):
@@ -17,6 +20,7 @@ class TriviaHandlers:
         # Initialize TriviaService for AI question generation
         self.trivia_service = TriviaService(Settings.GEMINI_API_KEY, db_manager)
         
+        self.quiz_scheduler = None  # Set later via set_quiz_scheduler()
         self.question_messages = {}
         self.original_questions = {}
         
@@ -27,9 +31,47 @@ class TriviaHandlers:
             'BODYA': 855951767
         }
     
+    def set_quiz_scheduler(self, quiz_scheduler):
+        """Set the quiz scheduler instance (used for pool refill)."""
+        self.quiz_scheduler = quiz_scheduler
+
     def setup_handlers(self):
         """Setup all trivia command handlers"""
-        
+
+        @self.bot.message_handler(commands=['regen_questions'])
+        def regen_questions_command(message):
+            """Handle /regen_questions [count] — admin-only pool refill."""
+            from config.settings import Settings
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                self.bot.reply_to(message, "У вас нет доступа к этой команде.")
+                return
+
+            # Parse optional count argument
+            parts = message.text.split()
+            count = 5
+            if len(parts) > 1:
+                try:
+                    count = max(1, min(int(parts[1]), 20))
+                except ValueError:
+                    self.bot.reply_to(message, "Неверный формат. Используйте: /regen_questions [1-20]")
+                    return
+
+            status_msg = self.bot.reply_to(message, f"🔄 Генерирую {count} вопросов для пула...")
+            if self.quiz_scheduler is None:
+                self.bot.edit_message_text(
+                    "❌ Планировщик квизов не инициализирован.",
+                    status_msg.chat.id, status_msg.message_id
+                )
+                return
+
+            result = self.quiz_scheduler.refill_question_pool(count)
+            self.bot.edit_message_text(
+                f"✅ Готово!\n\n"
+                f"Добавлено в пул: {result['added']}\n"
+                f"Пропущено (дубли/ошибки): {result['skipped']}",
+                status_msg.chat.id, status_msg.message_id
+            )
+
         @self.bot.message_handler(commands=['trivia'])
         def trivia_command(message):
             """Handle /trivia command"""
@@ -66,8 +108,31 @@ class TriviaHandlers:
     def send_trivia_question(self, chat_id):
         """Send a trivia question to the chat"""
         try:
-            question_data = self.get_question_from_gemini()
-            
+            # Send "thinking" message
+            thinking_msg = self.bot.send_message(chat_id, "🤔 Генерирую вопрос...")
+
+            # Try pool first, fall back to AI
+            question_id = None
+            question_data = None
+            result = self.trivia_service.get_unused_question_for_chat(chat_id)
+            if result is not None:
+                question_id, question_data = result
+                logger.info(f"Reusing pooled question id={question_id} for /trivia in chat {chat_id}")
+            else:
+                logger.info(f"Pool exhausted for chat {chat_id}, generating batch of 30 via AI for /trivia")
+                if self.quiz_scheduler:
+                    refill = self.quiz_scheduler.refill_question_pool(30)
+                    logger.info(f"Batch refill: {refill['added']} added, {refill['skipped']} skipped")
+                    result = self.trivia_service.get_unused_question_for_chat(chat_id)
+                    if result is not None:
+                        question_id, question_data = result
+
+            # Delete the "thinking" message
+            try:
+                self.bot.delete_message(chat_id, thinking_msg.message_id)
+            except:
+                pass  # If deletion fails, just continue
+
             if question_data is None:
                 self.bot.send_message(chat_id, "Извините, произошла ошибка при создании вопроса.")
                 return
@@ -82,9 +147,13 @@ class TriviaHandlers:
             
             # Send question with inline keyboard
             self.send_question_with_options(chat_id, question_text, answer_options)
-            
-            # Save question to database using TriviaService
-            # Question is already saved in the generate_question method
+
+            # Record in history so this question won't be repeated for this chat
+            if question_id is None:
+                # AI-generated: look up the id by text
+                question_id = self.quiz_scheduler._get_question_id_by_text(question_text) if self.quiz_scheduler else None
+            if question_id is not None:
+                self.trivia_service.record_question_sent_to_chat(question_id, chat_id)
             
         except Exception as e:
             self.bot.send_message(chat_id, f'Ошибка при создании вопроса: {e}')
@@ -332,75 +401,72 @@ class TriviaHandlers:
         connection = None
         try:
             connection = self.db_manager.get_connection()
-            
-            try:
-                with connection.cursor() as cursor:
-                    # Get today's questions
-                    cursor.execute(
-                        "SELECT question, correct_answer, explanation, date_added "
-                        "FROM questions "
-                        "WHERE DATE(date_added) = CURRENT_DATE "
-                        "ORDER BY date_added DESC"
-                    )
-                    
-                    today_questions = cursor.fetchall()
-                    
-                    if not today_questions:
-                        self.bot.reply_to(message, "📋 Сегодня вопросов еще не было!")
-                        return
-                    
-                    # Get player scores for this chat
-                    chat_id = message.chat.id
-                    scores_text = self.get_player_scores_for_chat(chat_id)
-                    
-                    # Build response message
-                    response_text = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
-                    
-                    for i, (question, correct_answer, explanation, date_added) in enumerate(today_questions, 1):
-                        time_str = date_added.strftime('%H:%M') if date_added else 'N/A'
-                        response_text += f"<b>{i}.</b> {question}\n"
-                        response_text += f"✅ <b>Ответ:</b> {correct_answer}\n"
+            chat_id = message.chat.id
+
+            with connection.cursor() as cursor:
+                # Get today's questions that were actually sent to this chat
+                cursor.execute(
+                    "SELECT q.question, q.correct_answer, q.explanation, h.sent_at "
+                    "FROM questions q "
+                    "JOIN chat_question_history h ON h.question_id = q.id AND h.chat_id = %s "
+                    "WHERE DATE(h.sent_at) = CURRENT_DATE "
+                    "ORDER BY h.sent_at ASC",
+                    (chat_id,)
+                )
+
+                today_questions = cursor.fetchall()
+
+                if not today_questions:
+                    self.bot.reply_to(message, "📋 Сегодня вопросов еще не было!")
+                    return
+
+                # Get player scores for this chat
+                scores_text = self.get_player_scores_for_chat(chat_id)
+
+                # Build response message
+                response_text = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
+
+                for i, (question, correct_answer, explanation, sent_at) in enumerate(today_questions, 1):
+                    time_str = sent_at.strftime('%H:%M') if sent_at else 'N/A'
+                    response_text += f"<b>{i}.</b> {question}\n"
+                    response_text += f"✅ <b>Ответ:</b> {correct_answer}\n"
+                    if explanation:
+                        response_text += f"💡 <i>{explanation}</i>\n"
+                    response_text += f"⏰ {time_str}\n\n"
+
+                # Add player scores
+                if scores_text:
+                    response_text += "\n🏆 <b>Очки игроков:</b>\n" + scores_text
+
+                # Split message if too long
+                max_length = 4000
+                if len(response_text) > max_length:
+                    parts = []
+                    current_part = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
+
+                    for i, (question, correct_answer, explanation, sent_at) in enumerate(today_questions, 1):
+                        time_str = sent_at.strftime('%H:%M') if sent_at else 'N/A'
+                        question_text = f"<b>{i}.</b> {question}\n"
+                        question_text += f"✅ <b>Ответ:</b> {correct_answer}\n"
                         if explanation:
-                            response_text += f"💡 <i>{explanation}</i>\n"
-                        response_text += f"⏰ {time_str}\n\n"
-                    
-                    # Add player scores
-                    if scores_text:
-                        response_text += "\n🏆 <b>Очки игроков:</b>\n" + scores_text
-                    
-                    # Split message if too long
-                    max_length = 4000
-                    if len(response_text) > max_length:
-                        parts = []
-                        current_part = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
-                        
-                        for i, (question, correct_answer, explanation, date_added) in enumerate(today_questions, 1):
-                            time_str = date_added.strftime('%H:%M') if date_added else 'N/A'
-                            question_text = f"<b>{i}.</b> {question}\n"
-                            question_text += f"✅ <b>Ответ:</b> {correct_answer}\n"
-                            if explanation:
-                                question_text += f"💡 <i>{explanation}</i>\n"
-                            question_text += f"⏰ {time_str}\n\n"
-                            
-                            if len(current_part + question_text) > max_length:
-                                parts.append(current_part)
-                                current_part = question_text
-                            else:
-                                current_part += question_text
-                        
-                        if current_part:
+                            question_text += f"💡 <i>{explanation}</i>\n"
+                        question_text += f"⏰ {time_str}\n\n"
+
+                        if len(current_part + question_text) > max_length:
                             parts.append(current_part)
-                        
-                        # Send all parts
-                        for part in parts:
-                            self.bot.reply_to(message, part, parse_mode='HTML')
-                    else:
-                        self.bot.reply_to(message, response_text, parse_mode='HTML')
-                        
-            finally:
-                if connection:
-                    self.db_manager.release_connection(connection)
-                
+                            current_part = question_text
+                        else:
+                            current_part += question_text
+
+                    if current_part:
+                        parts.append(current_part)
+
+                    # Send all parts
+                    for part in parts:
+                        self.bot.reply_to(message, part, parse_mode='HTML')
+                else:
+                    self.bot.reply_to(message, response_text, parse_mode='HTML')
+
         except Exception as e:
             print(f"Error getting correct answers: {e}")
             self.bot.reply_to(message, "❌ Произошла ошибка при получении вопросов")

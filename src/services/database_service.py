@@ -89,6 +89,19 @@ class DatabaseService:
                     date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Migration: add id column to questions if it was created without one
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'questions' AND column_name = 'id'
+                    ) THEN
+                        ALTER TABLE questions ADD COLUMN id SERIAL PRIMARY KEY;
+                    END IF;
+                END $$;
+            """)
             
             # Create answered questions table (to prevent duplicate answers)
             cur.execute("""
@@ -117,6 +130,24 @@ class DatabaseService:
                     chat_id INTEGER NOT NULL,
                     last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
+            """)
+
+            # Track which questions were sent to which chat (prevents repeats)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chat_question_history (
+                    id          SERIAL PRIMARY KEY,
+                    chat_id     BIGINT NOT NULL,
+                    question_id INTEGER NOT NULL REFERENCES questions(id),
+                    sent_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cqh_lookup
+                    ON chat_question_history (chat_id, question_id)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cqh_sent_at
+                    ON chat_question_history (chat_id, sent_at)
             """)
 
             conn.commit()

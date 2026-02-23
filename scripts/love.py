@@ -2,8 +2,14 @@ import telebot
 from telebot import types
 import datetime
 import random
+import os
+import time
+from dotenv import load_dotenv
 
-bot = telebot.TeleBot('6916186852:AAGWpqvr_fzE--gcG6DX6bMMqyNzzDRX688')
+# Load environment variables from .env file
+load_dotenv('/home/spedymax/tg-bot/.env')
+
+bot = telebot.TeleBot(os.getenv('LOVE_BOT_TOKEN'))
 
 # Replace these with the actual chat IDs
 MAX_ID = 741542965      # Your chat ID
@@ -286,6 +292,32 @@ def answers(message):
     if message.from_user.id == MUSHROOM_ID:
         bot.send_message(MAX_ID, f"Она запросила ответы на викторину")
 
-bot.polling()
+# Polling with retry logic for network errors
+def start_polling_with_retry(max_retries=5):
+    """Start bot polling with exponential backoff retry on network errors"""
+    retry_delay = 5  # Initial retry delay in seconds
+
+    for attempt in range(max_retries):
+        try:
+            print(f"Starting love bot polling (attempt {attempt + 1}/{max_retries})...")
+            bot.polling(none_stop=True, timeout=60)
+            break  # If polling starts successfully, exit retry loop
+        except Exception as e:
+            error_msg = str(e)
+            if "NameResolutionError" in error_msg or "ConnectionError" in error_msg:
+                if attempt < max_retries - 1:
+                    print(f"Network error on attempt {attempt + 1}: {error_msg}")
+                    print(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    print(f"Failed to start after {max_retries} attempts. Giving up.")
+                    raise
+            else:
+                # Re-raise non-network errors immediately
+                raise
+
+start_polling_with_retry()
+
 #741542965
 #475552394

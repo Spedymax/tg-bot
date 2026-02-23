@@ -1,9 +1,13 @@
 from telebot import types
 from config.settings import Settings
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import socket
 from struct import pack
+import google.generativeai as genai
+import logging
+
+logger = logging.getLogger(__name__)
 
 class AdminHandlers:
     def __init__(self, bot, player_service, game_service):
@@ -12,10 +16,123 @@ class AdminHandlers:
         self.game_service = game_service
         self.admin_actions = {}
         self.quiz_scheduler = None  # Will be set by main.py
+
+        # Initialize Gemini for message analysis
+        if Settings.GEMINI_API_KEY:
+            genai.configure(api_key=Settings.GEMINI_API_KEY)
+            self.gemini_model = genai.GenerativeModel('gemini-3-flash-preview')
+        else:
+            self.gemini_model = None
+            logger.warning("GEMINI_API_KEY not found, sho_tam_novogo feature will be disabled")
+
+        # Create messages table if it doesn't exist
+        self._create_messages_table()
         
     def set_quiz_scheduler(self, quiz_scheduler):
         """Set the quiz scheduler instance"""
         self.quiz_scheduler = quiz_scheduler
+
+    def _create_messages_table(self):
+        """Create messages table for storing chat messages (if not exists)"""
+        try:
+            # Using existing table structure: id, user_id, message_text, timestamp, name
+            query = """
+                CREATE TABLE IF NOT EXISTS messages (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER,
+                    message_text TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    name TEXT
+                )
+            """
+            self.player_service.db.execute_query(query)
+            logger.info("Messages table created/verified successfully")
+        except Exception as e:
+            logger.error(f"Error creating messages table: {e}")
+
+    def _store_message(self, message):
+        """Store a message in the database"""
+        try:
+            # Don't store bot commands or messages from bots
+            if message.text and not message.text.startswith('/') and not message.from_user.is_bot:
+                # Use existing table structure: id, user_id, message_text, timestamp, name
+                query = """
+                    INSERT INTO messages (user_id, message_text, timestamp, name)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP, %s)
+                """
+                # Combine first_name and username for the name field
+                name = message.from_user.first_name or message.from_user.username or 'Аноним'
+                params = (
+                    message.from_user.id,
+                    message.text,
+                    name
+                )
+                self.player_service.db.execute_query(query, params)
+        except Exception as e:
+            logger.error(f"Error storing message: {e}")
+
+    def _get_recent_messages(self, hours=12, limit=100):
+        """Get recent messages from the database"""
+        try:
+            query = """
+                SELECT name, message_text, timestamp
+                FROM messages
+                WHERE timestamp > NOW() - INTERVAL '%s hours'
+                ORDER BY timestamp DESC
+                LIMIT %s
+            """
+            params = (hours, limit)
+            results = self.player_service.db.execute_query(query, params)
+
+            if not results:
+                return []
+
+            # Format messages for AI analysis
+            messages = []
+            for row in results:
+                name = row[0] or 'Аноним'
+                text = row[1]
+                messages.append(f"{name}: {text}")
+
+            return messages
+        except Exception as e:
+            logger.error(f"Error getting recent messages: {e}")
+            return []
+
+    def _analyze_messages_with_gemini(self, messages):
+        """Analyze messages using Gemini AI"""
+        if not self.gemini_model:
+            return "❌ Gemini API не настроен. Проверьте GEMINI_API_KEY в .env файле."
+
+        if not messages:
+            return "📭 За последние 12 часов не было сообщений для анализа."
+
+        try:
+            # Prepare the prompt
+            messages_text = "\n".join(messages)
+            prompt = f"""Ты бот-анализатор чата. Тебе дан список сообщений от пользователей за последние 12 часов.
+
+Твоя задача: сделать краткую сводку того, о чём была речь в этих сообщениях.
+
+Требования:
+1. Начни сообщение с: "За последние 12 часов речь шла о том что:"
+2. Раздели темы на отдельные абзацы
+3. Используй эмодзи для наглядности
+4. Будь кратким и информативным
+5. Если были какие-то забавные моменты - упомяни их
+6. Пиши на русском языке
+
+Сообщения:
+{messages_text}
+"""
+
+            # Generate response
+            response = self.gemini_model.generate_content(prompt)
+            return response.text
+
+        except Exception as e:
+            logger.error(f"Error analyzing messages with Gemini: {e}")
+            return f"❌ Ошибка при анализе сообщений: {str(e)}"
         
     def wake_on_lan(self, mac_address, broadcast_ip='255.255.255.255'):
         """Send a Wake-on-LAN packet to wake up a computer"""
@@ -136,6 +253,7 @@ class AdminHandlers:
                         types.InlineKeyboardButton("⏹️ Остановить планировщик", callback_data="action_stopQuizScheduler"),
                         types.InlineKeyboardButton("📊 Статус планировщика", callback_data="action_quizSchedulerStatus"),
                         types.InlineKeyboardButton("🎯 Отправить квиз сейчас", callback_data="action_sendQuizNow"),
+                        types.InlineKeyboardButton("🔄 Пополнить пул (5 вопросов)", callback_data="action_regenQuestions"),
                         types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_system")
                     ]
                     markup.add(*buttons)
@@ -298,6 +416,36 @@ class AdminHandlers:
                             call.message.message_id
                         )
                         
+                elif action == "regenQuestions":
+                    # Refill question pool with 5 AI-generated questions
+                    if self.quiz_scheduler:
+                        try:
+                            self.bot.edit_message_text(
+                                "🔄 Генерирую 5 вопросов для пула, подождите...",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                            result = self.quiz_scheduler.refill_question_pool(5)
+                            self.bot.edit_message_text(
+                                f"✅ Готово!\n\n"
+                                f"Добавлено в пул: {result['added']}\n"
+                                f"Пропущено (дубли/ошибки): {result['skipped']}",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                        except Exception as e:
+                            self.bot.edit_message_text(
+                                f"❌ Ошибка при генерации вопросов: {str(e)}",
+                                call.message.chat.id,
+                                call.message.message_id
+                            )
+                    else:
+                        self.bot.edit_message_text(
+                            "❌ Планировщик квизов не инициализирован.",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+
                 elif action == "backupData":
                     # Create data backup
                     try:
@@ -371,7 +519,7 @@ class AdminHandlers:
             if message.from_user.id in Settings.ADMIN_IDS:
                 player_id = message.from_user.id
                 player = self.player_service.get_player(player_id)
-                
+
                 if player:
                     # Add random characteristic logic here
                     self.bot.reply_to(message, "Характеристика добавлена!")
@@ -379,3 +527,39 @@ class AdminHandlers:
                     self.bot.reply_to(message, f"Игрок с ID {player_id} не найден")
             else:
                 self.bot.reply_to(message, "У вас нет доступа к этой команде.")
+
+        @self.bot.message_handler(commands=['sho_tam_novogo'])
+        def analyze_recent_messages_command(message):
+            """Analyze recent chat messages with Gemini AI"""
+            if message.from_user.id in Settings.ADMIN_IDS:
+                try:
+                    # Send waiting message
+                    waiting_msg = self.bot.reply_to(message, "🔍 Анализирую сообщения за последние 12 часов...")
+
+                    # Get recent messages
+                    messages = self._get_recent_messages(hours=12, limit=100)
+
+                    # Analyze with Gemini
+                    analysis = self._analyze_messages_with_gemini(messages)
+
+                    # Send analysis result
+                    self.bot.edit_message_text(
+                        analysis,
+                        waiting_msg.chat.id,
+                        waiting_msg.message_id
+                    )
+
+                except Exception as e:
+                    logger.error(f"Error in sho_tam_novogo command: {e}")
+                    self.bot.reply_to(message, f"❌ Ошибка: {str(e)}")
+            else:
+                self.bot.reply_to(message, "У вас нет доступа к этой команде.")
+
+        @self.bot.message_handler(func=lambda m: m.text and not m.text.startswith('/'), content_types=['text'])
+        def store_message_handler(message):
+            """Store all NON-COMMAND text messages in the database for later analysis"""
+            # Store message asynchronously (non-blocking)
+            try:
+                self._store_message(message)
+            except Exception as e:
+                logger.error(f"Error storing message in handler: {e}")
