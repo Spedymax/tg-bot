@@ -5,6 +5,7 @@ import schedule
 import time
 import threading
 import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta, time as dt_time
 import os
 from typing import Optional, List, Dict
@@ -18,11 +19,20 @@ load_dotenv()
 
 
 # Настройка логирования
+# Use RotatingFileHandler to limit log file size (100MB max, keep 3 backups)
+file_handler = RotatingFileHandler(
+    'memory_bot.log',
+    maxBytes=100*1024*1024,  # 100 MB
+    backupCount=3
+)
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('memory_bot.log'),
+        file_handler,
         logging.StreamHandler()
     ]
 )
@@ -1197,12 +1207,16 @@ def handle_close_memories(call):
 def send_reminders_every_minute():
     """Проверяет всех активных пользователей и отправляет напоминание, если у них сейчас 12:00 и их день недели."""
     users = memory_bot.get_active_users()
+    sent_count = 0
+    current_day = None
+
     for user_id in users:
         try:
             tz = memory_bot.get_user_timezone(user_id)
             user_tz = pytz.timezone(tz)
             now = datetime.now(user_tz)
             day = now.strftime('%A').lower()  # monday, tuesday, ...
+            current_day = day
             reminder_day = memory_bot.get_reminder_day(user_id)
             if day == reminder_day:
                 if dt_time(11, 55) <= now.time() <= dt_time(12, 5):
@@ -1218,10 +1232,12 @@ def send_reminders_every_minute():
 """
                         bot.send_message(user_id, message_text, parse_mode='HTML')
                         memory_bot._update_last_reminder(user_id)
+                        sent_count += 1
         except Exception as e:
             logger.error(f"Ошибка отправки напоминания пользователю {user_id}: {e}")
 
-        logger.info(f"Отправлено еженедельных напоминаний для дня {day}: {sent_count}")
+    if sent_count > 0:
+        logger.info(f"Отправлено еженедельных напоминаний для дня {current_day}: {sent_count}")
 
 def schedule_reminders():
     """Настройка расписания: проверка напоминаний каждую минуту"""
@@ -1250,7 +1266,7 @@ def main():
     logger.info("Memory Bot запущен и готов к работе!")
 
     # Запускаем бота
-    bot.infinity_polling(none_stop=True)
+    bot.infinity_polling()
 
 
 # Обработчик для кнопок навигации с клавиатуры

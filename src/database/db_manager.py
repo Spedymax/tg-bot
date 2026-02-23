@@ -2,20 +2,27 @@ import psycopg2
 from psycopg2 import pool
 import logging
 import time
+import os
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     def __init__(self):
-        self.connection_pool = psycopg2.pool.SimpleConnectionPool(1, 20, **Settings.DB_CONFIG)
+        # Adjust pool size for multiple workers
+        # With Gunicorn workers, each worker gets its own pool
+        # Default: 4 workers × 5 connections = 20 total (safe for default PostgreSQL limit of 100)
+        WORKER_COUNT = int(os.getenv('GUNICORN_WORKERS', '4'))
+        MAX_CONN_PER_WORKER = max(3, 20 // WORKER_COUNT)
+
+        self.connection_pool = psycopg2.pool.SimpleConnectionPool(1, MAX_CONN_PER_WORKER, **Settings.DB_CONFIG)
         self._connection_metrics = {
             'total_connections': 0,
             'active_connections': 0,
             'peak_connections': 0,
             'connection_errors': 0
         }
-        logger.info("Database connection pool initialized with 1-20 connections")
+        logger.info(f"Database connection pool initialized with 1-{MAX_CONN_PER_WORKER} connections (worker-aware sizing)")
 
     def get_connection(self):
         """Get a connection from the pool with monitoring."""
@@ -90,7 +97,11 @@ class DatabaseManager:
         try:
             with connection.cursor() as cursor:
                 cursor.execute(query, params)
-                result = cursor.fetchall()
+                # Only fetch results for SELECT queries
+                if cursor.description:
+                    result = cursor.fetchall()
+                else:
+                    result = None
             connection.commit()
             return result
         except (Exception, psycopg2.DatabaseError) as error:

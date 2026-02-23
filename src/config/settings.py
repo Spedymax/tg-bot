@@ -55,3 +55,11 @@ class Settings:
         # Add participant user IDs here
         # Example: 123456789, 987654321
     ]
+
+    # Trivia broadcast configuration
+    ANSWERS_BROADCAST_TIMEZONE = 'Europe/Berlin'  # CET/CEST timezone
+    ANSWERS_BROADCAST_TIME_LOCAL = "23:00"  # 23:00 local time
+
+    # MoltBot / OpenClaw configuration
+    JARVIS_URL = os.getenv('JARVIS_URL', 'http://127.0.0.1:18789/v1/chat/completions')
+    JARVIS_TOKEN = os.getenv('JARVIS_TOKEN')

@@ -41,21 +41,95 @@ class TriviaService:
     
     def __init__(self, gemini_api_key: str, db_manager):
         self.db_manager = db_manager
-        
+
         # Configure Gemini AI
         genai.configure(api_key=gemini_api_key)
-        self.ai_client = genai.GenerativeModel('gemini-2.5-flash')
-        
+        self.ai_client = genai.GenerativeModel('gemini-3-flash-preview')
+
         self.difficulty = 'medium'
         self.active_questions: Dict[int, QuestionState] = {}
-        
+
         # Player IDs for compatibility
         self.player_ids = {
             'YURA': 742272644,
             'MAX': 741542965,
             'BODYA': 855951767
         }
+
+        self._migrate_questions_table()
     
+    def _migrate_questions_table(self):
+        """Add id column to questions table if it was created without one."""
+        conn = None
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'questions' AND column_name = 'id'
+                    ) THEN
+                        ALTER TABLE questions ADD COLUMN id SERIAL PRIMARY KEY;
+                    END IF;
+                END $$;
+            """)
+            conn.commit()
+            logger.info("questions table schema verified/migrated")
+        except Exception as e:
+            logger.error(f"Error migrating questions table: {e}")
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
+
+    def generate_questions_batch_with_ai(self, count: int) -> List[Question]:
+        """Generate `count` questions in a single API call. Returns a list of Question objects."""
+        if not self.ai_client:
+            logger.error("AI client not available for batch question generation")
+            return []
+        try:
+            prompt = self._build_batch_question_prompt(count)
+            response = self.ai_client.generate_content(prompt)
+            return self._parse_batch_ai_response(response.text)
+        except Exception as e:
+            logger.error(f"Error generating question batch with AI: {str(e)}")
+            return []
+
+    def _build_batch_question_prompt(self, count: int) -> str:
+        """Build a prompt that requests `count` questions in one response."""
+        return f"""Ты - эксперт по созданию вопросов для викторины. Создай {count} разных интересных вопросов.
+
+Для КАЖДОГО вопроса используй СТРОГО следующий формат (включая разделители):
+
+===ВОПРОС===
+ВОПРОС: [сам вопрос, не более 2 строк]
+ПРАВИЛЬНЫЙ ОТВЕТ: [правильный ответ, не более 50 символов]
+ОБЪЯСНЕНИЕ: [1-2 факта, объясняющих правильный ответ, не более 150 символов]
+НЕПРАВИЛЬНЫЕ ОТВЕТЫ: [ответ1], [ответ2], [ответ3]
+
+Требования:
+- Все {count} вопросов должны быть на РАЗНЫЕ темы
+- Средний уровень сложности
+- Все ответы не длиннее 50 символов, начинаются с большой буквы
+- Только факты, никаких вымышленных ответов
+- Пиши на русском языке
+- Объяснение не длиннее 150 символов
+- НЕ добавляй нумерацию вопросов, только разделитель ===ВОПРОС==="""
+
+    def _parse_batch_ai_response(self, response_text: str) -> List[Question]:
+        """Parse a batch AI response containing multiple questions."""
+        questions = []
+        blocks = [b.strip() for b in response_text.split("===ВОПРОС===") if b.strip()]
+        for block in blocks:
+            try:
+                q = self._parse_ai_response(block)
+                if q:
+                    questions.append(q)
+            except Exception as e:
+                logger.warning(f"Failed to parse question block: {e}")
+        return questions
+
     def generate_question_with_ai(self) -> Optional[Question]:
         """Generate a trivia question using AI client."""
         if not self.ai_client:
@@ -107,7 +181,7 @@ class TriviaService:
 Обязательный формат ответа, придерживайся только его, не используй никакую другую формулировку:
 ВОПРОС: [сам вопрос]
 ПРАВИЛЬНЫЙ ОТВЕТ: [правильный ответ]
-ОБЪЯСНЕНИЕ: [1-2 интересных факта, объясняющих правильный ответ]
+ОБЪЯСНЕНИЕ: [1-2 интересных факта, не более 150 символов]
 НЕПРАВИЛЬНЫЕ ОТВЕТЫ: [ответ1], [ответ2], [ответ3]
 
 Помни:
@@ -231,31 +305,88 @@ class TriviaService:
         
         return len(intersection) / len(union) if union else 0.0
     
-    def save_question_to_database(self, question: Question) -> bool:
-        """Save question to database."""
+    def save_question_to_database(self, question: Question) -> Optional[int]:
+        """Save question to database. Returns the new row id, or None on failure."""
         conn = None
         try:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
-            
+
             answer_options_str = json.dumps(question.answer_options)
             current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
+
             cursor.execute(
-                "INSERT INTO questions (question, correct_answer, answer_options, date_added, explanation) VALUES (%s, %s, %s, %s, %s)",
+                "INSERT INTO questions (question, correct_answer, answer_options, date_added, explanation)"
+                " VALUES (%s, %s, %s, %s, %s) RETURNING id",
                 (question.question, question.correct_answer, answer_options_str, current_date, question.explanation)
             )
+            question_id = cursor.fetchone()[0]
             conn.commit()
-            
-            logger.info("Question saved to database successfully")
-            return True
+
+            logger.info(f"Question saved to database successfully (id={question_id})")
+            return question_id
         except Exception as e:
             logger.error(f"Error saving question to database: {str(e)}")
-            return False
+            return None
         finally:
             if conn:
                 self.db_manager.release_connection(conn)
     
+    def get_unused_question_for_chat(self, chat_id: int):
+        """Return (question_id, question_dict) for a pooled question never sent to chat_id,
+        or None if the pool is exhausted."""
+        conn = None
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT q.id, q.question, q.correct_answer, q.answer_options, q.explanation
+                FROM questions q
+                LEFT JOIN chat_question_history h
+                    ON h.question_id = q.id
+                    AND h.chat_id = %s
+                WHERE h.id IS NULL
+                ORDER BY RANDOM()
+                LIMIT 1
+            """, (chat_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            qid, question_text, correct_answer, options_json, explanation = row
+            options = json.loads(options_json) if options_json else []
+            wrong = [o for o in options if o != correct_answer]
+            return qid, {
+                "question": question_text,
+                "answer": correct_answer,
+                "explanation": explanation or "",
+                "wrong_answers": wrong
+            }
+        except Exception as e:
+            logger.error(f"Error fetching unused question for chat {chat_id}: {e}")
+            return None
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
+
+    def record_question_sent_to_chat(self, question_id: int, chat_id: int) -> bool:
+        """Insert a row into chat_question_history to record that question was sent."""
+        conn = None
+        try:
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO chat_question_history (chat_id, question_id) VALUES (%s, %s)",
+                (chat_id, question_id)
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error recording question history: {e}")
+            return False
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
+
     def create_question_state(self, message_id: int, question: Question) -> QuestionState:
         """Create and store question state."""
         question_state = QuestionState(
