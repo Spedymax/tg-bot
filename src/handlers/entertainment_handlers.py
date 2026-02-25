@@ -38,6 +38,7 @@ class EntertainmentHandlers:
         # Load configuration
         self.config = self.load_config()
         self.image_urls = self.config.get('furry_image_urls', [])
+        self.whats_new_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'data', 'whats_new.json')
         
         # Dad jokes list (you'd load these from a file or database)
         self.dad_jokes_list = [
@@ -67,6 +68,11 @@ class EntertainmentHandlers:
     def setup_handlers(self):
         """Setup all entertainment command handlers"""
         
+        @self.bot.message_handler(commands=['new'])
+        def whats_new_command(message):
+            """Handle /new command - show latest feature announcement"""
+            self.send_whats_new(message.chat.id)
+
         @self.bot.message_handler(commands=['furrypics'])
         def furry_pics_command(message):
             """Handle /furrypics command"""
@@ -471,3 +477,20 @@ class EntertainmentHandlers:
         except Exception as e:
             logger.error(f"Error in otsos callback: {e}")
             self.bot.send_message(call.message.chat.id, "Произошла ошибка")
+
+    def send_whats_new(self, chat_id: int):
+        """Send the latest feature announcement Apple-style."""
+        try:
+            with open(self.whats_new_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            updates = data.get('updates', [])
+            if not updates:
+                self.bot.send_message(chat_id, "No updates yet.")
+                return
+            self.bot.send_message(chat_id, updates[0]['message'], parse_mode='HTML')
+        except FileNotFoundError:
+            logger.error("whats_new.json not found")
+            self.bot.send_message(chat_id, "No updates available.")
+        except Exception as e:
+            logger.error(f"Error sending whats new: {e}")
+            self.bot.send_message(chat_id, "Could not load update info.")
