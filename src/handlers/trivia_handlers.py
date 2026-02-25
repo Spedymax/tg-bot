@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 import google.generativeai as genai
 from config.settings import Settings
 from services.trivia_service import TriviaService
+from services.pet_service import PetService
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class TriviaHandlers:
         
         # Initialize TriviaService for AI question generation
         self.trivia_service = TriviaService(Settings.GEMINI_API_KEY, db_manager)
+        self.pet_service = PetService()
         
         self.quiz_scheduler = None  # Set later via set_quiz_scheduler()
         self.question_messages = {}
@@ -263,6 +265,23 @@ class TriviaHandlers:
                     chat_id = call.message.chat.id
                     current_score = player.get_quiz_score(chat_id)
                     player.update_quiz_score(chat_id, current_score + 1)
+
+                    # Update streak and add XP to pet
+                    player.trivia_streak = getattr(player, 'trivia_streak', 0) + 1
+                    if player.pet and player.pet.get('is_alive') and player.pet.get('is_locked'):
+                        player.pet, _, _ = self.pet_service.add_xp(player.pet, 10)
+                        new_title = self.pet_service.check_streak_reward(
+                            player.trivia_streak, getattr(player, 'pet_titles', [])
+                        )
+                        if new_title and new_title not in player.pet_titles:
+                            player.pet_titles.append(new_title)
+
+                    self.player_service.save_player(player)
+            else:
+                # Reset streak on wrong answer
+                player = self.player_service.get_player(user_id)
+                if player and getattr(player, 'trivia_streak', 0) > 0:
+                    player.trivia_streak = 0
                     self.player_service.save_player(player)
                 
         except Exception as e:

@@ -28,6 +28,7 @@ from handlers.trivia_handlers import TriviaHandlers
 from handlers.miniapp_handlers import MiniAppHandlers
 from handlers.health_alert_handlers import HealthAlertHandlers
 from handlers.moltbot_handlers import MoltbotHandlers
+from handlers.pet_handlers import PetHandlers
 from services.quiz_scheduler import QuizScheduler
 from services.telegram_error_handler import TelegramErrorHandler, telegram_error_handler
 
@@ -67,6 +68,9 @@ class TelegramBot:
 
         # Initialize MoltBot handlers
         self.moltbot_handlers = MoltbotHandlers(self.bot, self.db_manager)
+
+        # Initialize pet handlers
+        self.pet_handlers = PetHandlers(self.bot, self.player_service, self.game_service)
 
         # Initialize quiz scheduler
         self.quiz_scheduler = QuizScheduler(self.bot, self.db_manager, self.trivia_handlers.trivia_service)
@@ -152,6 +156,9 @@ class TelegramBot:
 
         # Setup health alert handlers
         self.health_alert_handlers.setup_handlers()
+
+        # Setup pet handlers
+        self.pet_handlers.setup_handlers()
 
         @self.bot.message_handler(commands=['start'])
         @telegram_error_handler("start_command")

@@ -61,11 +61,19 @@ class Player:
                 elif data[field_name] is None:
                     data[field_name] = []
         
-        # Handle datetime fields
+        # Handle datetime fields (replace None with min datetime)
         for field_name in ['last_used', 'last_vor', 'last_prezervativ', 'last_joke', 'casino_last_used']:
             if field_name in data and data[field_name] is None:
                 data[field_name] = datetime.min.replace(tzinfo=timezone.utc)
-        
+
+        # Handle optional datetime fields stored as ISO strings
+        for field_name in ['pet_revives_reset_date', 'last_trivia_date']:
+            if field_name in data and isinstance(data[field_name], str):
+                try:
+                    data[field_name] = datetime.fromisoformat(data[field_name])
+                except (ValueError, TypeError):
+                    data[field_name] = None
+
         return cls(**data)
 
     def to_db_dict(self) -> Dict[str, Any]:
@@ -77,7 +85,12 @@ class Player:
                           'chat_id', 'correct_answers', 'nnn_checkins', 'pet', 'pet_titles']:
             if isinstance(data[field_name], (list, dict)):
                 data[field_name] = json.dumps(data[field_name])
-        
+
+        # Convert optional datetime fields to ISO strings
+        for field_name in ['pet_revives_reset_date', 'last_trivia_date']:
+            if isinstance(data.get(field_name), datetime):
+                data[field_name] = data[field_name].isoformat()
+
         return data
 
     def has_item(self, item_name: str) -> bool:
