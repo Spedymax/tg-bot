@@ -157,5 +157,9 @@ memory_bot.log
 memory_backups
 *.json.bak
 
+# Telegram session files (contain authentication tokens)
+*.session
+*.session-journal
+
 # Git worktrees
 .worktrees/

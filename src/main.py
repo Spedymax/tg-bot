@@ -26,7 +26,8 @@ from handlers.shop_handlers import ShopHandlers
 from handlers.entertainment_handlers import EntertainmentHandlers
 from handlers.trivia_handlers import TriviaHandlers
 from handlers.miniapp_handlers import MiniAppHandlers
-from handlers.pet_handlers import PetHandlers
+from handlers.health_alert_handlers import HealthAlertHandlers
+from handlers.moltbot_handlers import MoltbotHandlers
 from services.quiz_scheduler import QuizScheduler
 from services.telegram_error_handler import TelegramErrorHandler, telegram_error_handler
 
@@ -45,7 +46,6 @@ class TelegramBot:
     def __init__(self):
         """Initialize the Telegram bot with new architecture"""
         self.bot = telebot.TeleBot(Settings.TELEGRAM_BOT_TOKEN)
-        logger.info("Starting connection to database...")
         self.db_manager = DatabaseManager()
         self.player_service = PlayerService(self.db_manager)
         self.game_service = GameService(self.player_service)
@@ -62,14 +62,18 @@ class TelegramBot:
         # Initialize mini-app handlers
         self.miniapp_handlers = MiniAppHandlers(self.bot, self.player_service, self.game_service)
 
-        # Initialize pet handlers
-        self.pet_handlers = PetHandlers(self.bot, self.player_service, self.game_service)
+        # Initialize health alert handlers
+        self.health_alert_handlers = HealthAlertHandlers(self.bot)
+
+        # Initialize MoltBot handlers
+        self.moltbot_handlers = MoltbotHandlers(self.bot, self.db_manager)
 
         # Initialize quiz scheduler
-        self.quiz_scheduler = QuizScheduler(self.bot, self.db_manager, self.trivia_handlers.trivia_service, self.player_service)
+        self.quiz_scheduler = QuizScheduler(self.bot, self.db_manager, self.trivia_handlers.trivia_service)
         
-        # Set quiz scheduler reference in admin handlers
+        # Set quiz scheduler reference in admin handlers and trivia handlers
         self.admin_handlers.set_quiz_scheduler(self.quiz_scheduler)
+        self.trivia_handlers.set_quiz_scheduler(self.quiz_scheduler)
         
         # Start connection pool monitoring
         self._start_pool_monitoring()
@@ -79,6 +83,12 @@ class TelegramBot:
         self.plot = self.load_json_file('/home/spedymax/tg-bot/assets/data/plot.json')
         self.shop = self.load_json_file('/home/spedymax/tg-bot/assets/data/shop.json')
         self.statuetki = self.load_json_file('/home/spedymax/tg-bot/assets/data/statuetki.json')
+
+        # Load game data
+        # self.char = self.load_json_file('../assets/data/char.json')
+        # self.plot = self.load_json_file('../assets/data/plot.json')
+        # self.shop = self.load_json_file('../assets/data/shop.json')
+        # self.statuetki = self.load_json_file('../assets/data/statuetki.json')
 
         # Global state (to be refactored later)
         self.admin_actions = {}
@@ -117,10 +127,13 @@ class TelegramBot:
 
     def setup_handlers(self):
         """Set up all bot command handlers"""
-        
+
+        # Setup MoltBot handlers FIRST — must run before the admin catch-all text handler
+        self.moltbot_handlers.setup_handlers()
+
         # Setup game handlers first
         self.game_handlers.setup_handlers()
-        
+
         # Setup admin handlers
         self.admin_handlers.setup_handlers()
         
@@ -137,8 +150,8 @@ class TelegramBot:
         # Setup mini-app handlers
         self.miniapp_handlers.setup_handlers()
 
-        # Setup pet handlers
-        self.pet_handlers.setup_handlers()
+        # Setup health alert handlers
+        self.health_alert_handlers.setup_handlers()
 
         @self.bot.message_handler(commands=['start'])
         @telegram_error_handler("start_command")

@@ -1,37 +1,35 @@
-import random
 import schedule
 import time
 import logging
 import threading
+import pytz
 from datetime import datetime, timezone
 from typing import Dict, Any
 from config.settings import Settings
 from services.trivia_service import TriviaService
 from telebot import types
-from utils.helpers import escape_html
 
 logger = logging.getLogger(__name__)
 
 
 class QuizScheduler:
     """Сервис для автоматической отправки квизов по расписанию."""
-
-    def __init__(self, bot, db_manager, trivia_service: TriviaService, player_service=None):
+    
+    def __init__(self, bot, db_manager, trivia_service: TriviaService):
         self.bot = bot
         self.db_manager = db_manager
         self.trivia_service = trivia_service
-        self.player_service = player_service
-
-        # Настройки квизов из Settings
-        self.quiz_times = Settings.TRIVIA_HOURS
-
+        
+        # Настройки квизов - 3 раза в день
+        self.quiz_times = ["12:00", "16:00", "20:00"]
+        
         # ID чата с друзьями (из настроек)
         self.target_chat_id = Settings.CHAT_IDS['main']  # Основная группа
-
+        
         # Флаг для остановки планировщика
         self.is_running = False
         self.scheduler_thread = None
-
+        
         # Настройка расписания
         self.setup_schedule()
         
@@ -43,9 +41,10 @@ class QuizScheduler:
             schedule.every().day.at(quiz_time).do(self.send_scheduled_quiz)
             logger.info(f"Quiz scheduled at {quiz_time}")
 
-        # Add daily pet death check at midnight
-        schedule.every().day.at("00:00").do(self.check_pet_deaths)
-        logger.info("Pet death check scheduled at 00:00")
+        # Schedule daily answers broadcast
+        answers_time_utc = self._calculate_answers_broadcast_time_utc()
+        schedule.every().day.at(answers_time_utc).do(self.send_daily_answers)
+        logger.info(f"Daily answers broadcast scheduled at {answers_time_utc} UTC ({Settings.ANSWERS_BROADCAST_TIME_LOCAL} {Settings.ANSWERS_BROADCAST_TIMEZONE})")
     
     def send_scheduled_quiz(self):
         """Отправка запланированного квиза."""
@@ -60,69 +59,123 @@ class QuizScheduler:
             logger.error(f"Error in send_scheduled_quiz: {e}")
     
     def send_quiz_to_chat(self, chat_id: int):
-        """Отправка квиза в указанный чат."""
+        """Отправка квиза: сначала из пула, иначе через AI."""
         try:
-            # Генерируем вопрос с помощью существующего сервиса
-            question_data = self._generate_question()
-            
-            if not question_data:
-                logger.error("Failed to generate question")
-                return
-            
-            # Отправляем квиз в чат
+            question_id = None
+            question_data = None
+
+            # Try pool first
+            result = self.trivia_service.get_unused_question_for_chat(chat_id)
+            if result is not None:
+                question_id, question_data = result
+                logger.info(f"Reusing pooled question id={question_id} for chat {chat_id}")
+
+            # Fall back to AI batch generation when pool is exhausted
+            if question_data is None:
+                logger.info(f"Pool exhausted for chat {chat_id}, generating batch of 30 via AI")
+                refill = self.refill_question_pool(30)
+                logger.info(f"Batch refill: {refill['added']} added, {refill['skipped']} skipped")
+
+                # Now try the pool again
+                result = self.trivia_service.get_unused_question_for_chat(chat_id)
+                if result is not None:
+                    question_id, question_data = result
+                else:
+                    logger.error("Pool still empty after batch refill, aborting quiz")
+                    return
+
+            # Send quiz
             self._send_quiz_message(chat_id, question_data)
-            
+
+            # Record history
+            if question_id is not None:
+                self.trivia_service.record_question_sent_to_chat(question_id, chat_id)
+
         except Exception as e:
             logger.error(f"Error sending quiz to chat {chat_id}: {e}")
-    
-    def _generate_question(self):
-        """Генерация вопроса с использованием TriviaService."""
+
+    def _get_question_id_by_text(self, question_text: str):
+        """Look up DB id for a just-inserted question by its text."""
+        conn = None
         try:
-            # Используем готовый метод из TriviaService
-            result = self.trivia_service.generate_question("system", "Scheduler")
-            
-            if result.get("success"):
-                question_data = result["question"]
-                return {
-                    "question": question_data["text"],
-                    "answer": question_data["correct_answer"],
-                    "explanation": question_data["explanation"],
-                    "wrong_answers": [opt for opt in question_data["options"] if opt != question_data["correct_answer"]]
-                }
-            else:
-                logger.error(f"Failed to generate question: {result.get('message')}")
-                return None
-            
+            conn = self.db_manager.get_connection()
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT id FROM questions WHERE question = %s ORDER BY date_added DESC LIMIT 1",
+                    (question_text,)
+                )
+                row = cursor.fetchone()
+                return row[0] if row else None
         except Exception as e:
-            logger.error(f"Error generating question: {e}")
+            logger.error(f"Error looking up question id: {e}")
             return None
+        finally:
+            if conn:
+                self.db_manager.release_connection(conn)
+    
+    def _generate_question(self, max_retries=3):
+        """Генерация вопроса с использованием TriviaService."""
+        for attempt in range(max_retries):
+            try:
+                # Используем готовый метод из TriviaService
+                result = self.trivia_service.generate_question("system", "Scheduler")
+                
+                if result.get("success"):
+                    question_data = result["question"]
+                    return {
+                        "question": question_data["text"],
+                        "answer": question_data["correct_answer"],
+                        "explanation": question_data["explanation"],
+                        "wrong_answers": [opt for opt in question_data["options"] if opt != question_data["correct_answer"]]
+                    }
+                else:
+                    error_message = result.get('message', 'Unknown error')
+                    logger.warning(f"Question generation attempt {attempt + 1} failed: {error_message}")
+                    
+                    # If it's a duplicate error and we have retries left, try again
+                    if "уже был задан ранее" in error_message and attempt < max_retries - 1:
+                        logger.info(f"Retrying question generation (attempt {attempt + 2}/{max_retries})")
+                        continue
+                    else:
+                        logger.error(f"Failed to generate question after {attempt + 1} attempts: {error_message}")
+                        return None
+                
+            except Exception as e:
+                logger.error(f"Error generating question on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying due to exception (attempt {attempt + 2}/{max_retries})")
+                    continue
+        
+        logger.error(f"Failed to generate question after {max_retries} attempts")
+        return None
     
     def _send_quiz_message(self, chat_id: int, question_data: Dict[str, Any]):
         """Отправка сообщения с квизом."""
         try:
             # Создаем варианты ответов
             answer_options = [question_data["answer"]] + question_data["wrong_answers"][:3]
-
+            
             # Перемешиваем варианты
+            import random
             random.shuffle(answer_options)
-
+            
             # Создаем клавиатуру
             markup = types.InlineKeyboardMarkup()
-
+            
             for index, answer in enumerate(answer_options):
                 button = types.InlineKeyboardButton(
                     text=answer,
                     callback_data=f"ans_{index}"
                 )
                 markup.add(button)
-
+            
             # Отправляем объявление
             self.bot.send_message(
                 chat_id,
                 "🧠 Время квиза! Проверим ваши знания!",
                 parse_mode='HTML'
             )
-
+            
             # Отправляем вопрос
             question_msg = self.bot.send_message(
                 chat_id,
@@ -132,20 +185,41 @@ class QuizScheduler:
                 protect_content=True
             )
 
-            # Сохраняем состояние вопроса используя TriviaService
-            self.trivia_service.save_question_state_raw(
-                question_msg.message_id,
-                question_data["question"],
-                {},  # players_responses
-                answer_options,
-                question_data["answer"],  # correct_answer
-                question_data["explanation"]  # explanation
-            )
-
+            # Сохраняем состояние вопроса (используя существующий функционал)
+            self._save_question_state(question_msg.message_id, question_data, answer_options)
+            
             logger.info(f"Quiz sent to chat {chat_id}, message_id: {question_msg.message_id}")
-
+            
         except Exception as e:
             logger.error(f"Error sending quiz message: {e}")
+    
+    def _save_question_state(self, message_id: int, question_data: Dict[str, Any], answer_options: list):
+        """Сохранение состояния квиза в базе данных."""
+        try:
+            connection = self.db_manager.get_connection()
+
+            try:
+                with connection.cursor() as cursor:
+                    import json
+
+                    # NOTE: Вопрос уже сохранен в таблицу questions в trivia_service.generate_question()
+                    # Здесь сохраняем только состояние вопроса для отслеживания ответов игроков
+                    question_state_data = {
+                        "players_responses": {},
+                        "options": answer_options
+                    }
+
+                    cursor.execute(
+                        "INSERT INTO question_state (message_id, original_question, players_responses) VALUES (%s, %s, %s)",
+                        (message_id, question_data["question"], json.dumps(question_state_data))
+                    )
+                    connection.commit()
+
+            finally:
+                self.db_manager.release_connection(connection)
+
+        except Exception as e:
+            logger.error(f"Error saving question state: {e}")
     
     def start_scheduler(self):
         """Запуск планировщика в отдельном потоке."""
@@ -178,6 +252,36 @@ class QuizScheduler:
                 logger.error(f"Error in scheduler loop: {e}")
                 time.sleep(60)
     
+    def refill_question_pool(self, count: int = 5) -> Dict[str, Any]:
+        """Generate `count` new AI questions in one API call and save them to the pool."""
+        added = 0
+        skipped = 0
+        try:
+            questions = self.trivia_service.generate_questions_batch_with_ai(count)
+            if not questions:
+                logger.error("Batch generation returned no questions")
+                return {"added": 0, "skipped": count}
+
+            for question in questions:
+                try:
+                    if self.trivia_service.is_duplicate_question(question.question, question.correct_answer):
+                        logger.info("Skipping duplicate question during pool refill")
+                        skipped += 1
+                        continue
+                    result = self.trivia_service.save_question_to_database(question)
+                    if result is not None:
+                        added += 1
+                    else:
+                        skipped += 1
+                except Exception as e:
+                    logger.error(f"Error saving question during pool refill: {e}")
+                    skipped += 1
+        except Exception as e:
+            logger.error(f"Error during pool refill batch generation: {e}")
+
+        logger.info(f"Pool refill complete: {added} added, {skipped} skipped")
+        return {"added": added, "skipped": skipped}
+
     def manual_quiz(self, chat_id: int = None) -> Dict[str, Any]:
         """Ручная отправка квиза."""
         try:
@@ -236,76 +340,154 @@ class QuizScheduler:
             logger.error(f"Error updating schedule: {e}")
             return False
 
-    def check_pet_deaths(self):
-        """Check for pets that should die due to inactivity."""
-        if not self.player_service:
-            logger.warning("Player service not available for pet death check")
-            return
-
+    def _calculate_answers_broadcast_time_utc(self):
+        """Calculate UTC time for daily answers broadcast based on configured timezone."""
         try:
-            logger.info("Running daily pet death check...")
-            now = datetime.now(timezone.utc)
-            today = now.date()
+            from datetime import datetime, time as dt_time
 
-            # Get all players
-            players = self.player_service.get_all_players()
-            deaths = []
+            # Get timezone
+            tz = pytz.timezone(Settings.ANSWERS_BROADCAST_TIMEZONE)
 
-            for player_id, player in players.items():
-                pet = getattr(player, 'pet', None)
-                if not pet or not pet.get('is_alive') or not pet.get('is_locked'):
-                    continue
+            # Parse local time
+            hour, minute = map(int, Settings.ANSWERS_BROADCAST_TIME_LOCAL.split(':'))
+            target_time = dt_time(hour, minute)
 
-                # Check last trivia date
-                last_trivia = getattr(player, 'last_trivia_date', None)
-                if last_trivia is None:
-                    # Pet was never fed, check creation date
-                    created_str = pet.get('created_at')
-                    if created_str:
-                        try:
-                            created = datetime.fromisoformat(created_str.replace('Z', '+00:00'))
-                            if created.date() < today:
-                                # Pet created before today and never fed
-                                deaths.append((player_id, player, pet.get('name', 'Улюбленець')))
-                        except:
-                            pass
-                    continue
+            # Convert to UTC
+            now = datetime.now(tz)
+            target_datetime = tz.localize(datetime.combine(now.date(), target_time))
+            utc_time = target_datetime.astimezone(pytz.UTC).time()
 
-                # Check if last trivia was before today
-                if last_trivia.date() < today:
-                    deaths.append((player_id, player, pet.get('name', 'Улюбленець')))
+            return utc_time.strftime("%H:%M")
+        except Exception as e:
+            logger.error(f"Error calculating broadcast time: {e}")
+            # Default to 22:00 UTC (23:00 CET winter time)
+            return "22:00"
 
-            # Process deaths (escape pet_name for HTML safety)
-            for player_id, player, pet_name in deaths:
-                pet_name = escape_html(pet_name)
-                try:
-                    player.pet['is_alive'] = False
-                    self.player_service.save_player(player)
+    MAX_TG_MSG_LEN = 4096
 
-                    # Send death notification
-                    username = None
-                    try:
-                        chat = self.bot.get_chat(player_id)
-                        username = chat.username
-                    except:
-                        pass
+    def _send_long_message(self, chat_id, text, parse_mode='HTML'):
+        """Send a long message by splitting it into chunks of MAX_TG_MSG_LEN."""
+        while text:
+            if len(text) <= self.MAX_TG_MSG_LEN:
+                self.bot.send_message(chat_id, text, parse_mode=parse_mode)
+                break
+            chunk = text[:self.MAX_TG_MSG_LEN]
+            cut = chunk.rfind('\n')
+            if cut > 0:
+                chunk = text[:cut]
+            self.bot.send_message(chat_id, chunk, parse_mode=parse_mode)
+            text = text[len(chunk):]
 
-                    if username:
-                        mention = f"@{username}"
-                    else:
-                        mention = f'<a href="tg://user?id={player_id}">{escape_html(player.player_name)}</a>'
+    def send_daily_answers(self):
+        """Broadcast today's correct answers at evening."""
+        try:
+            logger.info("Starting daily answers broadcast...")
 
-                    msg = f"{mention}, 💀 {pet_name} помер... Ти пропустив день. /pet щоб відродити."
+            # Get today's questions with answers (only those actually sent to this chat)
+            questions = self._get_todays_questions(self.target_chat_id)
 
-                    # Send to main chat
-                    self.bot.send_message(self.target_chat_id, msg, parse_mode='HTML')
+            if not questions:
+                logger.info("No questions today, skipping answers broadcast")
+                return
 
-                    logger.info(f"Pet died for player {player_id}")
+            # Get player scores for the main chat
+            player_scores = self._get_player_scores_for_chat(self.target_chat_id)
 
-                except Exception as e:
-                    logger.error(f"Error processing pet death for {player_id}: {e}")
+            # Format message
+            message = self._format_daily_answers(questions, player_scores)
 
-            logger.info(f"Pet death check complete. {len(deaths)} pets died.")
+            # Send broadcast (split if longer than Telegram's 4096-char limit)
+            self._send_long_message(self.target_chat_id, message)
+            logger.info(f"Daily answers broadcast sent successfully ({len(questions)} questions)")
 
         except Exception as e:
-            logger.error(f"Error in pet death check: {e}")
+            logger.error(f"Error sending daily answers: {e}")
+
+    def _get_todays_questions(self, chat_id: int):
+        """Query today's questions that were actually sent to the given chat."""
+        connection = None
+        try:
+            connection = self.db_manager.get_connection()
+
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT q.question, q.correct_answer, q.explanation, h.sent_at "
+                    "FROM questions q "
+                    "JOIN chat_question_history h ON h.question_id = q.id AND h.chat_id = %s "
+                    "WHERE DATE(h.sent_at) = CURRENT_DATE "
+                    "ORDER BY h.sent_at ASC",
+                    (chat_id,)
+                )
+                return cursor.fetchall()
+
+        except Exception as e:
+            logger.error(f"Error fetching today's questions: {e}")
+            return []
+        finally:
+            if connection:
+                self.db_manager.release_connection(connection)
+
+    def _get_player_scores_for_chat(self, chat_id):
+        """Get player scores for specific chat."""
+        connection = None
+        try:
+            connection = self.db_manager.get_connection()
+
+            with connection.cursor() as cursor:
+                # Get all players from pisunchik_data table
+                cursor.execute("SELECT player_id, player_name, correct_answers FROM pisunchik_data")
+                players_data = cursor.fetchall()
+
+                scores = []
+                chat_id_str = str(chat_id)
+
+                for player_id, player_name, correct_answers in players_data:
+                    if not correct_answers:
+                        continue
+
+                    # Parse correct_answers array to find score for this chat
+                    score_for_chat = 0
+                    for score_entry in correct_answers:
+                        if score_entry.startswith(f"{chat_id_str}:"):
+                            try:
+                                score_for_chat = int(score_entry.split(":")[1])
+                                break
+                            except (ValueError, IndexError):
+                                continue
+
+                    if score_for_chat > 0:
+                        name = player_name or f"Player {player_id}"
+                        scores.append((name, score_for_chat))
+
+                # Sort by score descending
+                scores.sort(key=lambda x: x[1], reverse=True)
+                return scores
+
+        except Exception as e:
+            logger.error(f"Error getting player scores: {e}")
+            return []
+        finally:
+            if connection:
+                self.db_manager.release_connection(connection)
+
+    def _format_daily_answers(self, questions, player_scores):
+        """Format questions and leaderboard into HTML message."""
+        message = "📊 <b>Правильные ответы за сегодня</b>\n\n"
+
+        # Add questions
+        for i, (question, correct_answer, explanation, date_added) in enumerate(questions, 1):
+            time_str = date_added.strftime('%H:%M') if date_added else 'N/A'
+            message += f"<b>Вопрос {i}:</b> {question}\n"
+            message += f"✅ <b>Ответ:</b> {correct_answer}\n"
+            if explanation:
+                message += f"💡 <i>{explanation}</i>\n"
+            message += f"⏰ {time_str}\n\n"
+
+        # Add leaderboard
+        if player_scores:
+            message += "🏆 <b>Лучшие игроки:</b>\n"
+            for rank, (name, score) in enumerate(player_scores[:5], 1):
+                medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else "🔸"
+                message += f"{medal} {name} - {score} правильных ответов\n"
+
+        return message
