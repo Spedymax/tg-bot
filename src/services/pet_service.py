@@ -190,11 +190,9 @@ class PetService:
         if not player.pet or not player.pet.get('is_alive'):
             return 0.0
         hunger = getattr(player, 'pet_hunger', 100)
-        if hunger <= 9:
+        if hunger < 30:
             return 0.0
-        if hunger <= 29:
-            return 0.0  # very hungry — XP stopped
-        multiplier = 0.5 if hunger <= 59 else 1.0
+        multiplier = 0.5 if hunger < 60 else 1.0
         happiness = getattr(player, 'pet_happiness', 50)
         if happiness >= 80:
             multiplier *= 1.2
