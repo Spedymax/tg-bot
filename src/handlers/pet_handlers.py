@@ -65,7 +65,7 @@ class PetHandlers:
         revives_used = getattr(player, 'pet_revives_used', 0)
         streak = getattr(player, 'trivia_streak', 0)
 
-        text = self.pet_service.format_pet_display(pet, active_title, revives_used, streak)
+        text = self.pet_service.format_pet_display(pet, active_title, revives_used, streak, player)
         markup = self._get_pet_buttons(pet, player)
 
         if pet.get('image_file_id'):

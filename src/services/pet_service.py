@@ -146,7 +146,7 @@ class PetService:
         }.get(stage, stage)
 
     def format_pet_display(self, pet: Dict[str, Any], active_title: Optional[str],
-                           revives_used: int, streak: int) -> str:
+                           revives_used: int, streak: int, player=None) -> str:
         """Format pet info for display."""
         if not pet:
             return "У тебя ещё нет питомца!"
@@ -180,6 +180,21 @@ class PetService:
 
         if not pet.get('is_locked'):
             text += "\n⚙️ Статус: Настройка..."
+
+        # Show hunger/happiness bars if pet is alive and active
+        if player and pet.get('is_alive') and pet.get('is_locked'):
+            hunger = getattr(player, 'pet_hunger', 100)
+            happiness = getattr(player, 'pet_happiness', 50)
+
+            def _bar(val: int, length: int = 8) -> str:
+                filled = max(0, min(length, int(val / 100 * length)))
+                return '█' * filled + '░' * (length - filled)
+
+            hunger_icon = '😊' if hunger >= 60 else ('😟' if hunger >= 30 else '😫')
+            happy_icon = '😊' if happiness >= 80 else ('🙂' if happiness >= 50 else ('😔' if happiness >= 20 else '😢'))
+
+            text += f"\n🍖 Голод: {_bar(hunger)} {hunger}%  {hunger_icon}"
+            text += f"\n🎭 Настроение: {_bar(happiness)} {happiness}%  {happy_icon}"
 
         return text
 
