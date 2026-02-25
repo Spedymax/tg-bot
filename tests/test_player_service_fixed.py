@@ -113,7 +113,8 @@ class TestPlayerServiceFixed(unittest.TestCase):
         
         # Add player to cache
         test_player = Player(player_id=12345, player_name="TestPlayer")
-        service._cache[12345] = test_player
+        from datetime import datetime, timezone
+        service._cache[12345] = {"player": test_player, "cached_at": datetime.now(timezone.utc)}
         
         # Get player (should come from cache)
         player = service.get_player(12345)
