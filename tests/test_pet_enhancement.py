@@ -100,3 +100,35 @@ def test_format_pet_display_shows_hunger_bar():
     assert 'Голод' in text
     assert 'Настроение' in text
     assert '█' in text
+
+def test_ulta_available_when_ready():
+    svc = PetService()
+    p = make_player_with_live_pet()
+    p.pet_hunger = 70
+    p.pet_happiness = 60
+    p.pet_ulta_used_date = None
+    assert svc.is_ulta_available(p) == True
+
+def test_ulta_not_available_on_cooldown():
+    svc = PetService()
+    p = make_player_with_live_pet()
+    p.pet_hunger = 70
+    p.pet_happiness = 60
+    p.pet_ulta_used_date = datetime.now(timezone.utc) - timedelta(hours=10)
+    assert svc.is_ulta_available(p) == False
+
+def test_ulta_not_available_when_hungry():
+    svc = PetService()
+    p = make_player_with_live_pet()
+    p.pet_hunger = 5
+    p.pet_happiness = 60
+    assert svc.is_ulta_available(p) == False
+
+def test_ulta_cooldown_doubled_when_depressed():
+    svc = PetService()
+    p = make_player_with_live_pet()
+    p.pet_hunger = 70
+    p.pet_happiness = 15  # depressed (<20)
+    p.pet_ulta_used_date = datetime.now(timezone.utc) - timedelta(hours=25)
+    # Normal 24h would be ready, but depressed = 48h cooldown
+    assert svc.is_ulta_available(p) == False
