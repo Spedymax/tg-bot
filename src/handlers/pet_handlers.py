@@ -324,11 +324,11 @@ class PetHandlers:
 
     def show_titles(self, call):
         """Show titles selection screen."""
-        self.bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         player = self.player_service.get_player(user_id)
 
         if not player:
+            self.bot.answer_callback_query(call.id)
             return
 
         titles = getattr(player, 'pet_titles', [])
@@ -337,6 +337,8 @@ class PetHandlers:
         if not titles:
             self.bot.answer_callback_query(call.id, "У тебе ще немає титулів!")
             return
+
+        self.bot.answer_callback_query(call.id)
 
         text = "🏷 Твої титули:\n\n"
         for title in titles:
