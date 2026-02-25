@@ -271,7 +271,7 @@ class PetService:
             return False
         hunger = getattr(player, 'pet_hunger', 100)
         happiness = getattr(player, 'pet_happiness', 50)
-        if hunger < 10 or happiness < 20:
+        if hunger < 10:
             return False
         used = getattr(player, 'pet_ulta_used_date', None)
         if used is None:
