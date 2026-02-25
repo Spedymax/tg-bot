@@ -172,7 +172,11 @@ class GameService:
     
     def execute_roll_command(self, player: Player, rolls: int) -> Dict:
         """Execute roll command"""
-        cost = self.calculate_roll_cost(rolls, player)
+        if getattr(player, 'pet_ulta_free_roll_pending', False):
+            cost = 0
+            player.pet_ulta_free_roll_pending = False
+        else:
+            cost = self.calculate_roll_cost(rolls, player)
         
         if not player.spend_coins(cost):
             return {
