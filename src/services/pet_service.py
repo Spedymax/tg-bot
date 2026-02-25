@@ -255,3 +255,34 @@ class PetService:
         gains = {'trivia': 5, 'casino': 3, 'pisunchik': 2, 'roll': 2}
         player.pet_happiness = min(100, getattr(player, 'pet_happiness', 50) + gains.get(activity, 2))
         player.pet_happiness_last_activity = now
+
+    # ─── Ulta system ──────────────────────────────────────────────
+
+    ULTA_NAMES = {
+        'egg':       '🎰 Казино+',
+        'baby':      '🎲 Халявный ролл',
+        'adult':     '🔮 Оракул',
+        'legendary': '✅ Халява',
+    }
+
+    def is_ulta_available(self, player) -> bool:
+        """Check if ulta can be used right now."""
+        if not player.pet or not player.pet.get('is_alive') or not player.pet.get('is_locked'):
+            return False
+        hunger = getattr(player, 'pet_hunger', 100)
+        happiness = getattr(player, 'pet_happiness', 50)
+        if hunger < 10 or happiness < 20:
+            return False
+        used = getattr(player, 'pet_ulta_used_date', None)
+        if used is None:
+            return True
+        cooldown_h = 48 if happiness < 20 else 24
+        return (datetime.now(timezone.utc) - used).total_seconds() >= cooldown_h * 3600
+
+    def mark_ulta_used(self, player):
+        """Record that ulta was used now."""
+        player.pet_ulta_used_date = datetime.now(timezone.utc)
+
+    def get_ulta_name(self, stage: str) -> str:
+        """Get display name for ulta at given stage."""
+        return self.ULTA_NAMES.get(stage, '⚡ Ульта')
