@@ -37,6 +37,18 @@ class TriviaHandlers:
         """Set the quiz scheduler instance (used for pool refill)."""
         self.quiz_scheduler = quiz_scheduler
 
+    def _get_pet_badge(self, player) -> str:
+        """Get pet stage badge for appending to game result messages."""
+        if not player.pet or not player.pet.get('is_alive') or not player.pet.get('is_locked'):
+            return ''
+        emojis = {'egg': '🥚', 'baby': '🐣', 'adult': '🐤', 'legendary': '🦅'}
+        badge = emojis.get(player.pet.get('stage', ''), '')
+        if not badge:
+            return ''
+        if self.pet_service.is_ulta_available(player):
+            badge += '⚡'
+        return f' {badge}'
+
     def setup_handlers(self):
         """Setup all trivia command handlers"""
 
@@ -261,7 +273,12 @@ class TriviaHandlers:
             
             # Add player name with emoji to responses
             emoji = "✅" if is_correct else "❌"
-            question_data["players_responses"][user_id] = f"{player_name} {emoji}"
+            if is_correct:
+                _badge_player = self.player_service.get_player(user_id)
+                _pet_badge = self._get_pet_badge(_badge_player) if _badge_player else ''
+            else:
+                _pet_badge = ''
+            question_data["players_responses"][user_id] = f"{player_name}{_pet_badge} {emoji}"
             
             self.bot.answer_callback_query(call.id, f"Вы выбрали: {selected_answer}")
             
