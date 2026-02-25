@@ -553,8 +553,17 @@ class PetHandlers:
         self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
 
     def _ulta_khalyava(self, call, player):
-        """Legendary ulta: auto-correct next trivia."""
-        pass  # Implemented in Task 14
+        """Legendary ulta: auto-correct next trivia answer."""
+        player.pet_ulta_trivia_pending = True
+        self.pet_service.mark_ulta_used(player)
+        self.player_service.save_player(player)
+        self.bot.answer_callback_query(
+            call.id,
+            "✅ Халява активирована! Следующий вопрос викторины засчитается автоматически.",
+            show_alert=True
+        )
+        self.show_pet_menu(call.message.chat.id, call.from_user.id,
+                           delete_message_id=call.message.message_id)
 
     def oracle_confirm(self, call):
         """Oracle: player confirmed — apply the stored preview result."""

@@ -276,9 +276,16 @@ class TriviaHandlers:
                 question_data["options"]
             )
             
+            # Халява ulta override: treat next answer as correct
+            player = self.player_service.get_player(user_id)
+            if player and getattr(player, 'pet_ulta_trivia_pending', False):
+                player.pet_ulta_trivia_pending = False
+                is_correct = True  # force correct
+
             # Update player score if correct
             if is_correct:
-                player = self.player_service.get_player(user_id)
+                if not player:
+                    player = self.player_service.get_player(user_id)
                 if player:
                     chat_id = call.message.chat.id
                     current_score = player.get_quiz_score(chat_id)
@@ -311,7 +318,8 @@ class TriviaHandlers:
                     self.player_service.save_player(player)
             else:
                 # Reset streak on wrong answer
-                player = self.player_service.get_player(user_id)
+                if not player:
+                    player = self.player_service.get_player(user_id)
                 if player and getattr(player, 'trivia_streak', 0) > 0:
                     player.trivia_streak = 0
                     self.player_service.save_player(player)
