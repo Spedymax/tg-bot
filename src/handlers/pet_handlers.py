@@ -44,6 +44,15 @@ class PetHandlers:
             self.bot.send_message(chat_id, "Вы не зарегистрированы как игрок.")
             return
 
+        # Apply lazy decay on every pet view
+        if player.pet and player.pet.get('is_alive') and player.pet.get('is_locked'):
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            died = self.pet_service.apply_hunger_decay(player, now)
+            self.pet_service.apply_happiness_decay(player, now)
+            if died:
+                self.player_service.save_player(player)
+
         pet = getattr(player, 'pet', None)
 
         if not pet:
