@@ -107,6 +107,15 @@ class GameService:
             'on_cooldown': False
         }
     
+    def preview_pisunchik_result(self, player: Player) -> Dict:
+        """Pre-generate a pisunchik result without applying it."""
+        size_change = random.randint(GameConfig.PISUNCHIK_MIN_CHANGE, GameConfig.PISUNCHIK_MAX_CHANGE)
+        coins_change = random.randint(GameConfig.PISUNCHIK_MIN_COINS, GameConfig.PISUNCHIK_MAX_COINS)
+        # Apply bdsm_kostumchik bonus (read-only simulation)
+        if player.has_item('bdsm_kostumchik') and random.random() <= GameConfig.ITEM_EFFECTS['bdsm_kostumchik']['probability']:
+            size_change += GameConfig.ITEM_EFFECTS['bdsm_kostumchik']['bonus']
+        return {'size_change': size_change, 'coins_change': coins_change}
+
     def can_use_casino(self, player: Player) -> Tuple[bool, Optional[str]]:
         """Check if player can use casino"""
         current_time = datetime.now(timezone.utc)
@@ -114,11 +123,14 @@ class GameService:
         if player.casino_last_used:
             time_elapsed = current_time - player.casino_last_used
             
-            if time_elapsed < timedelta(hours=24) and player.casino_usage_count >= GameConfig.CASINO_DAILY_LIMIT:
+            extra = getattr(player, 'pet_casino_extra_spins', 0)
+            effective_limit = GameConfig.CASINO_DAILY_LIMIT + extra
+            if time_elapsed < timedelta(hours=24) and player.casino_usage_count >= effective_limit:
                 time_left = timedelta(days=1) - time_elapsed
                 return False, f"Вы достигли лимита использования команды на сегодня.\nВремени осталось: {time_left}"
             elif time_elapsed >= timedelta(hours=24):
                 player.casino_usage_count = 0
+                player.pet_casino_extra_spins = 0  # reset daily extra spins on new day
         
         return True, None
     
@@ -169,7 +181,11 @@ class GameService:
     
     def execute_roll_command(self, player: Player, rolls: int) -> Dict:
         """Execute roll command"""
-        cost = self.calculate_roll_cost(rolls, player)
+        if getattr(player, 'pet_ulta_free_roll_pending', False):
+            cost = 0
+            player.pet_ulta_free_roll_pending = False
+        else:
+            cost = self.calculate_roll_cost(rolls, player)
         
         if not player.spend_coins(cost):
             return {

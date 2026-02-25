@@ -43,6 +43,20 @@ class Player:
     trivia_streak: int = 0
     last_trivia_date: Optional[datetime] = None
 
+    # Pet hunger/happiness stats
+    pet_hunger: int = 100
+    pet_happiness: int = 50
+    pet_hunger_last_decay: Optional[datetime] = None
+    pet_happiness_last_activity: Optional[datetime] = None
+
+    # Ulta system
+    pet_ulta_used_date: Optional[datetime] = None
+    pet_ulta_free_roll_pending: bool = False
+    pet_ulta_oracle_pending: bool = False
+    pet_ulta_trivia_pending: bool = False
+    pet_casino_extra_spins: int = 0
+    pet_ulta_oracle_preview: Optional[Dict[str, Any]] = None
+
     @classmethod
     def from_db_row(cls, row: tuple, column_names: List[str]) -> 'Player':
         """Create a Player instance from a database row"""
@@ -67,7 +81,9 @@ class Player:
                 data[field_name] = datetime.min.replace(tzinfo=timezone.utc)
 
         # Handle optional datetime fields stored as ISO strings
-        for field_name in ['pet_revives_reset_date', 'last_trivia_date']:
+        for field_name in ['pet_revives_reset_date', 'last_trivia_date',
+                           'pet_hunger_last_decay', 'pet_happiness_last_activity',
+                           'pet_ulta_used_date']:
             if field_name in data and isinstance(data[field_name], str):
                 try:
                     data[field_name] = datetime.fromisoformat(data[field_name])
@@ -82,12 +98,15 @@ class Player:
         
         # Convert lists/dicts to JSON strings for database storage
         for field_name in ['items', 'characteristics', 'player_stocks', 'statuetki',
-                          'chat_id', 'correct_answers', 'nnn_checkins', 'pet', 'pet_titles']:
+                          'chat_id', 'correct_answers', 'nnn_checkins', 'pet', 'pet_titles',
+                          'pet_ulta_oracle_preview']:
             if isinstance(data[field_name], (list, dict)):
                 data[field_name] = json.dumps(data[field_name])
 
         # Convert optional datetime fields to ISO strings
-        for field_name in ['pet_revives_reset_date', 'last_trivia_date']:
+        for field_name in ['pet_revives_reset_date', 'last_trivia_date',
+                           'pet_hunger_last_decay', 'pet_happiness_last_activity',
+                           'pet_ulta_used_date']:
             if isinstance(data.get(field_name), datetime):
                 data[field_name] = data[field_name].isoformat()
 
