@@ -303,6 +303,11 @@ class TriviaHandlers:
                         if new_title and new_title not in player.pet_titles:
                             player.pet_titles.append(new_title)
 
+                    # Food drop (25% chance on correct answer)
+                    import random as _rand
+                    if player.pet and player.pet.get('is_alive') and _rand.random() < 0.25:
+                        player.add_item('pet_food_basic')
+
                     self.player_service.save_player(player)
             else:
                 # Reset streak on wrong answer
