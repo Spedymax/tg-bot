@@ -503,7 +503,14 @@ class PetHandlers:
 
     def _ulta_casino_plus(self, call, player):
         """Egg ulta: +2 casino attempts today."""
-        pass  # Implemented in Task 11
+        player.pet_casino_extra_spins = getattr(player, 'pet_casino_extra_spins', 0) + 2
+        self.pet_service.mark_ulta_used(player)
+        self.player_service.save_player(player)
+        self.bot.answer_callback_query(
+            call.id, "🎰 Казино+: +2 попытки казино сегодня!", show_alert=True
+        )
+        self.show_pet_menu(call.message.chat.id, call.from_user.id,
+                           delete_message_id=call.message.message_id)
 
     def _ulta_free_roll(self, call, player):
         """Baby ulta: next roll is free."""
