@@ -146,7 +146,7 @@ class PetService:
         }.get(stage, stage)
 
     def format_pet_display(self, pet: Dict[str, Any], active_title: Optional[str],
-                           revives_used: int, streak: int) -> str:
+                           revives_used: int, streak: int, player=None) -> str:
         """Format pet info for display."""
         if not pet:
             return "У тебя ещё нет питомца!"
@@ -181,4 +181,108 @@ class PetService:
         if not pet.get('is_locked'):
             text += "\n⚙️ Статус: Настройка..."
 
+        # Show hunger/happiness bars if pet is alive and active
+        if player and pet.get('is_alive') and pet.get('is_locked'):
+            hunger = getattr(player, 'pet_hunger', 100)
+            happiness = getattr(player, 'pet_happiness', 50)
+
+            def _bar(val: int, length: int = 8) -> str:
+                filled = max(0, min(length, int(val / 100 * length)))
+                return '█' * filled + '░' * (length - filled)
+
+            hunger_icon = '😊' if hunger >= 60 else ('😟' if hunger >= 30 else '😫')
+            happy_icon = '😊' if happiness >= 80 else ('🙂' if happiness >= 50 else ('😔' if happiness >= 20 else '😢'))
+
+            text += f"\n🍖 Голод: {_bar(hunger)} {hunger}%  {hunger_icon}"
+            text += f"\n🎭 Настроение: {_bar(happiness)} {happiness}%  {happy_icon}"
+
         return text
+
+    # ─── Hunger / Happiness ───────────────────────────────────────
+
+    def get_xp_multiplier(self, player) -> float:
+        """Return XP multiplier based on hunger and happiness."""
+        if not player.pet or not player.pet.get('is_alive'):
+            return 0.0
+        hunger = getattr(player, 'pet_hunger', 100)
+        if hunger < 30:
+            return 0.0
+        multiplier = 0.5 if hunger < 60 else 1.0
+        happiness = getattr(player, 'pet_happiness', 50)
+        if happiness >= 80:
+            multiplier *= 1.2
+        return multiplier
+
+    def apply_hunger_decay(self, player, now: datetime) -> bool:
+        """Apply accumulated hunger decay ticks (every 12h = -10).
+        Returns True if pet just died."""
+        from datetime import timedelta
+        if not player.pet or not player.pet.get('is_alive'):
+            return False
+        last = getattr(player, 'pet_hunger_last_decay', None)
+        if last is None:
+            player.pet_hunger_last_decay = now
+            return False
+        ticks = int((now - last).total_seconds() // (12 * 3600))
+        if ticks <= 0:
+            return False
+        player.pet_hunger = max(0, getattr(player, 'pet_hunger', 100) - ticks * 10)
+        player.pet_hunger_last_decay = last + timedelta(hours=12 * ticks)
+        if player.pet_hunger == 0:
+            player.pet['is_alive'] = False
+            return True
+        return False
+
+    def apply_happiness_decay(self, player, now: datetime):
+        """Apply accumulated happiness decay ticks (every 24h = -10)."""
+        from datetime import timedelta
+        if not player.pet or not player.pet.get('is_alive'):
+            return
+        last = getattr(player, 'pet_happiness_last_activity', None)
+        if last is None:
+            player.pet_happiness_last_activity = now
+            return
+        ticks = int((now - last).total_seconds() // (24 * 3600))
+        if ticks <= 0:
+            return
+        player.pet_happiness = max(0, getattr(player, 'pet_happiness', 50) - ticks * 10)
+        # Don't advance last_activity — only game actions reset the timer
+
+    def record_game_activity(self, player, activity: str, now: datetime):
+        """Boost happiness on any game action and reset inactivity timer."""
+        if not player.pet or not player.pet.get('is_alive') or not player.pet.get('is_locked'):
+            return
+        gains = {'trivia': 5, 'casino': 3, 'pisunchik': 2, 'roll': 2}
+        player.pet_happiness = min(100, getattr(player, 'pet_happiness', 50) + gains.get(activity, 2))
+        player.pet_happiness_last_activity = now
+
+    # ─── Ulta system ──────────────────────────────────────────────
+
+    ULTA_NAMES = {
+        'egg':       '🎰 Казино+',
+        'baby':      '🎲 Халявный ролл',
+        'adult':     '🔮 Оракул',
+        'legendary': '✅ Халява',
+    }
+
+    def is_ulta_available(self, player) -> bool:
+        """Check if ulta can be used right now."""
+        if not player.pet or not player.pet.get('is_alive') or not player.pet.get('is_locked'):
+            return False
+        hunger = getattr(player, 'pet_hunger', 100)
+        happiness = getattr(player, 'pet_happiness', 50)
+        if hunger < 10:
+            return False
+        used = getattr(player, 'pet_ulta_used_date', None)
+        if used is None:
+            return True
+        cooldown_h = 48 if happiness < 20 else 24
+        return (datetime.now(timezone.utc) - used).total_seconds() >= cooldown_h * 3600
+
+    def mark_ulta_used(self, player):
+        """Record that ulta was used now."""
+        player.pet_ulta_used_date = datetime.now(timezone.utc)
+
+    def get_ulta_name(self, stage: str) -> str:
+        """Get display name for ulta at given stage."""
+        return self.ULTA_NAMES.get(stage, '⚡ Ульта')

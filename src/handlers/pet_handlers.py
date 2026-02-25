@@ -44,6 +44,14 @@ class PetHandlers:
             self.bot.send_message(chat_id, "Вы не зарегистрированы как игрок.")
             return
 
+        # Apply lazy decay on every pet view
+        if player.pet and player.pet.get('is_alive') and player.pet.get('is_locked'):
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            self.pet_service.apply_hunger_decay(player, now)
+            self.pet_service.apply_happiness_decay(player, now)
+            self.player_service.save_player(player)
+
         pet = getattr(player, 'pet', None)
 
         if not pet:
@@ -56,7 +64,7 @@ class PetHandlers:
         revives_used = getattr(player, 'pet_revives_used', 0)
         streak = getattr(player, 'trivia_streak', 0)
 
-        text = self.pet_service.format_pet_display(pet, active_title, revives_used, streak)
+        text = self.pet_service.format_pet_display(pet, active_title, revives_used, streak, player)
         markup = self._get_pet_buttons(pet, player)
 
         if pet.get('image_file_id'):
@@ -95,7 +103,18 @@ class PetHandlers:
             pet_titles = getattr(player, 'pet_titles', [])
             if pet_titles:
                 markup.add(types.InlineKeyboardButton("🏷 Титулы", callback_data="pet_titles"))
+            stage = pet.get('stage', 'egg')
+            if self.pet_service.is_ulta_available(player):
+                ulta_name = self.pet_service.get_ulta_name(stage)
+                markup.add(types.InlineKeyboardButton(
+                    f"⚡ {ulta_name}", callback_data="pet_ulta"
+                ))
+            else:
+                markup.add(types.InlineKeyboardButton(
+                    "⚡ Ульта (не готова)", callback_data="pet_ulta_info"
+                ))
             markup.add(types.InlineKeyboardButton("💀 Убить", callback_data="pet_kill_confirm"))
+            markup.add(types.InlineKeyboardButton("🍖 Покормить", callback_data="pet_feed"))
 
         return markup
 
@@ -133,6 +152,14 @@ class PetHandlers:
             'delete_no':      lambda: self._dismiss_and_reopen(call),
             'titles':         lambda: self.show_titles(call),
             'titles_back':    lambda: self._dismiss_and_reopen(call),
+            'feed':           lambda: self.show_feed_menu(call),
+            'feed_basic':     lambda: self.feed_pet(call, 'basic'),
+            'feed_deluxe':    lambda: self.feed_pet(call, 'deluxe'),
+            'feed_back':      lambda: self._dismiss_and_reopen(call),
+            'ulta':           lambda: self.activate_ulta(call),
+            'ulta_info':      lambda: self._show_ulta_info(call),
+            'oracle_yes':     lambda: self.oracle_confirm(call),
+            'oracle_no':      lambda: self.oracle_cancel(call),
         }
 
         handler = handlers.get(action)
@@ -157,6 +184,71 @@ class PetHandlers:
         except Exception:
             pass
         self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
+
+    # ──────────────────────────────────────────────
+    # Feed
+    # ──────────────────────────────────────────────
+
+    def show_feed_menu(self, call):
+        """Show food selection menu."""
+        user_id = call.from_user.id
+        player = self.player_service.get_player(user_id)
+        if not player or not player.pet:
+            self.bot.answer_callback_query(call.id)
+            return
+
+        basic_count = player.items.count('pet_food_basic')
+        deluxe_count = player.items.count('pet_food_deluxe')
+
+        if basic_count == 0 and deluxe_count == 0:
+            self.bot.answer_callback_query(call.id, "У тебя нет еды для питомца!")
+            return
+
+        self.bot.answer_callback_query(call.id)
+        markup = types.InlineKeyboardMarkup()
+        if basic_count > 0:
+            markup.add(types.InlineKeyboardButton(
+                f"🍖 Корм ({basic_count} шт.) +30 голод",
+                callback_data="pet_feed_basic"
+            ))
+        if deluxe_count > 0:
+            markup.add(types.InlineKeyboardButton(
+                f"🍗 Деликатес ({deluxe_count} шт.) +60 голод +20 настроение",
+                callback_data="pet_feed_deluxe"
+            ))
+        markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="pet_feed_back"))
+        self._replace_with_text(call, "🍽 Чем покормить питомца?", markup)
+
+    def feed_pet(self, call, food_type: str):
+        """Feed the pet with selected food item."""
+        from datetime import datetime, timezone
+        user_id = call.from_user.id
+        player = self.player_service.get_player(user_id)
+        if not player or not player.pet:
+            self.bot.answer_callback_query(call.id, "Питомец не найден")
+            return
+
+        item_key = 'pet_food_basic' if food_type == 'basic' else 'pet_food_deluxe'
+        effects = {
+            'pet_food_basic':  {'hunger': 30, 'happiness': 0,  'name': 'Корм'},
+            'pet_food_deluxe': {'hunger': 60, 'happiness': 20, 'name': 'Деликатес'},
+        }
+        effect = effects[item_key]
+
+        if not player.remove_item(item_key):
+            self.bot.answer_callback_query(call.id, "Еда не найдена!")
+            return
+
+        now = datetime.now(timezone.utc)
+        self.pet_service.apply_hunger_decay(player, now)
+        player.pet_hunger = min(100, getattr(player, 'pet_hunger', 100) + effect['hunger'])
+        if effect['happiness'] > 0:
+            player.pet_happiness = min(100, getattr(player, 'pet_happiness', 50) + effect['happiness'])
+
+        self.player_service.save_player(player)
+        self.bot.answer_callback_query(call.id, f"🐾 {effect['name']} съеден!")
+        self.show_pet_menu(call.message.chat.id, user_id,
+                           delete_message_id=call.message.message_id)
 
     # ──────────────────────────────────────────────
     # Pet creation
@@ -370,6 +462,150 @@ class PetHandlers:
             self.bot.answer_callback_query(call.id)
 
         self.show_titles(call)
+
+    # ──────────────────────────────────────────────
+    # Ulta system
+    # ──────────────────────────────────────────────
+
+    def activate_ulta(self, call):
+        """Dispatch to stage-specific ulta handler."""
+        user_id = call.from_user.id
+        player = self.player_service.get_player(user_id)
+        if not player or not player.pet:
+            self.bot.answer_callback_query(call.id, "Питомец не найден")
+            return
+        if not self.pet_service.is_ulta_available(player):
+            self.bot.answer_callback_query(call.id, "Ульта ещё не готова!")
+            return
+
+        stage = player.pet.get('stage', 'egg')
+        dispatch = {
+            'egg':       self._ulta_casino_plus,
+            'baby':      self._ulta_free_roll,
+            'adult':     self._ulta_oracle,
+            'legendary': self._ulta_khalyava,
+        }
+        handler = dispatch.get(stage)
+        if handler:
+            handler(call, player)
+        else:
+            self.bot.answer_callback_query(call.id, "Неизвестная стадия")
+
+    def _show_ulta_info(self, call):
+        """Show info about ulta cooldown."""
+        self.bot.answer_callback_query(
+            call.id,
+            "Ульта будет готова через 24 часа после последнего использования. "
+            "Убедись, что питомец не голоден (голод ≥ 10) и не подавлен (настроение ≥ 20).",
+            show_alert=True
+        )
+
+    def _ulta_casino_plus(self, call, player):
+        """Egg ulta: +2 casino attempts today."""
+        player.pet_casino_extra_spins = getattr(player, 'pet_casino_extra_spins', 0) + 2
+        self.pet_service.mark_ulta_used(player)
+        self.player_service.save_player(player)
+        self.bot.answer_callback_query(
+            call.id, "🎰 Казино+: +2 попытки казино сегодня!", show_alert=True
+        )
+        self.show_pet_menu(call.message.chat.id, call.from_user.id,
+                           delete_message_id=call.message.message_id)
+
+    def _ulta_free_roll(self, call, player):
+        """Baby ulta: next roll is free."""
+        player.pet_ulta_free_roll_pending = True
+        self.pet_service.mark_ulta_used(player)
+        self.player_service.save_player(player)
+        self.bot.answer_callback_query(
+            call.id,
+            "🎲 Халявный ролл активирован! Следующий /roll бесплатный.",
+            show_alert=True
+        )
+        self.show_pet_menu(call.message.chat.id, call.from_user.id,
+                           delete_message_id=call.message.message_id)
+
+    def _ulta_oracle(self, call, player):
+        """Adult ulta: preview pisunchik result before rolling."""
+        preview = self.game_service.preview_pisunchik_result(player)
+        player.pet_ulta_oracle_pending = True
+        player.pet_ulta_oracle_preview = preview
+        self.pet_service.mark_ulta_used(player)
+        self.player_service.save_player(player)
+        self.bot.answer_callback_query(call.id)
+
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("✅ Бросить!", callback_data="pet_oracle_yes"),
+            types.InlineKeyboardButton("❌ Пропустить", callback_data="pet_oracle_no"),
+        )
+        sign = '+' if preview['size_change'] >= 0 else ''
+        text = (
+            f"🔮 Оракул предсказывает:\n\n"
+            f"Изменение: {sign}{preview['size_change']} см\n"
+            f"Монеты: +{preview['coins_change']} BTC\n\n"
+            f"Бросать?"
+        )
+        try:
+            self.bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+        self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
+
+    def _ulta_khalyava(self, call, player):
+        """Legendary ulta: auto-correct next trivia answer."""
+        player.pet_ulta_trivia_pending = True
+        self.pet_service.mark_ulta_used(player)
+        self.player_service.save_player(player)
+        self.bot.answer_callback_query(
+            call.id,
+            "✅ Халява активирована! Следующий вопрос викторины засчитается автоматически.",
+            show_alert=True
+        )
+        self.show_pet_menu(call.message.chat.id, call.from_user.id,
+                           delete_message_id=call.message.message_id)
+
+    def oracle_confirm(self, call):
+        """Oracle: player confirmed — apply the stored preview result."""
+        from datetime import datetime, timezone
+        user_id = call.from_user.id
+        player = self.player_service.get_player(user_id)
+        if not player or not player.pet_ulta_oracle_preview:
+            self.bot.answer_callback_query(call.id, "Предсказание устарело")
+            self._dismiss_and_reopen(call)
+            return
+
+        preview = player.pet_ulta_oracle_preview
+        player.pet_ulta_oracle_pending = False
+        player.pet_ulta_oracle_preview = None
+        player.pisunchik_size += preview['size_change']
+        player.add_coins(preview['coins_change'])
+        player.last_used = datetime.now(timezone.utc)
+        self.player_service.save_player(player)
+
+        self.bot.answer_callback_query(call.id)
+        sign = '+' if preview['size_change'] >= 0 else ''
+        try:
+            self.bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+        self.bot.send_message(
+            call.message.chat.id,
+            f"🔮 Бросок совершён!\n"
+            f"Ваш писюнчик: {player.pisunchik_size} см ({sign}{preview['size_change']} см)\n"
+            f"Монеты: +{preview['coins_change']} BTC"
+        )
+
+    def oracle_cancel(self, call):
+        """Oracle: player skipped — no cooldown refund (ulta was already used)."""
+        user_id = call.from_user.id
+        player = self.player_service.get_player(user_id)
+        if player:
+            player.pet_ulta_oracle_pending = False
+            player.pet_ulta_oracle_preview = None
+            self.player_service.save_player(player)
+        self.bot.answer_callback_query(call.id, "Пропущено. Писюнчик не брошен.")
+        self.show_pet_menu(call.message.chat.id, user_id,
+                           delete_message_id=call.message.message_id)
 
     def get_player_mention(self, user_id: int, player_name: str, username: Optional[str] = None) -> str:
         if username:

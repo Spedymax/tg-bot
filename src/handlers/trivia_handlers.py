@@ -37,6 +37,18 @@ class TriviaHandlers:
         """Set the quiz scheduler instance (used for pool refill)."""
         self.quiz_scheduler = quiz_scheduler
 
+    def _get_pet_badge(self, player) -> str:
+        """Get pet stage badge for appending to game result messages."""
+        if not player.pet or not player.pet.get('is_alive') or not player.pet.get('is_locked'):
+            return ''
+        emojis = {'egg': '🥚', 'baby': '🐣', 'adult': '🐤', 'legendary': '🦅'}
+        badge = emojis.get(player.pet.get('stage', ''), '')
+        if not badge:
+            return ''
+        if self.pet_service.is_ulta_available(player):
+            badge += '⚡'
+        return f' {badge}'
+
     def setup_handlers(self):
         """Setup all trivia command handlers"""
 
@@ -89,6 +101,24 @@ class TriviaHandlers:
             """Handle trivia answer callbacks"""
             self.handle_answer_callback(call)
     
+    def _announce_evolution(self, chat_id: int, player, old_stage: str):
+        """Announce pet evolution to the group chat."""
+        from utils.helpers import escape_html
+        stage_names = {'egg': 'Яйцо', 'baby': 'Малыш', 'adult': 'Взрослый', 'legendary': 'Легендарный'}
+        stage_emojis = {'egg': '🥚', 'baby': '🐣', 'adult': '🐤', 'legendary': '🦅'}
+        new_stage = player.pet.get('stage', '')
+        pet_name = escape_html(player.pet.get('name', 'питомец'))
+        mention = f'<a href="tg://user?id={player.player_id}">{escape_html(player.player_name)}</a>'
+        text = (
+            f"🎉 Питомец «{pet_name}» игрока {mention} эволюционировал!\n"
+            f"{stage_emojis.get(old_stage, '')} {stage_names.get(old_stage, old_stage)} → "
+            f"{stage_emojis.get(new_stage, '')} {stage_names.get(new_stage, new_stage)}"
+        )
+        try:
+            self.bot.send_message(chat_id, text, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Failed to send evolution announcement: {e}")
+
     def get_question_from_gemini(self):
         """Generate a trivia question using TriviaService"""
         try:
@@ -240,10 +270,20 @@ class TriviaHandlers:
             finally:
                 if connection:
                     self.db_manager.release_connection(connection)
-            
+
+            # Халява ulta override: force correct BEFORE emoji and response are recorded
+            player = self.player_service.get_player(user_id)
+            if player and getattr(player, 'pet_ulta_trivia_pending', False):
+                player.pet_ulta_trivia_pending = False
+                is_correct = True
+
             # Add player name with emoji to responses
             emoji = "✅" if is_correct else "❌"
-            question_data["players_responses"][user_id] = f"{player_name} {emoji}"
+            if is_correct:
+                _pet_badge = self._get_pet_badge(player) if player else ''
+            else:
+                _pet_badge = ''
+            question_data["players_responses"][user_id] = f"{player_name}{_pet_badge} {emoji}"
             
             self.bot.answer_callback_query(call.id, f"Вы выбрали: {selected_answer}")
             
@@ -260,7 +300,8 @@ class TriviaHandlers:
             
             # Update player score if correct
             if is_correct:
-                player = self.player_service.get_player(user_id)
+                if not player:
+                    player = self.player_service.get_player(user_id)
                 if player:
                     chat_id = call.message.chat.id
                     current_score = player.get_quiz_score(chat_id)
@@ -269,17 +310,32 @@ class TriviaHandlers:
                     # Update streak and add XP to pet
                     player.trivia_streak = getattr(player, 'trivia_streak', 0) + 1
                     if player.pet and player.pet.get('is_alive') and player.pet.get('is_locked'):
-                        player.pet, _, _ = self.pet_service.add_xp(player.pet, 10)
+                        now = datetime.now(timezone.utc)
+                        self.pet_service.apply_hunger_decay(player, now)
+                        self.pet_service.record_game_activity(player, 'trivia', now)
+                        multiplier = self.pet_service.get_xp_multiplier(player)
+                        xp_gain = int(10 * multiplier)
+                        if xp_gain > 0:
+                            old_stage = player.pet.get('stage')
+                            player.pet, _, evolved = self.pet_service.add_xp(player.pet, xp_gain)
+                            if evolved:
+                                self._announce_evolution(chat_id, player, old_stage)
                         new_title = self.pet_service.check_streak_reward(
                             player.trivia_streak, getattr(player, 'pet_titles', [])
                         )
                         if new_title and new_title not in player.pet_titles:
                             player.pet_titles.append(new_title)
 
+                    # Food drop (25% chance on correct answer)
+                    import random as _rand
+                    if player.pet and player.pet.get('is_alive') and _rand.random() < 0.25:
+                        player.add_item('pet_food_basic')
+
                     self.player_service.save_player(player)
             else:
                 # Reset streak on wrong answer
-                player = self.player_service.get_player(user_id)
+                if not player:
+                    player = self.player_service.get_player(user_id)
                 if player and getattr(player, 'trivia_streak', 0) > 0:
                     player.trivia_streak = 0
                     self.player_service.save_player(player)
