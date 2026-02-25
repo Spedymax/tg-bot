@@ -90,3 +90,13 @@ def test_record_game_activity_increases_happiness():
     now = datetime.now(timezone.utc)
     svc.record_game_activity(p, 'trivia', now)
     assert p.pet_happiness == 55
+
+def test_format_pet_display_shows_hunger_bar():
+    svc = PetService()
+    p = make_player_with_live_pet()
+    p.pet_hunger = 70
+    p.pet_happiness = 60
+    text = svc.format_pet_display(p.pet, None, 0, 0, p)
+    assert 'Голод' in text
+    assert 'Настроение' in text
+    assert '█' in text
