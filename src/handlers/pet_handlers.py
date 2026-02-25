@@ -105,6 +105,7 @@ class PetHandlers:
             if pet_titles:
                 markup.add(types.InlineKeyboardButton("🏷 Титулы", callback_data="pet_titles"))
             markup.add(types.InlineKeyboardButton("💀 Убить", callback_data="pet_kill_confirm"))
+            markup.add(types.InlineKeyboardButton("🍖 Покормить", callback_data="pet_feed"))
 
         return markup
 
@@ -142,6 +143,10 @@ class PetHandlers:
             'delete_no':      lambda: self._dismiss_and_reopen(call),
             'titles':         lambda: self.show_titles(call),
             'titles_back':    lambda: self._dismiss_and_reopen(call),
+            'feed':           lambda: self.show_feed_menu(call),
+            'feed_basic':     lambda: self.feed_pet(call, 'basic'),
+            'feed_deluxe':    lambda: self.feed_pet(call, 'deluxe'),
+            'feed_back':      lambda: self._dismiss_and_reopen(call),
         }
 
         handler = handlers.get(action)
@@ -166,6 +171,71 @@ class PetHandlers:
         except Exception:
             pass
         self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
+
+    # ──────────────────────────────────────────────
+    # Feed
+    # ──────────────────────────────────────────────
+
+    def show_feed_menu(self, call):
+        """Show food selection menu."""
+        user_id = call.from_user.id
+        player = self.player_service.get_player(user_id)
+        if not player or not player.pet:
+            self.bot.answer_callback_query(call.id)
+            return
+
+        basic_count = player.items.count('pet_food_basic')
+        deluxe_count = player.items.count('pet_food_deluxe')
+
+        if basic_count == 0 and deluxe_count == 0:
+            self.bot.answer_callback_query(call.id, "У тебя нет еды для питомца!")
+            return
+
+        self.bot.answer_callback_query(call.id)
+        markup = types.InlineKeyboardMarkup()
+        if basic_count > 0:
+            markup.add(types.InlineKeyboardButton(
+                f"🍖 Корм ({basic_count} шт.) +30 голод",
+                callback_data="pet_feed_basic"
+            ))
+        if deluxe_count > 0:
+            markup.add(types.InlineKeyboardButton(
+                f"🍗 Деликатес ({deluxe_count} шт.) +60 голод +20 настроение",
+                callback_data="pet_feed_deluxe"
+            ))
+        markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="pet_feed_back"))
+        self._replace_with_text(call, "🍽 Чем покормить питомца?", markup)
+
+    def feed_pet(self, call, food_type: str):
+        """Feed the pet with selected food item."""
+        from datetime import datetime, timezone
+        user_id = call.from_user.id
+        player = self.player_service.get_player(user_id)
+        if not player or not player.pet:
+            self.bot.answer_callback_query(call.id, "Питомец не найден")
+            return
+
+        item_key = 'pet_food_basic' if food_type == 'basic' else 'pet_food_deluxe'
+        effects = {
+            'pet_food_basic':  {'hunger': 30, 'happiness': 0,  'name': 'Корм'},
+            'pet_food_deluxe': {'hunger': 60, 'happiness': 20, 'name': 'Деликатес'},
+        }
+        effect = effects[item_key]
+
+        if not player.remove_item(item_key):
+            self.bot.answer_callback_query(call.id, "Еда не найдена!")
+            return
+
+        now = datetime.now(timezone.utc)
+        self.pet_service.apply_hunger_decay(player, now)
+        player.pet_hunger = min(100, getattr(player, 'pet_hunger', 100) + effect['hunger'])
+        if effect['happiness'] > 0:
+            player.pet_happiness = min(100, getattr(player, 'pet_happiness', 50) + effect['happiness'])
+
+        self.player_service.save_player(player)
+        self.bot.answer_callback_query(call.id, f"🐾 {effect['name']} съеден!")
+        self.show_pet_menu(call.message.chat.id, user_id,
+                           delete_message_id=call.message.message_id)
 
     # ──────────────────────────────────────────────
     # Pet creation
