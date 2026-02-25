@@ -16,61 +16,42 @@ class PetHandlers:
         self.game_service = game_service
         self.pet_service = PetService()
 
-        # Temp storage for waiting user input
-        self.waiting_for_name = {}  # {user_id: message_id}
-        self.waiting_for_image = {}  # {user_id: message_id}
-
     def setup_handlers(self):
         """Setup all pet-related command handlers."""
 
         @self.bot.message_handler(commands=['pet'])
         def pet_command(message):
-            """Handle /pet command - main pet interface."""
             self.show_pet_menu(message.chat.id, message.from_user.id)
 
-        # Callback handlers
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith('pet_'))
         def pet_callback(call):
-            """Handle all pet-related callbacks."""
             self.handle_pet_callback(call)
 
-        # Text input handlers
-        @self.bot.message_handler(func=lambda m: m.from_user.id in self.waiting_for_name)
-        def handle_name_input(message):
-            """Handle pet name input."""
-            self.process_name_input(message)
+    # ──────────────────────────────────────────────
+    # Core display
+    # ──────────────────────────────────────────────
 
-        # Photo input handlers
-        @self.bot.message_handler(content_types=['photo'],
-                                   func=lambda m: m.from_user.id in self.waiting_for_image)
-        def handle_image_input(message):
-            """Handle pet image upload."""
-            self.process_image_input(message)
+    def show_pet_menu(self, chat_id: int, user_id: int, delete_message_id: int = None):
+        """Send a fresh pet menu, optionally deleting an old message first."""
+        if delete_message_id:
+            try:
+                self.bot.delete_message(chat_id, delete_message_id)
+            except Exception:
+                pass
 
-    def show_pet_menu(self, chat_id: int, user_id: int, message_id: int = None):
-        """Show the main pet menu with inline buttons."""
         player = self.player_service.get_player(user_id)
-
         if not player:
-            self.bot.send_message(chat_id, "Ви не зареєстровані як гравець.")
+            self.bot.send_message(chat_id, "Вы не зарегистрированы как игрок.")
             return
 
         pet = getattr(player, 'pet', None)
 
         if not pet:
-            # No pet - show create button
             markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🥚 Створити улюбленця", callback_data="pet_create"))
-
-            text = "У тебе ще немає улюбленця!"
-
-            if message_id:
-                self.bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
-            else:
-                self.bot.send_message(chat_id, text, reply_markup=markup)
+            markup.add(types.InlineKeyboardButton("🥚 Создать питомца", callback_data="pet_create"))
+            self.bot.send_message(chat_id, "У тебя ещё нет питомца!", reply_markup=markup)
             return
 
-        # Has pet - show pet info with appropriate buttons
         active_title = getattr(player, 'pet_active_title', None)
         revives_used = getattr(player, 'pet_revives_used', 0)
         streak = getattr(player, 'trivia_streak', 0)
@@ -78,8 +59,7 @@ class PetHandlers:
         text = self.pet_service.format_pet_display(pet, active_title, revives_used, streak)
         markup = self._get_pet_buttons(pet, player)
 
-        # Send with image if available
-        if pet.get('image_file_id') and not message_id:
+        if pet.get('image_file_id'):
             try:
                 self.bot.send_photo(chat_id, pet['image_file_id'], caption=text,
                                     reply_markup=markup, parse_mode='HTML')
@@ -87,166 +67,182 @@ class PetHandlers:
             except Exception as e:
                 logger.error(f"Error sending pet image: {e}")
 
-        if message_id:
-            self.bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
-        else:
-            self.bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        self.bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
     def _get_pet_buttons(self, pet: dict, player) -> types.InlineKeyboardMarkup:
         """Get appropriate buttons based on pet state."""
         markup = types.InlineKeyboardMarkup()
 
         if not pet.get('is_alive'):
-            # Dead pet buttons
-            markup.add(types.InlineKeyboardButton("❤️ Відродити", callback_data="pet_revive"))
-            markup.add(types.InlineKeyboardButton("🗑 Видалити назавжди", callback_data="pet_delete_confirm"))
+            # Dead pet
+            markup.add(types.InlineKeyboardButton("❤️ Возродить", callback_data="pet_revive"))
+            markup.add(types.InlineKeyboardButton("🗑 Удалить навсегда", callback_data="pet_delete_confirm"))
+
         elif not pet.get('is_locked'):
-            # Unlocked pet (customization mode)
+            # Initial setup (new, never confirmed)
             markup.row(
-                types.InlineKeyboardButton("✏️ Змінити ім'я", callback_data="pet_name"),
-                types.InlineKeyboardButton("🖼 Змінити фото", callback_data="pet_image")
+                types.InlineKeyboardButton("✏️ Изменить имя", callback_data="pet_name"),
+                types.InlineKeyboardButton("🖼 Изменить фото", callback_data="pet_image")
             )
-            markup.add(types.InlineKeyboardButton("✅ Підтвердити", callback_data="pet_confirm"))
+            markup.add(types.InlineKeyboardButton("✅ Подтвердить", callback_data="pet_confirm"))
+
         else:
-            # Alive and locked pet
+            # Alive and active — customization always available
+            markup.row(
+                types.InlineKeyboardButton("✏️ Имя", callback_data="pet_name"),
+                types.InlineKeyboardButton("🖼 Фото", callback_data="pet_image")
+            )
             pet_titles = getattr(player, 'pet_titles', [])
             if pet_titles:
-                markup.add(types.InlineKeyboardButton("🏷 Титули", callback_data="pet_titles"))
-            markup.add(types.InlineKeyboardButton("💀 Вбити", callback_data="pet_kill_confirm"))
+                markup.add(types.InlineKeyboardButton("🏷 Титулы", callback_data="pet_titles"))
+            markup.add(types.InlineKeyboardButton("💀 Убить", callback_data="pet_kill_confirm"))
 
         return markup
+
+    # ──────────────────────────────────────────────
+    # Callback routing
+    # ──────────────────────────────────────────────
 
     def handle_pet_callback(self, call):
         """Route pet callbacks to appropriate handlers."""
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         message_id = call.message.message_id
-        action = call.data.replace('pet_', '')
+        action = call.data.replace('pet_', '', 1)
+
+        # Title selection by index: pet_title_0, pet_title_1, ...
+        if action.startswith('title_') and action != 'titles' and action != 'titles_back':
+            try:
+                idx = int(action.replace('title_', '', 1))
+                self.select_title(call, idx)
+            except ValueError:
+                self.bot.answer_callback_query(call.id, "Ошибка выбора титула")
+            return
 
         handlers = {
-            'create': lambda: self.create_pet(call),
-            'name': lambda: self.request_name(call),
-            'image': lambda: self.request_image(call),
-            'confirm': lambda: self.confirm_pet(call),
-            'revive': lambda: self.revive_pet(call),
-            'kill_confirm': lambda: self.show_kill_confirm(call),
-            'kill_yes': lambda: self.kill_pet(call),
-            'kill_no': lambda: self.show_pet_menu(chat_id, user_id, message_id),
+            'create':         lambda: self.create_pet(call),
+            'name':           lambda: self.request_name(call),
+            'image':          lambda: self.request_image(call),
+            'confirm':        lambda: self.confirm_pet(call),
+            'revive':         lambda: self.revive_pet(call),
+            'kill_confirm':   lambda: self.show_kill_confirm(call),
+            'kill_yes':       lambda: self.kill_pet(call),
+            'kill_no':        lambda: self._dismiss_and_reopen(call),
             'delete_confirm': lambda: self.show_delete_confirm(call),
-            'delete_yes': lambda: self.delete_pet(call),
-            'delete_no': lambda: self.show_pet_menu(chat_id, user_id, message_id),
-            'titles': lambda: self.show_titles(call),
-            'titles_back': lambda: self.show_pet_menu(chat_id, user_id, message_id),
+            'delete_yes':     lambda: self.delete_pet(call),
+            'delete_no':      lambda: self._dismiss_and_reopen(call),
+            'titles':         lambda: self.show_titles(call),
+            'titles_back':    lambda: self._dismiss_and_reopen(call),
         }
-
-        # Handle title selection (pet_title_TitleName)
-        if action.startswith('title_') and action != 'titles' and action != 'titles_back':
-            self.select_title(call, action.replace('title_', ''))
-            return
 
         handler = handlers.get(action)
         if handler:
             handler()
         else:
-            self.bot.answer_callback_query(call.id, "Невідома дія")
+            self.bot.answer_callback_query(call.id, "Неизвестное действие")
+
+    # ──────────────────────────────────────────────
+    # Helpers
+    # ──────────────────────────────────────────────
+
+    def _dismiss_and_reopen(self, call):
+        """Delete current message and reopen pet menu."""
+        self.show_pet_menu(call.message.chat.id, call.from_user.id,
+                           delete_message_id=call.message.message_id)
+
+    def _replace_with_text(self, call, text, markup):
+        """Delete current message, send a plain text message."""
+        try:
+            self.bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+        self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
+
+    # ──────────────────────────────────────────────
+    # Pet creation
+    # ──────────────────────────────────────────────
 
     def create_pet(self, call):
-        """Start pet creation process."""
         user_id = call.from_user.id
         player = self.player_service.get_player(user_id)
-
         if not player:
-            self.bot.answer_callback_query(call.id, "Гравець не знайдений")
+            self.bot.answer_callback_query(call.id, "Игрок не найден")
             return
 
-        # Create pet with default name
-        pet = self.pet_service.create_pet("Новий улюбленець")
-        player.pet = pet
+        player.pet = self.pet_service.create_pet("Новый питомец")
         self.player_service.save_player(player)
+        self.bot.answer_callback_query(call.id, "Питомец создан!")
+        self.show_pet_menu(call.message.chat.id, user_id,
+                           delete_message_id=call.message.message_id)
 
-        self.bot.answer_callback_query(call.id, "Улюбленця створено!")
-        self.show_pet_menu(call.message.chat.id, user_id, call.message.message_id)
+    # ──────────────────────────────────────────────
+    # Name / image customization
+    # ──────────────────────────────────────────────
 
     def request_name(self, call):
-        """Request new pet name from user."""
-        user_id = call.from_user.id
-        chat_id = call.message.chat.id
-
-        self.waiting_for_name[user_id] = call.message.message_id
-
         self.bot.answer_callback_query(call.id)
-        self.bot.send_message(chat_id, "Напиши нове ім'я для улюбленця:")
+        msg = self.bot.send_message(call.message.chat.id, "Напиши новое имя для питомца:")
+        self.bot.register_next_step_handler(msg, self.process_name_input)
 
     def process_name_input(self, message):
-        """Process pet name input."""
         user_id = message.from_user.id
-        chat_id = message.chat.id
-        new_name = message.text.strip()[:50]  # Limit name length
-
-        if user_id not in self.waiting_for_name:
-            return
-
-        del self.waiting_for_name[user_id]
+        new_name = message.text.strip()[:50]
 
         player = self.player_service.get_player(user_id)
-        if player and player.pet and not player.pet.get('is_locked'):
+        if player and player.pet:
             player.pet['name'] = escape_html(new_name)
             self.player_service.save_player(player)
-            self.bot.send_message(chat_id, f"Ім'я змінено на: {new_name}")
+            self.bot.send_message(message.chat.id, f"Имя изменено на: {new_name}")
 
-        self.show_pet_menu(chat_id, user_id)
+        self.show_pet_menu(message.chat.id, user_id)
 
     def request_image(self, call):
-        """Request new pet image from user."""
-        user_id = call.from_user.id
-        chat_id = call.message.chat.id
-
-        self.waiting_for_image[user_id] = call.message.message_id
-
         self.bot.answer_callback_query(call.id)
-        self.bot.send_message(chat_id, "Надішли нове фото для улюбленця:")
+        msg = self.bot.send_message(call.message.chat.id, "Пришли новое фото для питомца:")
+        self.bot.register_next_step_handler(msg, self.process_image_input)
 
     def process_image_input(self, message):
-        """Process pet image upload."""
         user_id = message.from_user.id
-        chat_id = message.chat.id
 
-        if user_id not in self.waiting_for_image:
+        if not message.photo:
+            self.bot.send_message(message.chat.id, "Это не фото. Пришли изображение.")
+            self.bot.register_next_step_handler(message, self.process_image_input)
             return
 
-        del self.waiting_for_image[user_id]
-
-        # Get the largest photo
-        photo = message.photo[-1]
-        file_id = photo.file_id
-
+        file_id = message.photo[-1].file_id
         player = self.player_service.get_player(user_id)
-        if player and player.pet and not player.pet.get('is_locked'):
+        if player and player.pet:
             player.pet['image_file_id'] = file_id
             self.player_service.save_player(player)
-            self.bot.send_message(chat_id, "Фото оновлено!")
+            self.bot.send_message(message.chat.id, "Фото обновлено!")
 
-        self.show_pet_menu(chat_id, user_id)
+        self.show_pet_menu(message.chat.id, user_id)
+
+    # ──────────────────────────────────────────────
+    # Confirm (initial setup only)
+    # ──────────────────────────────────────────────
 
     def confirm_pet(self, call):
-        """Lock pet customization."""
         user_id = call.from_user.id
         player = self.player_service.get_player(user_id)
-
         if player and player.pet:
             player.pet['is_locked'] = True
             self.player_service.save_player(player)
-            self.bot.answer_callback_query(call.id, "Улюбленця підтверджено! Тепер він буде рости.")
+            self.bot.answer_callback_query(call.id, "Питомец подтверждён! Теперь он будет расти.")
 
-        self.show_pet_menu(call.message.chat.id, user_id, call.message.message_id)
+        self.show_pet_menu(call.message.chat.id, user_id,
+                           delete_message_id=call.message.message_id)
+
+    # ──────────────────────────────────────────────
+    # Revive
+    # ──────────────────────────────────────────────
 
     def revive_pet(self, call):
-        """Attempt to revive dead pet."""
         user_id = call.from_user.id
         player = self.player_service.get_player(user_id)
 
         if not player or not player.pet:
-            self.bot.answer_callback_query(call.id, "Улюбленця не знайдено")
+            self.bot.answer_callback_query(call.id, "Питомец не найден")
             return
 
         revives_used = getattr(player, 'pet_revives_used', 0)
@@ -261,69 +257,65 @@ class PetHandlers:
             player.pet_revives_used = new_revives
             player.pet_revives_reset_date = new_reset
             self.player_service.save_player(player)
-            self.bot.answer_callback_query(call.id, "Улюбленця відроджено!")
+            self.bot.answer_callback_query(call.id, "Питомец возрождён!")
         else:
-            self.bot.answer_callback_query(call.id, "Немає відроджень на цей місяць!")
+            self.bot.answer_callback_query(call.id, "Нет возрождений на этот месяц!")
 
-        self.show_pet_menu(call.message.chat.id, user_id, call.message.message_id)
+        self.show_pet_menu(call.message.chat.id, user_id,
+                           delete_message_id=call.message.message_id)
+
+    # ──────────────────────────────────────────────
+    # Kill
+    # ──────────────────────────────────────────────
 
     def show_kill_confirm(self, call):
-        """Show kill confirmation."""
         markup = types.InlineKeyboardMarkup()
         markup.row(
-            types.InlineKeyboardButton("❌ Ні, залишити", callback_data="pet_kill_no"),
-            types.InlineKeyboardButton("✅ Так, вбити", callback_data="pet_kill_yes")
+            types.InlineKeyboardButton("❌ Нет, оставить", callback_data="pet_kill_no"),
+            types.InlineKeyboardButton("✅ Да, убить", callback_data="pet_kill_yes")
         )
-
-        self.bot.edit_message_text(
-            "⚠️ Ти впевнений? Улюбленець помре і потребуватиме відродження!",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=markup
-        )
+        self._replace_with_text(call, "⚠️ Ты уверен? Питомец умрёт и потребует возрождения!", markup)
 
     def kill_pet(self, call):
-        """Kill pet (make it dormant)."""
         user_id = call.from_user.id
         player = self.player_service.get_player(user_id)
-
         if player and player.pet:
             player.pet = self.pet_service.kill_pet(player.pet)
             self.player_service.save_player(player)
-            self.bot.answer_callback_query(call.id, "Улюбленець помер 💀")
+            self.bot.answer_callback_query(call.id, "Питомец умер 💀")
 
-        self.show_pet_menu(call.message.chat.id, user_id, call.message.message_id)
+        self.show_pet_menu(call.message.chat.id, user_id,
+                           delete_message_id=call.message.message_id)
+
+    # ──────────────────────────────────────────────
+    # Delete
+    # ──────────────────────────────────────────────
 
     def show_delete_confirm(self, call):
-        """Show delete confirmation."""
         markup = types.InlineKeyboardMarkup()
         markup.row(
-            types.InlineKeyboardButton("❌ Ні, залишити", callback_data="pet_delete_no"),
-            types.InlineKeyboardButton("✅ Так, видалити", callback_data="pet_delete_yes")
+            types.InlineKeyboardButton("❌ Нет, оставить", callback_data="pet_delete_no"),
+            types.InlineKeyboardButton("✅ Да, удалить", callback_data="pet_delete_yes")
         )
-
-        self.bot.edit_message_text(
-            "⚠️ Ти впевнений? Улюбленця буде видалено НАЗАВЖДИ! Весь прогрес буде втрачено!",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=markup
-        )
+        self._replace_with_text(call,
+            "⚠️ Ты уверен? Питомец будет удалён НАВСЕГДА! Весь прогресс будет потерян!", markup)
 
     def delete_pet(self, call):
-        """Permanently delete pet."""
         user_id = call.from_user.id
         player = self.player_service.get_player(user_id)
-
         if player:
             player.pet = None
-            # Keep titles - they're permanent
             self.player_service.save_player(player)
-            self.bot.answer_callback_query(call.id, "Улюбленця видалено")
+            self.bot.answer_callback_query(call.id, "Питомец удалён")
 
-        self.show_pet_menu(call.message.chat.id, user_id, call.message.message_id)
+        self.show_pet_menu(call.message.chat.id, user_id,
+                           delete_message_id=call.message.message_id)
+
+    # ──────────────────────────────────────────────
+    # Titles
+    # ──────────────────────────────────────────────
 
     def show_titles(self, call):
-        """Show titles selection screen."""
         user_id = call.from_user.id
         player = self.player_service.get_player(user_id)
 
@@ -335,42 +327,51 @@ class PetHandlers:
         active_title = getattr(player, 'pet_active_title', None)
 
         if not titles:
-            self.bot.answer_callback_query(call.id, "У тебе ще немає титулів!")
+            self.bot.answer_callback_query(call.id, "У тебя ещё нет титулов!")
             return
 
         self.bot.answer_callback_query(call.id)
 
-        text = "🏷 Твої титули:\n\n"
+        text = "🏷 Твои титулы:\n\n"
         for title in titles:
-            marker = " ✅ (активний)" if title == active_title else ""
+            marker = " ✅" if title == active_title else ""
             text += f"• {escape_html(title)}{marker}\n"
 
         markup = types.InlineKeyboardMarkup(row_width=2)
-        buttons = [types.InlineKeyboardButton(t, callback_data=f"pet_title_{t[:40]}") for t in titles]  # Truncate to ensure fits in 64 bytes
+        # Use index as callback data — avoids UTF-8 byte limit issues
+        buttons = [
+            types.InlineKeyboardButton(t, callback_data=f"pet_title_{i}")
+            for i, t in enumerate(titles)
+        ]
         markup.add(*buttons)
         markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="pet_titles_back"))
 
-        self.bot.edit_message_text(
-            text,
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=markup
-        )
+        try:
+            self.bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+        self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
 
-    def select_title(self, call, title: str):
-        """Select active title."""
+    def select_title(self, call, idx: int):
+        """Activate title by index."""
         user_id = call.from_user.id
         player = self.player_service.get_player(user_id)
 
-        if player and title in getattr(player, 'pet_titles', []):
-            player.pet_active_title = title
-            self.player_service.save_player(player)
-            self.bot.answer_callback_query(call.id, f"Титул '{title}' активовано!")
+        if player:
+            titles = getattr(player, 'pet_titles', [])
+            if 0 <= idx < len(titles):
+                title = titles[idx]
+                player.pet_active_title = title
+                self.player_service.save_player(player)
+                self.bot.answer_callback_query(call.id, f"Титул «{title}» активирован!")
+            else:
+                self.bot.answer_callback_query(call.id, "Титул не найден")
+        else:
+            self.bot.answer_callback_query(call.id)
 
         self.show_titles(call)
 
     def get_player_mention(self, user_id: int, player_name: str, username: Optional[str] = None) -> str:
-        """Get mention string for player."""
         if username:
             return f"@{username}"
         return f'<a href="tg://user?id={user_id}">{escape_html(player_name)}</a>'

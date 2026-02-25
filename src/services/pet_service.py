@@ -82,10 +82,6 @@ class PetService:
         leveled_up = pet['level'] > old_level
         evolved = pet['stage'] != old_stage
 
-        # Unlock customization on evolution
-        if evolved:
-            pet['is_locked'] = False
-
         return pet, leveled_up, evolved
 
     def kill_pet(self, pet: Dict[str, Any]) -> Dict[str, Any]:
@@ -141,28 +137,28 @@ class PetService:
         }.get(stage, "🐾")
 
     def get_stage_name(self, stage: str) -> str:
-        """Get Ukrainian name for evolution stage."""
+        """Get Russian name for evolution stage."""
         return {
-            "egg": "Яйце",
-            "baby": "Малюк",
-            "adult": "Дорослий",
-            "legendary": "Легендарний"
+            "egg": "Яйцо",
+            "baby": "Малыш",
+            "adult": "Взрослый",
+            "legendary": "Легендарный"
         }.get(stage, stage)
 
     def format_pet_display(self, pet: Dict[str, Any], active_title: Optional[str],
                            revives_used: int, streak: int) -> str:
         """Format pet info for display."""
         if not pet:
-            return "У тебе ще немає улюбленця!"
+            return "У тебя ещё нет питомца!"
 
         stage_emoji = self.get_stage_emoji(pet['stage'])
         stage_name = self.get_stage_name(pet['stage'])
 
         name_display = pet['name']
         if active_title:
-            name_display = f"{pet['name']} the {active_title}"
+            name_display = f"{pet['name']} — {active_title}"
 
-        status = "Живий ✅" if pet['is_alive'] else "Мертвий 💀"
+        status = "Живой ✅" if pet['is_alive'] else "Мёртвый 💀"
 
         # Calculate XP for next level/evolution
         next_evo_xp = self.get_xp_for_next_evolution(pet['stage'])
@@ -171,18 +167,18 @@ class PetService:
             xp_display = f"{pet['xp']}/{next_evo_xp}"
 
         text = f"{stage_emoji} {name_display}\n"
-        text += f"Рівень: {pet['level']} ({stage_name})\n"
+        text += f"Уровень: {pet['level']} ({stage_name})\n"
         text += f"XP: {xp_display}\n"
         text += f"Статус: {status}\n"
 
         if pet['is_alive'] and streak > 0:
-            text += f"Серія правильних: {streak} 🔥\n"
+            text += f"Серия правильных: {streak} 🔥\n"
 
         if not pet['is_alive']:
             remaining = self.max_revives - revives_used
-            text += f"Відродження: {remaining}/{self.max_revives} залишилось\n"
+            text += f"Возрождений: {remaining}/{self.max_revives} осталось\n"
 
         if not pet.get('is_locked'):
-            text += "\n⚙️ Статус: Налаштування..."
+            text += "\n⚙️ Статус: Настройка..."
 
         return text
