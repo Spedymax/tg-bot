@@ -25,11 +25,24 @@ class GameHandlers:
                 return
             
             result = self.game_service.execute_pisunchik_command(player)
-            
+
             if not result['success']:
                 self.bot.reply_to(message, result['message'])
                 return
-            
+
+            # Reload player since execute_pisunchik_command saves internally
+            player = self.player_service.get_player(player_id)
+
+            # Pet activity tracking + food drop
+            import random as _rand
+            from datetime import datetime, timezone
+            from services.pet_service import PetService as _PetSvc
+            _pet_svc = _PetSvc()
+            _pet_svc.record_game_activity(player, 'pisunchik', datetime.now(timezone.utc))
+            if player.pet and player.pet.get('is_alive') and _rand.random() < 0.20:
+                player.add_item('pet_food_basic')
+            self.player_service.save_player(player)
+
             reply_message = (
                 f"Ваш писюнчик: {result['new_size']} см\n"
                 f"Изменения: {result['size_change']} см\n"
@@ -78,6 +91,13 @@ class GameHandlers:
                         time.sleep(GameConfig.CASINO_DICE_DELAY)
                 
                 # Save player with updated coins
+                import random as _rand
+                from datetime import datetime, timezone
+                from services.pet_service import PetService as _PetSvc
+                _pet_svc = _PetSvc()
+                _pet_svc.record_game_activity(player, 'casino', datetime.now(timezone.utc))
+                if total_wins > 0 and player.pet and player.pet.get('is_alive') and _rand.random() < 0.15:
+                    player.add_item('pet_food_basic')
 
                 self.player_service.save_player(player)
                 self.bot.send_message(message.chat.id, f"🎉 Всего выигрышей: {total_wins}! Общий выигрыш: {total_wins * GameConfig.CASINO_JACKPOT_REWARD} BTC!")
