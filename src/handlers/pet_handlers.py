@@ -104,6 +104,16 @@ class PetHandlers:
             pet_titles = getattr(player, 'pet_titles', [])
             if pet_titles:
                 markup.add(types.InlineKeyboardButton("🏷 Титулы", callback_data="pet_titles"))
+            stage = pet.get('stage', 'egg')
+            if self.pet_service.is_ulta_available(player):
+                ulta_name = self.pet_service.get_ulta_name(stage)
+                markup.add(types.InlineKeyboardButton(
+                    f"⚡ {ulta_name}", callback_data="pet_ulta"
+                ))
+            else:
+                markup.add(types.InlineKeyboardButton(
+                    "⚡ Ульта (не готова)", callback_data="pet_ulta_info"
+                ))
             markup.add(types.InlineKeyboardButton("💀 Убить", callback_data="pet_kill_confirm"))
             markup.add(types.InlineKeyboardButton("🍖 Покормить", callback_data="pet_feed"))
 
@@ -147,6 +157,10 @@ class PetHandlers:
             'feed_basic':     lambda: self.feed_pet(call, 'basic'),
             'feed_deluxe':    lambda: self.feed_pet(call, 'deluxe'),
             'feed_back':      lambda: self._dismiss_and_reopen(call),
+            'ulta':           lambda: self.activate_ulta(call),
+            'ulta_info':      lambda: self._show_ulta_info(call),
+            'oracle_yes':     lambda: self.oracle_confirm(call),
+            'oracle_no':      lambda: self.oracle_cancel(call),
         }
 
         handler = handlers.get(action)
@@ -449,6 +463,67 @@ class PetHandlers:
             self.bot.answer_callback_query(call.id)
 
         self.show_titles(call)
+
+    # ──────────────────────────────────────────────
+    # Ulta system
+    # ──────────────────────────────────────────────
+
+    def activate_ulta(self, call):
+        """Dispatch to stage-specific ulta handler."""
+        user_id = call.from_user.id
+        player = self.player_service.get_player(user_id)
+        if not player or not player.pet:
+            self.bot.answer_callback_query(call.id, "Питомец не найден")
+            return
+        if not self.pet_service.is_ulta_available(player):
+            self.bot.answer_callback_query(call.id, "Ульта ещё не готова!")
+            return
+
+        stage = player.pet.get('stage', 'egg')
+        dispatch = {
+            'egg':       self._ulta_casino_plus,
+            'baby':      self._ulta_free_roll,
+            'adult':     self._ulta_oracle,
+            'legendary': self._ulta_khalyava,
+        }
+        handler = dispatch.get(stage)
+        if handler:
+            handler(call, player)
+        else:
+            self.bot.answer_callback_query(call.id, "Неизвестная стадия")
+
+    def _show_ulta_info(self, call):
+        """Show info about ulta cooldown."""
+        self.bot.answer_callback_query(
+            call.id,
+            "Ульта будет готова через 24 часа после последнего использования. "
+            "Убедись, что питомец не голоден (голод ≥ 10) и не подавлен (настроение ≥ 20).",
+            show_alert=True
+        )
+
+    def _ulta_casino_plus(self, call, player):
+        """Egg ulta: +2 casino attempts today."""
+        pass  # Implemented in Task 11
+
+    def _ulta_free_roll(self, call, player):
+        """Baby ulta: next roll is free."""
+        pass  # Implemented in Task 12
+
+    def _ulta_oracle(self, call, player):
+        """Adult ulta: preview pisunchik result."""
+        pass  # Implemented in Task 13
+
+    def _ulta_khalyava(self, call, player):
+        """Legendary ulta: auto-correct next trivia."""
+        pass  # Implemented in Task 14
+
+    def oracle_confirm(self, call):
+        """Oracle: player confirmed the roll."""
+        self.bot.answer_callback_query(call.id, "Ульта Оракул ещё не реализована")
+
+    def oracle_cancel(self, call):
+        """Oracle: player skipped the roll."""
+        self.bot.answer_callback_query(call.id, "Ульта Оракул ещё не реализована")
 
     def get_player_mention(self, user_id: int, player_name: str, username: Optional[str] = None) -> str:
         if username:
