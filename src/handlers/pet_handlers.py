@@ -514,7 +514,16 @@ class PetHandlers:
 
     def _ulta_free_roll(self, call, player):
         """Baby ulta: next roll is free."""
-        pass  # Implemented in Task 12
+        player.pet_ulta_free_roll_pending = True
+        self.pet_service.mark_ulta_used(player)
+        self.player_service.save_player(player)
+        self.bot.answer_callback_query(
+            call.id,
+            "🎲 Халявный ролл активирован! Следующий /roll бесплатный.",
+            show_alert=True
+        )
+        self.show_pet_menu(call.message.chat.id, call.from_user.id,
+                           delete_message_id=call.message.message_id)
 
     def _ulta_oracle(self, call, player):
         """Adult ulta: preview pisunchik result."""
