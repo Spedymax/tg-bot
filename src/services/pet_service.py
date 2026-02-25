@@ -64,6 +64,16 @@ class PetService:
         }
         return stage_thresholds.get(current_stage)
 
+    def get_stage_from_xp(self, xp: int) -> str:
+        """Get evolution stage directly from XP (source of truth for evolution)."""
+        if xp < self.xp_thresholds.get('egg_to_baby', 50):
+            return 'egg'
+        elif xp < self.xp_thresholds.get('baby_to_adult', 150):
+            return 'baby'
+        elif xp < self.xp_thresholds.get('adult_to_legendary', 350):
+            return 'adult'
+        return 'legendary'
+
     def add_xp(self, pet: Dict[str, Any], xp_amount: int) -> Tuple[Dict[str, Any], bool, bool]:
         """
         Add XP to pet and check for level up / evolution.
@@ -77,7 +87,7 @@ class PetService:
 
         pet['xp'] = pet.get('xp', 0) + xp_amount
         pet['level'] = self.calculate_level(pet['xp'])
-        pet['stage'] = self.get_stage(pet['level'])
+        pet['stage'] = self.get_stage_from_xp(pet['xp'])
 
         leveled_up = pet['level'] > old_level
         evolved = pet['stage'] != old_stage
