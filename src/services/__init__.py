@@ -6,56 +6,56 @@ __all__ = []
 try:
     from .game_service import GameService
     __all__.append('GameService')
-except ImportError:
+except Exception:
     pass
 
 # Services with external dependencies
 try:
     from .spotify_service import SpotifyService
     __all__.append('SpotifyService')
-except ImportError:
+except Exception:
     pass
 
 try:
     from .tournament_service import TournamentService
     __all__.append('TournamentService')
-except ImportError:
+except Exception:
     pass
 
 try:
     from .stock_service import StockService
     __all__.append('StockService')
-except ImportError:
+except Exception:
     pass
 
 try:
     from .crypto_service import CryptoService
     __all__.append('CryptoService')
-except ImportError:
+except Exception:
     pass
 
 try:
     from .messaging_service import MessagingService
     __all__.append('MessagingService')
-except ImportError:
+except Exception:
     pass
 
 try:
     from .trivia_service import TriviaService
     __all__.append('TriviaService')
-except ImportError:
+except Exception:
     pass
 
 try:
     from .bot_response_service import BotResponseService
     __all__.append('BotResponseService')
-except ImportError:
+except Exception:
     pass
 
 try:
     from .database_service import DatabaseService
     __all__.append('DatabaseService')
-except ImportError:
+except Exception:
     pass
 
 # Services package
