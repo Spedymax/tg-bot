@@ -114,11 +114,14 @@ class GameService:
         if player.casino_last_used:
             time_elapsed = current_time - player.casino_last_used
             
-            if time_elapsed < timedelta(hours=24) and player.casino_usage_count >= GameConfig.CASINO_DAILY_LIMIT:
+            extra = getattr(player, 'pet_casino_extra_spins', 0)
+            effective_limit = GameConfig.CASINO_DAILY_LIMIT + extra
+            if time_elapsed < timedelta(hours=24) and player.casino_usage_count >= effective_limit:
                 time_left = timedelta(days=1) - time_elapsed
                 return False, f"Вы достигли лимита использования команды на сегодня.\nВремени осталось: {time_left}"
             elif time_elapsed >= timedelta(hours=24):
                 player.casino_usage_count = 0
+                player.pet_casino_extra_spins = 0  # reset daily extra spins on new day
         
         return True, None
     
