@@ -89,6 +89,24 @@ class TriviaHandlers:
             """Handle trivia answer callbacks"""
             self.handle_answer_callback(call)
     
+    def _announce_evolution(self, chat_id: int, player, old_stage: str):
+        """Announce pet evolution to the group chat."""
+        from utils.helpers import escape_html
+        stage_names = {'egg': 'Яйцо', 'baby': 'Малыш', 'adult': 'Взрослый', 'legendary': 'Легендарный'}
+        stage_emojis = {'egg': '🥚', 'baby': '🐣', 'adult': '🐤', 'legendary': '🦅'}
+        new_stage = player.pet.get('stage', '')
+        pet_name = escape_html(player.pet.get('name', 'питомец'))
+        mention = f'<a href="tg://user?id={player.player_id}">{escape_html(player.player_name)}</a>'
+        text = (
+            f"🎉 Питомец «{pet_name}» игрока {mention} эволюционировал!\n"
+            f"{stage_emojis.get(old_stage, '')} {stage_names.get(old_stage, old_stage)} → "
+            f"{stage_emojis.get(new_stage, '')} {stage_names.get(new_stage, new_stage)}"
+        )
+        try:
+            self.bot.send_message(chat_id, text, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Failed to send evolution announcement: {e}")
+
     def get_question_from_gemini(self):
         """Generate a trivia question using TriviaService"""
         try:
@@ -269,7 +287,16 @@ class TriviaHandlers:
                     # Update streak and add XP to pet
                     player.trivia_streak = getattr(player, 'trivia_streak', 0) + 1
                     if player.pet and player.pet.get('is_alive') and player.pet.get('is_locked'):
-                        player.pet, _, _ = self.pet_service.add_xp(player.pet, 10)
+                        now = datetime.now(timezone.utc)
+                        self.pet_service.apply_hunger_decay(player, now)
+                        self.pet_service.record_game_activity(player, 'trivia', now)
+                        multiplier = self.pet_service.get_xp_multiplier(player)
+                        xp_gain = int(10 * multiplier)
+                        if xp_gain > 0:
+                            old_stage = player.pet.get('stage')
+                            player.pet, _, evolved = self.pet_service.add_xp(player.pet, xp_gain)
+                            if evolved:
+                                self._announce_evolution(chat_id, player, old_stage)
                         new_title = self.pet_service.check_streak_reward(
                             player.trivia_streak, getattr(player, 'pet_titles', [])
                         )
