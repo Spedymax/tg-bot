@@ -107,6 +107,15 @@ class GameService:
             'on_cooldown': False
         }
     
+    def preview_pisunchik_result(self, player: Player) -> Dict:
+        """Pre-generate a pisunchik result without applying it."""
+        size_change = random.randint(GameConfig.PISUNCHIK_MIN_CHANGE, GameConfig.PISUNCHIK_MAX_CHANGE)
+        coins_change = random.randint(GameConfig.PISUNCHIK_MIN_COINS, GameConfig.PISUNCHIK_MAX_COINS)
+        # Apply bdsm_kostumchik bonus (read-only simulation)
+        if player.has_item('bdsm_kostumchik') and random.random() <= GameConfig.ITEM_EFFECTS['bdsm_kostumchik']['probability']:
+            size_change += GameConfig.ITEM_EFFECTS['bdsm_kostumchik']['bonus']
+        return {'size_change': size_change, 'coins_change': coins_change}
+
     def can_use_casino(self, player: Player) -> Tuple[bool, Optional[str]]:
         """Check if player can use casino"""
         current_time = datetime.now(timezone.utc)

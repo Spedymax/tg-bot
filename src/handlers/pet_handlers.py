@@ -526,20 +526,78 @@ class PetHandlers:
                            delete_message_id=call.message.message_id)
 
     def _ulta_oracle(self, call, player):
-        """Adult ulta: preview pisunchik result."""
-        pass  # Implemented in Task 13
+        """Adult ulta: preview pisunchik result before rolling."""
+        preview = self.game_service.preview_pisunchik_result(player)
+        player.pet_ulta_oracle_pending = True
+        player.pet_ulta_oracle_preview = preview
+        self.pet_service.mark_ulta_used(player)
+        self.player_service.save_player(player)
+        self.bot.answer_callback_query(call.id)
+
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("✅ Бросить!", callback_data="pet_oracle_yes"),
+            types.InlineKeyboardButton("❌ Пропустить", callback_data="pet_oracle_no"),
+        )
+        sign = '+' if preview['size_change'] >= 0 else ''
+        text = (
+            f"🔮 Оракул предсказывает:\n\n"
+            f"Изменение: {sign}{preview['size_change']} см\n"
+            f"Монеты: +{preview['coins_change']} BTC\n\n"
+            f"Бросать?"
+        )
+        try:
+            self.bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+        self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
 
     def _ulta_khalyava(self, call, player):
         """Legendary ulta: auto-correct next trivia."""
         pass  # Implemented in Task 14
 
     def oracle_confirm(self, call):
-        """Oracle: player confirmed the roll."""
-        self.bot.answer_callback_query(call.id, "Ульта Оракул ещё не реализована")
+        """Oracle: player confirmed — apply the stored preview result."""
+        from datetime import datetime, timezone
+        user_id = call.from_user.id
+        player = self.player_service.get_player(user_id)
+        if not player or not player.pet_ulta_oracle_preview:
+            self.bot.answer_callback_query(call.id, "Предсказание устарело")
+            self._dismiss_and_reopen(call)
+            return
+
+        preview = player.pet_ulta_oracle_preview
+        player.pet_ulta_oracle_pending = False
+        player.pet_ulta_oracle_preview = None
+        player.pisunchik_size += preview['size_change']
+        player.add_coins(preview['coins_change'])
+        player.last_used = datetime.now(timezone.utc)
+        self.player_service.save_player(player)
+
+        self.bot.answer_callback_query(call.id)
+        sign = '+' if preview['size_change'] >= 0 else ''
+        try:
+            self.bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+        self.bot.send_message(
+            call.message.chat.id,
+            f"🔮 Бросок совершён!\n"
+            f"Ваш писюнчик: {player.pisunchik_size} см ({sign}{preview['size_change']} см)\n"
+            f"Монеты: +{preview['coins_change']} BTC"
+        )
 
     def oracle_cancel(self, call):
-        """Oracle: player skipped the roll."""
-        self.bot.answer_callback_query(call.id, "Ульта Оракул ещё не реализована")
+        """Oracle: player skipped — no cooldown refund (ulta was already used)."""
+        user_id = call.from_user.id
+        player = self.player_service.get_player(user_id)
+        if player:
+            player.pet_ulta_oracle_pending = False
+            player.pet_ulta_oracle_preview = None
+            self.player_service.save_player(player)
+        self.bot.answer_callback_query(call.id, "Пропущено. Писюнчик не брошен.")
+        self.show_pet_menu(call.message.chat.id, user_id,
+                           delete_message_id=call.message.message_id)
 
     def get_player_mention(self, user_id: int, player_name: str, username: Optional[str] = None) -> str:
         if username:
