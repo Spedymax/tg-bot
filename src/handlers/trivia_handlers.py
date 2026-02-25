@@ -1,40 +1,77 @@
 import random
 import json
+import html
 import logging
 from telebot import types
 from datetime import datetime, timezone, timedelta
+import google.generativeai as genai
 from config.settings import Settings
 from services.trivia_service import TriviaService
-from services.pet_service import PetService
-from utils.helpers import safe_split_callback, safe_int, escape_html
 
 logger = logging.getLogger(__name__)
 
 class TriviaHandlers:
-    # Maximum number of questions to keep in memory
-    MAX_CACHED_QUESTIONS = 100
-
     def __init__(self, bot, player_service, game_service, db_manager):
         self.bot = bot
         self.player_service = player_service
         self.game_service = game_service
         self.db_manager = db_manager
-
+        
         # Initialize TriviaService for AI question generation
         self.trivia_service = TriviaService(Settings.GEMINI_API_KEY, db_manager)
-
-        # Initialize PetService for pet XP integration
-        self.pet_service = PetService()
-
-        # Store questions with timestamps: {message_id: {"data": ..., "created_at": datetime}}
+        
+        self.quiz_scheduler = None  # Set later via set_quiz_scheduler()
         self.question_messages = {}
-
-        # Load question states from database on startup (graceful recovery)
-        self._load_states_on_startup()
+        self.original_questions = {}
+        
+        # Player IDs for scoring
+        self.PLAYER_IDS = {
+            'YURA': 742272644,
+            'MAX': 741542965,
+            'BODYA': 855951767
+        }
     
+    def set_quiz_scheduler(self, quiz_scheduler):
+        """Set the quiz scheduler instance (used for pool refill)."""
+        self.quiz_scheduler = quiz_scheduler
+
     def setup_handlers(self):
         """Setup all trivia command handlers"""
-        
+
+        @self.bot.message_handler(commands=['regen_questions'])
+        def regen_questions_command(message):
+            """Handle /regen_questions [count] — admin-only pool refill."""
+            from config.settings import Settings
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                self.bot.reply_to(message, "У вас нет доступа к этой команде.")
+                return
+
+            # Parse optional count argument
+            parts = message.text.split()
+            count = 5
+            if len(parts) > 1:
+                try:
+                    count = max(1, min(int(parts[1]), 20))
+                except ValueError:
+                    self.bot.reply_to(message, "Неверный формат. Используйте: /regen_questions [1-20]")
+                    return
+
+            status_msg = self.bot.reply_to(message, f"🔄 Генерирую {count} вопросов для пула...")
+            if self.quiz_scheduler is None:
+                self.bot.edit_message_text(
+                    "❌ Планировщик квизов не инициализирован.",
+                    status_msg.chat.id, status_msg.message_id
+                )
+                return
+
+            result = self.quiz_scheduler.refill_question_pool(count)
+            self.bot.edit_message_text(
+                f"✅ Готово!\n\n"
+                f"Добавлено в пул: {result['added']}\n"
+                f"Пропущено (дубли/ошибки): {result['skipped']}",
+                status_msg.chat.id, status_msg.message_id
+            )
+
         @self.bot.message_handler(commands=['trivia'])
         def trivia_command(message):
             """Handle /trivia command"""
@@ -50,57 +87,6 @@ class TriviaHandlers:
             """Handle trivia answer callbacks"""
             self.handle_answer_callback(call)
     
-    def _load_states_on_startup(self):
-        """Load question states from database on startup."""
-        try:
-            loaded_states = self.trivia_service.load_question_states_from_db()
-            # Sync question_messages with trivia_service.active_questions
-            for message_id, state in loaded_states.items():
-                self.question_messages[message_id] = {
-                    "data": {
-                        "text": state.question_text,
-                        "players_responses": state.players_responses,
-                        "options": state.answer_options
-                    },
-                    "created_at": datetime.now(timezone.utc)
-                }
-            logger.info(f"Loaded {len(loaded_states)} question states from database")
-        except Exception as e:
-            logger.error(f"Error loading question states on startup: {e}")
-
-    def _cleanup_old_questions(self):
-        """Remove oldest questions if cache exceeds limit."""
-        if len(self.question_messages) <= self.MAX_CACHED_QUESTIONS:
-            return
-
-        # Sort by created_at and remove oldest
-        sorted_messages = sorted(
-            self.question_messages.items(),
-            key=lambda x: x[1].get("created_at", datetime.min.replace(tzinfo=timezone.utc))
-        )
-
-        # Keep only the most recent MAX_CACHED_QUESTIONS
-        to_remove = len(self.question_messages) - self.MAX_CACHED_QUESTIONS
-        for message_id, _ in sorted_messages[:to_remove]:
-            del self.question_messages[message_id]
-
-        logger.info(f"Cleaned up {to_remove} old questions from memory cache")
-
-    def _store_question(self, message_id: int, question_data: dict):
-        """Store a question with timestamp and cleanup if needed."""
-        self.question_messages[message_id] = {
-            "data": question_data,
-            "created_at": datetime.now(timezone.utc)
-        }
-        self._cleanup_old_questions()
-
-    def _get_question(self, message_id: int) -> dict:
-        """Get question data by message_id."""
-        entry = self.question_messages.get(message_id)
-        if entry:
-            return entry.get("data")
-        return None
-
     def get_question_from_gemini(self):
         """Generate a trivia question using TriviaService"""
         try:
@@ -113,17 +99,40 @@ class TriviaHandlers:
                     "wrong_answers": [opt for opt in result["question"]["options"] if opt != result["question"]["correct_answer"]]
                 }
             else:
-                logger.error(f"Error generating question: {result['message']}")
+                print(f"Error: {result['message']}")
                 return None
         except Exception as e:
-            logger.error(f"Error generating question: {e}")
+            print(f"Error generating question: {e}")
             return None
     
     def send_trivia_question(self, chat_id):
         """Send a trivia question to the chat"""
         try:
-            question_data = self.get_question_from_gemini()
-            
+            # Send "thinking" message
+            thinking_msg = self.bot.send_message(chat_id, "🤔 Генерирую вопрос...")
+
+            # Try pool first, fall back to AI
+            question_id = None
+            question_data = None
+            result = self.trivia_service.get_unused_question_for_chat(chat_id)
+            if result is not None:
+                question_id, question_data = result
+                logger.info(f"Reusing pooled question id={question_id} for /trivia in chat {chat_id}")
+            else:
+                logger.info(f"Pool exhausted for chat {chat_id}, generating batch of 30 via AI for /trivia")
+                if self.quiz_scheduler:
+                    refill = self.quiz_scheduler.refill_question_pool(30)
+                    logger.info(f"Batch refill: {refill['added']} added, {refill['skipped']} skipped")
+                    result = self.trivia_service.get_unused_question_for_chat(chat_id)
+                    if result is not None:
+                        question_id, question_data = result
+
+            # Delete the "thinking" message
+            try:
+                self.bot.delete_message(chat_id, thinking_msg.message_id)
+            except:
+                pass  # If deletion fails, just continue
+
             if question_data is None:
                 self.bot.send_message(chat_id, "Извините, произошла ошибка при создании вопроса.")
                 return
@@ -138,9 +147,13 @@ class TriviaHandlers:
             
             # Send question with inline keyboard
             self.send_question_with_options(chat_id, question_text, answer_options)
-            
-            # Save question to database using TriviaService
-            # Question is already saved in the generate_question method
+
+            # Record in history so this question won't be repeated for this chat
+            if question_id is None:
+                # AI-generated: look up the id by text
+                question_id = self.quiz_scheduler._get_question_id_by_text(question_text) if self.quiz_scheduler else None
+            if question_id is not None:
+                self.trivia_service.record_question_sent_to_chat(question_id, chat_id)
             
         except Exception as e:
             self.bot.send_message(chat_id, f'Ошибка при создании вопроса: {e}')
@@ -169,46 +182,28 @@ class TriviaHandlers:
             "players_responses": {},
             "options": answer_options
         }
-
-        # Use the new store method with cleanup
-        self._store_question(question_msg.message_id, question_data)
-        # Save to database using TriviaService
-        self.trivia_service.save_question_state_raw(
-            question_msg.message_id, question, {}, answer_options
-        )
+        
+        self.question_messages[question_msg.message_id] = question_data
+        self.save_question_state(question_msg.message_id, question, {}, answer_options)
     
     def handle_answer_callback(self, call):
         """Handle trivia answer selection"""
         try:
             message_id = call.message.message_id
             user_id = call.from_user.id
-
-            # Safely parse callback data
-            parts = safe_split_callback(call.data, "_", 2)
-            if not parts:
-                self.bot.answer_callback_query(call.id, "Неверный формат данных")
-                return
-
-            answer_index = safe_int(parts[1], -1)
-            if answer_index < 0:
-                self.bot.answer_callback_query(call.id, "Неверный формат ответа")
-                return
-
-            player_name = escape_html(call.from_user.first_name or "Игрок")
+            answer_index = int(call.data.split('_')[1])
+            player_name = call.from_user.first_name or "Игрок"
             
             # Try to get question from memory first, then from database
-            question_data = self._get_question(message_id)
-            if not question_data:
-                # Load from database using TriviaService
-                question_state = self.trivia_service.get_question_state(message_id)
-                if question_state:
-                    question_data = {
-                        "text": question_state.question_text,
-                        "players_responses": question_state.players_responses,
-                        "options": question_state.answer_options
-                    }
+            question_data = None
+            if message_id in self.question_messages:
+                question_data = self.question_messages[message_id]
+            else:
+                # Load from database
+                question_data = self.load_question_state_from_db(message_id)
+                if question_data:
                     # Store in memory for future use
-                    self._store_question(message_id, question_data)
+                    self.question_messages[message_id] = question_data
             
             if not question_data:
                 self.bot.answer_callback_query(call.id, "Вопрос не найден")
@@ -228,9 +223,10 @@ class TriviaHandlers:
             selected_answer = question_data["options"][answer_index]
             
             # Check if answer is correct
-            connection = self.db_manager.get_connection()
+            connection = None
             is_correct = False
             try:
+                connection = self.db_manager.get_connection()
                 with connection.cursor() as cursor:
                     cursor.execute(
                         "SELECT correct_answer FROM questions WHERE question = %s ORDER BY date_added DESC LIMIT 1",
@@ -240,119 +236,40 @@ class TriviaHandlers:
                     if result:
                         is_correct = result[0] == selected_answer
             finally:
-                self.db_manager.release_connection(connection)
+                if connection:
+                    self.db_manager.release_connection(connection)
             
             # Add player name with emoji to responses
             emoji = "✅" if is_correct else "❌"
             question_data["players_responses"][user_id] = f"{player_name} {emoji}"
-
-            # Update memory cache with modified data
-            self._store_question(message_id, question_data)
-
+            
             self.bot.answer_callback_query(call.id, f"Вы выбрали: {selected_answer}")
-
+            
             # Update the question message to show the response
             self.update_question_message(call.message, question_data)
-
-            # Update question state in database using TriviaService
-            self.trivia_service.save_question_state_raw(
-                message_id,
-                question_data["text"],
-                question_data["players_responses"],
+            
+            # Update question state in database
+            self.save_question_state(
+                message_id, 
+                question_data["text"], 
+                question_data["players_responses"], 
                 question_data["options"]
             )
             
-            # Update player score and pet system
-            player = self.player_service.get_player(user_id)
-            if player:
-                chat_id = call.message.chat.id
-
-                # Update quiz score if correct
-                if is_correct:
+            # Update player score if correct
+            if is_correct:
+                player = self.player_service.get_player(user_id)
+                if player:
+                    chat_id = call.message.chat.id
                     current_score = player.get_quiz_score(chat_id)
                     player.update_quiz_score(chat_id, current_score + 1)
-
-                # Update pet system (XP, streak, titles)
-                pet_notifications = self._update_pet_on_trivia(player, is_correct, chat_id)
-                self.player_service.save_player(player)
-
-                # Send pet notifications
-                if pet_notifications:
-                    username = call.from_user.username
-                    player_name = player.player_name or call.from_user.first_name
-                    pet_name = escape_html(player.pet.get('name', 'Улюбленець')) if player.pet else 'Улюбленець'
-
-                    if username:
-                        mention = f"@{username}"
-                    else:
-                        mention = f'<a href="tg://user?id={call.from_user.id}">{escape_html(player_name)}</a>'
-
-                    for notif_type, value in pet_notifications:
-                        try:
-                            if notif_type == 'title':
-                                msg = f"{mention}, 🏷 Ти отримав титул \"{escape_html(value)}\"! Серія правильних відповідей!"
-                            elif notif_type == 'level':
-                                msg = f"{mention}, 🎉 {pet_name} досяг рівня {value}!"
-                            elif notif_type == 'evolution':
-                                stage_name = self.pet_service.get_stage_name(value)
-                                msg = f"{mention}, ✨ {pet_name} еволюціонував у {stage_name}! Натисни /pet щоб налаштувати."
-                            else:
-                                continue
-                            self.bot.send_message(chat_id, msg, parse_mode='HTML')
-                        except Exception as e:
-                            logger.error(f"Error sending pet notification: {e}")
-
+                    self.player_service.save_player(player)
+                
         except Exception as e:
-            logger.error(f"Error in answer callback: {e}")
+            print(f"Error in answer callback: {e}")
             self.bot.answer_callback_query(call.id, "Произошла ошибка")
-
-    def _update_pet_on_trivia(self, player, is_correct: bool, chat_id: int) -> list:
-        """
-        Update pet XP and streak after trivia answer.
-        Returns list of notification tuples to send: ('title', name), ('level', level), ('evolution', stage)
-        """
-        notifications = []
-
-        pet = getattr(player, 'pet', None)
-        if not pet or not pet.get('is_alive') or not pet.get('is_locked'):
-            return notifications
-
-        # Update last trivia date
-        player.last_trivia_date = datetime.now(timezone.utc)
-
-        # Add XP: 1 for participation, +3 bonus for correct
-        xp_gain = 1
-        if is_correct:
-            xp_gain += 3
-            # Update streak
-            player.trivia_streak = getattr(player, 'trivia_streak', 0) + 1
-
-            # Check for title reward (every 3 streak)
-            new_title = self.pet_service.check_streak_reward(
-                player.trivia_streak,
-                getattr(player, 'pet_titles', [])
-            )
-            if new_title:
-                if not hasattr(player, 'pet_titles') or player.pet_titles is None:
-                    player.pet_titles = []
-                player.pet_titles.append(new_title)
-                notifications.append(('title', new_title))
-        else:
-            # Reset streak on wrong answer
-            player.trivia_streak = 0
-
-        # Add XP and check for level up / evolution
-        pet, leveled_up, evolved = self.pet_service.add_xp(pet, xp_gain)
-        player.pet = pet
-
-        if leveled_up and not evolved:
-            notifications.append(('level', pet['level']))
-
-        if evolved:
-            notifications.append(('evolution', pet['stage']))
-
-        return notifications
-
+    
+    
     def update_question_message(self, message, question_data):
         """Update the question message to show player responses"""
         try:
@@ -377,93 +294,191 @@ class TriviaHandlers:
                 parse_mode='html'
             )
         except Exception as e:
-            logger.error(f"Error updating question message: {e}")
-
+            print(f"Error updating question message: {e}")
+    
+    def save_question_state(self, message_id, question, players_responses, answer_options=None):
+        """Save question state to database"""
+        connection = None
+        try:
+            connection = self.db_manager.get_connection()
+            with connection.cursor() as cursor:
+                data_to_save = {
+                    "players_responses": players_responses
+                }
+                
+                if answer_options:
+                    data_to_save["options"] = answer_options
+                
+                # Check if record exists
+                cursor.execute(
+                    "SELECT 1 FROM question_state WHERE message_id = %s",
+                    (message_id,)
+                )
+                
+                if cursor.fetchone():
+                    # Update existing record
+                    cursor.execute(
+                        "UPDATE question_state SET original_question = %s, players_responses = %s WHERE message_id = %s",
+                        (question, json.dumps(data_to_save), message_id)
+                    )
+                else:
+                    # Insert new record
+                    cursor.execute(
+                        "INSERT INTO question_state (message_id, original_question, players_responses) VALUES (%s, %s, %s)",
+                        (message_id, question, json.dumps(data_to_save))
+                    )
+                
+                connection.commit()
+        except Exception as e:
+            print(f"Error saving question state: {e}")
+        finally:
+            if connection:
+                self.db_manager.release_connection(connection)
+    
+    def load_question_state_from_db(self, message_id):
+        """Load question state from database"""
+        connection = None
+        try:
+            connection = self.db_manager.get_connection()
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT original_question, players_responses FROM question_state WHERE message_id = %s",
+                    (message_id,)
+                )
+                result = cursor.fetchone()
+                
+                if result:
+                    question_text, players_responses_json = result
+                    
+                    # Handle None or empty JSON
+                    if not players_responses_json:
+                        return {
+                            "text": question_text,
+                            "players_responses": {},
+                            "options": []
+                        }
+                    
+                    # Parse the JSON data
+                    try:
+                        if isinstance(players_responses_json, str):
+                            data = json.loads(players_responses_json)
+                        else:
+                            data = players_responses_json  # Already a dict
+                        
+                        # Handle different data formats
+                        if isinstance(data, dict):
+                            return {
+                                "text": question_text,
+                                "players_responses": data.get("players_responses", {}),
+                                "options": data.get("options", [])
+                            }
+                        else:
+                            # Legacy format - data is directly players_responses
+                            return {
+                                "text": question_text,
+                                "players_responses": data if isinstance(data, dict) else {},
+                                "options": []
+                            }
+                    except (json.JSONDecodeError, TypeError) as e:
+                        print(f"Error parsing question state JSON: {e}")
+                        # Return empty structure instead of None
+                        return {
+                            "text": question_text,
+                            "players_responses": {},
+                            "options": []
+                        }
+                
+                return None
+        except Exception as e:
+            print(f"Error loading question state: {e}")
+            return None
+        finally:
+            if connection:
+                self.db_manager.release_connection(connection)
+    
     def get_correct_answers(self, message):
         """Show today's questions with correct answers"""
+        connection = None
         try:
-            # Get today's questions using TriviaService
-            today_questions = self.trivia_service.get_today_questions()
-
-            if not today_questions:
-                self.bot.reply_to(message, "📋 Сегодня вопросов еще не было!")
-                return
-
-            # Get player scores for this chat
+            connection = self.db_manager.get_connection()
             chat_id = message.chat.id
-            scores_text = self.get_player_scores_for_chat(chat_id)
 
-            # Build response message
-            response_text = self._format_questions_for_display(today_questions)
+            with connection.cursor() as cursor:
+                # Get today's questions that were actually sent to this chat
+                cursor.execute(
+                    "SELECT q.question, q.correct_answer, q.explanation, h.sent_at "
+                    "FROM questions q "
+                    "JOIN chat_question_history h ON h.question_id = q.id AND h.chat_id = %s "
+                    "WHERE DATE(h.sent_at) = CURRENT_DATE "
+                    "ORDER BY h.sent_at ASC",
+                    (chat_id,)
+                )
 
-            # Add player scores
-            if scores_text:
-                response_text += "\n🏆 <b>Очки игроков:</b>\n" + scores_text
+                today_questions = cursor.fetchall()
 
-            # Split message if too long and send
-            self._send_long_message(message, response_text, today_questions)
+                if not today_questions:
+                    self.bot.reply_to(message, "📋 Сегодня вопросов еще не было!")
+                    return
+
+                # Get player scores for this chat
+                scores_text = self.get_player_scores_for_chat(chat_id)
+
+                # Build response message
+                response_text = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
+
+                for i, (question, correct_answer, explanation, sent_at) in enumerate(today_questions, 1):
+                    time_str = sent_at.strftime('%H:%M') if sent_at else 'N/A'
+                    response_text += f"<b>{i}.</b> {question}\n"
+                    response_text += f"✅ <b>Ответ:</b> {correct_answer}\n"
+                    if explanation:
+                        response_text += f"💡 <i>{explanation}</i>\n"
+                    response_text += f"⏰ {time_str}\n\n"
+
+                # Add player scores
+                if scores_text:
+                    response_text += "\n🏆 <b>Очки игроков:</b>\n" + scores_text
+
+                # Split message if too long
+                max_length = 4000
+                if len(response_text) > max_length:
+                    parts = []
+                    current_part = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
+
+                    for i, (question, correct_answer, explanation, sent_at) in enumerate(today_questions, 1):
+                        time_str = sent_at.strftime('%H:%M') if sent_at else 'N/A'
+                        question_text = f"<b>{i}.</b> {question}\n"
+                        question_text += f"✅ <b>Ответ:</b> {correct_answer}\n"
+                        if explanation:
+                            question_text += f"💡 <i>{explanation}</i>\n"
+                        question_text += f"⏰ {time_str}\n\n"
+
+                        if len(current_part + question_text) > max_length:
+                            parts.append(current_part)
+                            current_part = question_text
+                        else:
+                            current_part += question_text
+
+                    if current_part:
+                        parts.append(current_part)
+
+                    # Send all parts
+                    for part in parts:
+                        self.bot.reply_to(message, part, parse_mode='HTML')
+                else:
+                    self.bot.reply_to(message, response_text, parse_mode='HTML')
 
         except Exception as e:
-            logger.error(f"Error getting correct answers: {e}")
+            print(f"Error getting correct answers: {e}")
             self.bot.reply_to(message, "❌ Произошла ошибка при получении вопросов")
-
-    def _format_questions_for_display(self, questions):
-        """Format questions for display in message."""
-        response_text = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
-
-        for i, q in enumerate(questions, 1):
-            # Escape HTML to prevent XSS
-            question_text = escape_html(q['question'])
-            answer_text = escape_html(q['correct_answer'])
-            response_text += f"<b>{i}.</b> {question_text}\n"
-            response_text += f"✅ <b>Ответ:</b> {answer_text}\n"
-            if q.get('explanation'):
-                explanation_text = escape_html(q['explanation'])
-                response_text += f"💡 <i>{explanation_text}</i>\n"
-            response_text += f"⏰ {q.get('date_added', 'N/A')}\n\n"
-
-        return response_text
-
-    def _send_long_message(self, message, response_text, questions):
-        """Split and send long message if needed."""
-        max_length = 4000
-
-        if len(response_text) <= max_length:
-            self.bot.reply_to(message, response_text, parse_mode='HTML')
-            return
-
-        # Split into parts
-        parts = []
-        current_part = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
-
-        for i, q in enumerate(questions, 1):
-            # Escape HTML to prevent XSS
-            q_text = escape_html(q['question'])
-            a_text = escape_html(q['correct_answer'])
-            question_text = f"<b>{i}.</b> {q_text}\n"
-            question_text += f"✅ <b>Ответ:</b> {a_text}\n"
-            if q.get('explanation'):
-                e_text = escape_html(q['explanation'])
-                question_text += f"💡 <i>{e_text}</i>\n"
-            question_text += f"⏰ {q.get('date_added', 'N/A')}\n\n"
-
-            if len(current_part + question_text) > max_length:
-                parts.append(current_part)
-                current_part = question_text
-            else:
-                current_part += question_text
-
-        if current_part:
-            parts.append(current_part)
-
-        # Send all parts
-        for part in parts:
-            self.bot.reply_to(message, part, parse_mode='HTML')
+        finally:
+            if connection:
+                self.db_manager.release_connection(connection)
     
     def load_trivia_data(self):
         """Load trivia data from database"""
-        connection = self.db_manager.get_connection()
+        connection = None
         try:
+            connection = self.db_manager.get_connection()
             with connection.cursor() as cursor:
                 cursor.execute("SELECT * FROM questions ORDER BY date_added DESC")
                 return [{
@@ -472,13 +487,15 @@ class TriviaHandlers:
                     'date_added': row[3].strftime('%d-%m-%Y %H:%M') if row[3] else 'Unknown'
                 } for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"Error loading trivia data: {e}")
+            print(f"Error loading trivia data: {e}")
             return []
         finally:
-            self.db_manager.release_connection(connection)
+            if connection:
+                self.db_manager.release_connection(connection)
     
     def get_player_scores_for_chat(self, chat_id):
         """Get player scores for specific chat"""
+        connection = None
         try:
             connection = self.db_manager.get_connection()
             
@@ -522,9 +539,13 @@ class TriviaHandlers:
                         return "Пока никто не набрал очков в этом чате."
                         
             finally:
-                self.db_manager.release_connection(connection)
+                if connection:
+                    self.db_manager.release_connection(connection)
                 
         except Exception as e:
-            logger.error(f"Error getting player scores: {e}")
+            print(f"Error getting player scores: {e}")
             return "Ошибка при получении очков."
+        finally:
+            if connection:
+                self.db_manager.release_connection(connection)
     
