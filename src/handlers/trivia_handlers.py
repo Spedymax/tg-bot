@@ -270,12 +270,17 @@ class TriviaHandlers:
             finally:
                 if connection:
                     self.db_manager.release_connection(connection)
-            
+
+            # Халява ulta override: force correct BEFORE emoji and response are recorded
+            player = self.player_service.get_player(user_id)
+            if player and getattr(player, 'pet_ulta_trivia_pending', False):
+                player.pet_ulta_trivia_pending = False
+                is_correct = True
+
             # Add player name with emoji to responses
             emoji = "✅" if is_correct else "❌"
             if is_correct:
-                _badge_player = self.player_service.get_player(user_id)
-                _pet_badge = self._get_pet_badge(_badge_player) if _badge_player else ''
+                _pet_badge = self._get_pet_badge(player) if player else ''
             else:
                 _pet_badge = ''
             question_data["players_responses"][user_id] = f"{player_name}{_pet_badge} {emoji}"
@@ -293,12 +298,6 @@ class TriviaHandlers:
                 question_data["options"]
             )
             
-            # Халява ulta override: treat next answer as correct
-            player = self.player_service.get_player(user_id)
-            if player and getattr(player, 'pet_ulta_trivia_pending', False):
-                player.pet_ulta_trivia_pending = False
-                is_correct = True  # force correct
-
             # Update player score if correct
             if is_correct:
                 if not player:
