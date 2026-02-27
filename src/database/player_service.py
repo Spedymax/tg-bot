@@ -14,7 +14,11 @@ ALLOWED_PLAYER_FIELDS = {
     'last_used', 'last_vor', 'last_prezervativ', 'last_joke', 'casino_last_used',
     'casino_usage_count', 'ballzzz_number', 'notified',
     'pet', 'pet_titles', 'pet_active_title', 'pet_revives_used',
-    'pet_revives_reset_date', 'trivia_streak', 'last_trivia_date'
+    'pet_revives_reset_date', 'trivia_streak', 'last_trivia_date',
+    # Pet hunger/happiness/ulta fields
+    'pet_hunger', 'pet_happiness', 'pet_hunger_last_decay', 'pet_happiness_last_activity',
+    'pet_ulta_used_date', 'pet_ulta_free_roll_pending', 'pet_ulta_oracle_pending',
+    'pet_ulta_trivia_pending', 'pet_casino_extra_spins', 'pet_ulta_oracle_preview',
 }
 
 class PlayerService:
@@ -93,7 +97,12 @@ class PlayerService:
                             casino_usage_count = %s, ballzzz_number = %s, notified = %s,
                             miniapp_daily_spins = %s, miniapp_last_spin_date = %s, miniapp_total_winnings = %s,
                             pet = %s, pet_titles = %s, pet_active_title = %s, pet_revives_used = %s,
-                            pet_revives_reset_date = %s, trivia_streak = %s, last_trivia_date = %s
+                            pet_revives_reset_date = %s, trivia_streak = %s, last_trivia_date = %s,
+                            pet_hunger = %s, pet_happiness = %s,
+                            pet_hunger_last_decay = %s, pet_happiness_last_activity = %s,
+                            pet_ulta_used_date = %s, pet_ulta_free_roll_pending = %s,
+                            pet_ulta_oracle_pending = %s, pet_ulta_trivia_pending = %s,
+                            pet_casino_extra_spins = %s, pet_ulta_oracle_preview = %s
                         WHERE player_id = %s
                     """
                     cursor.execute(update_query, (
@@ -113,6 +122,16 @@ class PlayerService:
                         getattr(player, 'pet_revives_reset_date', None),
                         getattr(player, 'trivia_streak', 0),
                         getattr(player, 'last_trivia_date', None),
+                        getattr(player, 'pet_hunger', 100),
+                        getattr(player, 'pet_happiness', 50),
+                        getattr(player, 'pet_hunger_last_decay', None),
+                        getattr(player, 'pet_happiness_last_activity', None),
+                        getattr(player, 'pet_ulta_used_date', None),
+                        getattr(player, 'pet_ulta_free_roll_pending', False),
+                        getattr(player, 'pet_ulta_oracle_pending', False),
+                        getattr(player, 'pet_ulta_trivia_pending', False),
+                        getattr(player, 'pet_casino_extra_spins', 0),
+                        json.dumps(getattr(player, 'pet_ulta_oracle_preview', None)) if getattr(player, 'pet_ulta_oracle_preview', None) else None,
                         player.player_id
                     ))
                 else:
@@ -125,8 +144,12 @@ class PlayerService:
                             last_vor, last_prezervativ, last_joke, casino_last_used,
                             casino_usage_count, ballzzz_number, notified,
                             pet, pet_titles, pet_active_title, pet_revives_used,
-                            pet_revives_reset_date, trivia_streak, last_trivia_date
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            pet_revives_reset_date, trivia_streak, last_trivia_date,
+                            pet_hunger, pet_happiness, pet_hunger_last_decay,
+                            pet_happiness_last_activity, pet_ulta_used_date,
+                            pet_ulta_free_roll_pending, pet_ulta_oracle_pending,
+                            pet_ulta_trivia_pending, pet_casino_extra_spins, pet_ulta_oracle_preview
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
                     cursor.execute(insert_query, (
                         player.player_id, player.player_name, player.pisunchik_size, player.coins,
@@ -141,7 +164,17 @@ class PlayerService:
                         getattr(player, 'pet_revives_used', 0),
                         getattr(player, 'pet_revives_reset_date', None),
                         getattr(player, 'trivia_streak', 0),
-                        getattr(player, 'last_trivia_date', None)
+                        getattr(player, 'last_trivia_date', None),
+                        getattr(player, 'pet_hunger', 100),
+                        getattr(player, 'pet_happiness', 50),
+                        getattr(player, 'pet_hunger_last_decay', None),
+                        getattr(player, 'pet_happiness_last_activity', None),
+                        getattr(player, 'pet_ulta_used_date', None),
+                        getattr(player, 'pet_ulta_free_roll_pending', False),
+                        getattr(player, 'pet_ulta_oracle_pending', False),
+                        getattr(player, 'pet_ulta_trivia_pending', False),
+                        getattr(player, 'pet_casino_extra_spins', 0),
+                        json.dumps(getattr(player, 'pet_ulta_oracle_preview', None)) if getattr(player, 'pet_ulta_oracle_preview', None) else None,
                     ))
                 
                 connection.commit()
