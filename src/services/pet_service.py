@@ -296,3 +296,35 @@ class PetService:
     def get_ulta_name(self, stage: str) -> str:
         """Get display name for ulta at given stage."""
         return self.ULTA_NAMES.get(stage, '⚡ Ульта')
+
+    def get_pet_badge(self, player) -> str:
+        """Return state-aware pet badge for appending to game result lines.
+        Returns empty string if pet is absent, dead, or not yet confirmed.
+        """
+        pet = getattr(player, 'pet', None)
+        if not pet or not pet.get('is_alive') or not pet.get('is_locked'):
+            return ''
+
+        stage_emoji = self.get_stage_emoji(pet.get('stage', ''))
+        hunger = getattr(player, 'pet_hunger', 100)
+        happiness = getattr(player, 'pet_happiness', 50)
+
+        parts = []
+        if hunger < 10:
+            parts.append('[Умирает! 💀]')
+        elif hunger < 30:
+            parts.append('[Очень голоден 😫]')
+        elif hunger < 60:
+            parts.append('[Голоден 😟]')
+        elif happiness >= 80:
+            parts.append('[Счастлив 😊]')
+
+        if happiness < 20 and parts:
+            parts.append('[Подавлен]')
+        elif happiness < 20:
+            parts.append('[Подавлен]')
+
+        badge = f' {stage_emoji}'
+        if parts:
+            badge += ' ' + ' '.join(parts)
+        return badge
