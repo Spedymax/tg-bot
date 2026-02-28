@@ -43,13 +43,7 @@ class GameHandlers:
                 player.add_item('pet_food_basic')
             self.player_service.save_player(player)
 
-            # Build pet badge
-            pet_badge = ''
-            if player.pet and player.pet.get('is_alive') and player.pet.get('is_locked'):
-                _stage_emojis = {'egg': '🥚', 'baby': '🐣', 'adult': '🐤', 'legendary': '🦅'}
-                pet_badge = _stage_emojis.get(player.pet.get('stage', ''), '')
-                if pet_badge:
-                    pet_badge = f' {pet_badge}'
+            pet_badge = _pet_svc.get_pet_badge(player)
 
             reply_message = (
                 f"Ваш писюнчик{pet_badge}: {result['new_size']} см\n"
