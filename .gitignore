@@ -157,9 +157,26 @@ memory_bot.log
 memory_backups
 *.json.bak
 
+# Rotated logs
+*.log.[0-9]
+*.log.[0-9].gz
+*.log.[0-9][0-9]
+bot.log*
+memory_bot.log*
+
+# Backup files
+backup_*.json
+
+# Runtime state files
+moltbot_state.json
+*_state.json
+
 # Telegram session files (contain authentication tokens)
 *.session
 *.session-journal
+
+# Claude local settings
+.claude/settings.local.json
 
 # Git worktrees
 .worktrees/
