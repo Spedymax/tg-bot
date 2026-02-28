@@ -104,3 +104,14 @@ def test_cooldown_48h_when_depressed(svc):
     remaining = svc.get_ulta_cooldown_remaining(p)
     assert remaining is not None  # 48h cooldown, only 25h elapsed
     assert remaining.total_seconds() > 0
+
+
+def test_death_sets_notify_flag(svc):
+    p = make_player(hunger=10)
+    p.pet_hunger = 10
+    p.pet_death_pending_notify = False
+    p.pet_hunger_last_decay = datetime.now(timezone.utc) - timedelta(hours=13)
+    died = svc.apply_hunger_decay(p, datetime.now(timezone.utc))
+    assert died is True
+    assert p.pet['is_alive'] is False
+    assert p.pet_death_pending_notify is True
