@@ -184,9 +184,11 @@ class GameHandlers:
             else:
                 pet_badge = ''
 
-            self.bot.send_message(call.message.chat.id, f"Всего потрачено: {result['cost']} BTC")
-            self.bot.send_message(call.message.chat.id, f"Результаты бросков: {' '.join(map(str, result['results']))}")
-            self.bot.send_message(call.message.chat.id, f"Ваш писюнчик{pet_badge}: {result['new_size']} см")
+            dice_str = ' '.join(map(str, result['results']))
+            self.bot.send_message(
+                call.message.chat.id,
+                f"🎲 Потрачено: {result['cost']} BTC | [{dice_str}] | Писюнчик{pet_badge}: {result['new_size']} см"
+            )
             
             if result['jackpots'] > 0:
                 for i in range(result['jackpots']):
