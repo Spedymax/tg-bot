@@ -151,14 +151,27 @@ class GameHandlers:
                 return
             
             result = self.game_service.execute_roll_command(player, rolls)
-            
+
             if not result['success']:
                 self.bot.send_message(call.message.chat.id, result['message'])
                 return
-            
+
+            # Pet activity tracking + death notice
+            from datetime import datetime, timezone
+            from services.pet_service import PetService as _PetSvc
+            _pet_svc = _PetSvc()
+            player = self.player_service.get_player(player_id)
+            if player:
+                _pet_svc.record_game_activity(player, 'roll', datetime.now(timezone.utc))
+                self._maybe_send_death_notice(call.message.chat.id, player)
+                self.player_service.save_player(player)
+                pet_badge = _pet_svc.get_pet_badge(player)
+            else:
+                pet_badge = ''
+
             self.bot.send_message(call.message.chat.id, f"Всего потрачено: {result['cost']} BTC")
             self.bot.send_message(call.message.chat.id, f"Результаты бросков: {' '.join(map(str, result['results']))}")
-            self.bot.send_message(call.message.chat.id, f"Ваш писюнчик: {result['new_size']} см")
+            self.bot.send_message(call.message.chat.id, f"Ваш писюнчик{pet_badge}: {result['new_size']} см")
             
             if result['jackpots'] > 0:
                 for i in range(result['jackpots']):
