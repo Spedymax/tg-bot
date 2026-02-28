@@ -11,6 +11,23 @@ class GameHandlers:
         self.player_service = player_service
         self.game_service = game_service
         
+    def _maybe_send_death_notice(self, chat_id: int, player) -> None:
+        """Send one-shot death notification if pet just died from hunger."""
+        if not getattr(player, 'pet_death_pending_notify', False):
+            return
+        player.pet_death_pending_notify = False
+        pet = getattr(player, 'pet', None)
+        pet_name = ''
+        if pet:
+            from utils.helpers import escape_html
+            pet_name = escape_html(pet.get('name', ''))
+        name_part = f' «{pet_name}»' if pet_name else ''
+        self.bot.send_message(
+            chat_id,
+            f"💀 Питомец{name_part} умер от голода! Используй /pet чтобы возродить.",
+            parse_mode='HTML'
+        )
+
     def setup_handlers(self):
         """Setup all game-related command handlers"""
         
@@ -41,6 +58,7 @@ class GameHandlers:
             _pet_svc.record_game_activity(player, 'pisunchik', datetime.now(timezone.utc))
             if player.pet and player.pet.get('is_alive') and _rand.random() < 0.20:
                 player.add_item('pet_food_basic')
+            self._maybe_send_death_notice(message.chat.id, player)
             self.player_service.save_player(player)
 
             pet_badge = _pet_svc.get_pet_badge(player)
@@ -101,6 +119,7 @@ class GameHandlers:
                 if total_wins > 0 and player.pet and player.pet.get('is_alive') and _rand.random() < 0.15:
                     player.add_item('pet_food_basic')
 
+                self._maybe_send_death_notice(message.chat.id, player)
                 self.player_service.save_player(player)
                 self.bot.send_message(message.chat.id, f"🎉 Всего выигрышей: {total_wins}! Общий выигрыш: {total_wins * GameConfig.CASINO_JACKPOT_REWARD} BTC!")
 
