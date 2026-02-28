@@ -56,6 +56,7 @@ class Player:
     pet_ulta_trivia_pending: bool = False
     pet_casino_extra_spins: int = 0
     pet_ulta_oracle_preview: Optional[Dict[str, Any]] = None
+    pet_death_pending_notify: bool = False
 
     @classmethod
     def from_db_row(cls, row: tuple, column_names: List[str]) -> 'Player':
