@@ -319,9 +319,7 @@ class PetService:
         elif happiness >= 80:
             parts.append('[Счастлив 😊]')
 
-        if happiness < 20 and parts:
-            parts.append('[Подавлен]')
-        elif happiness < 20:
+        if happiness < 20:
             parts.append('[Подавлен]')
 
         badge = f' {stage_emoji}'

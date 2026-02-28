@@ -65,3 +65,10 @@ def test_badge_egg_stage(svc):
 def test_badge_legendary_stage(svc):
     p = make_player(hunger=80, happiness=50, stage='legendary')
     assert svc.get_pet_badge(p) == ' 🦅'
+
+def test_badge_depressed_only_no_hunger(svc):
+    """Depressed pet with healthy hunger — only [Подавлен] label."""
+    p = make_player(hunger=80, happiness=10)
+    badge = svc.get_pet_badge(p)
+    assert '[Подавлен]' in badge
+    assert '[Голоден' not in badge
