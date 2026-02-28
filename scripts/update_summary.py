@@ -21,15 +21,15 @@ logger = logging.getLogger(__name__)
 # ── Настройки ────────────────────────────────────────────────────────────────
 
 DB_CONFIG = {
-    'dbname': 'server-tg-pisunchik',
-    'user': 'postgres',
-    'password': '123',
-    'host': '127.0.0.1',
-    'port': 5432,
+    'dbname': os.getenv('DB_NAME', 'server-tg-pisunchik'),
+    'user': os.getenv('DB_USER', 'postgres'),
+    'password': os.getenv('DB_PASSWORD', ''),
+    'host': os.getenv('DB_HOST', '127.0.0.1'),
+    'port': int(os.getenv('DB_PORT', 5432)),
 }
 
-JARVIS_URL   = 'http://127.0.0.1:18789/v1/chat/completions'
-JARVIS_TOKEN = '***REMOVED***'
+JARVIS_URL   = os.getenv('JARVIS_URL', 'http://127.0.0.1:18789/v1/chat/completions')
+JARVIS_TOKEN = os.getenv('JARVIS_TOKEN', '')
 
 CHAT_SUMMARY_PATH = os.path.expanduser('~/.openclaw/workspace/memory/chat-summary.md')
 MESSAGES_LIMIT    = 300  # сколько последних сообщений анализировать
