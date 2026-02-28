@@ -107,6 +107,23 @@ class TriviaHandlers:
         except Exception as e:
             logger.error(f"Failed to send evolution announcement: {e}")
 
+    def _maybe_send_death_notice(self, chat_id: int, player) -> None:
+        """Send one-shot death notification if pet just died from hunger."""
+        if not getattr(player, 'pet_death_pending_notify', False):
+            return
+        player.pet_death_pending_notify = False
+        pet = getattr(player, 'pet', None)
+        pet_name = ''
+        if pet:
+            from utils.helpers import escape_html
+            pet_name = escape_html(pet.get('name', ''))
+        name_part = f' «{pet_name}»' if pet_name else ''
+        self.bot.send_message(
+            chat_id,
+            f"💀 Питомец{name_part} умер от голода! Используй /pet чтобы возродить.",
+            parse_mode='HTML'
+        )
+
     def get_question_from_gemini(self):
         """Generate a trivia question using TriviaService"""
         try:
@@ -319,6 +336,7 @@ class TriviaHandlers:
                     if player.pet and player.pet.get('is_alive') and _rand.random() < 0.25:
                         player.add_item('pet_food_basic')
 
+                    self._maybe_send_death_notice(chat_id, player)
                     self.player_service.save_player(player)
             else:
                 # Reset streak on wrong answer
