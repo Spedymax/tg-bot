@@ -83,7 +83,12 @@ class PetHandlers:
 
         if not pet.get('is_alive'):
             # Dead pet
-            markup.add(types.InlineKeyboardButton("❤️ Возродить", callback_data="pet_revive"))
+            revives_used = getattr(player, 'pet_revives_used', 0)
+            revives_remaining = self.pet_service.max_revives - revives_used
+            if revives_remaining <= 0:
+                markup.add(types.InlineKeyboardButton("❤️ Возродить (нет возрождений)", callback_data="pet_revive"))
+            else:
+                markup.add(types.InlineKeyboardButton("❤️ Возродить", callback_data="pet_revive"))
             markup.add(types.InlineKeyboardButton("🗑 Удалить навсегда", callback_data="pet_delete_confirm"))
 
         elif not pet.get('is_locked'):
