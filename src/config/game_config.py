@@ -15,7 +15,7 @@ class GameConfig:
     CASINO_JACKPOT_VALUES = {1, 22, 43, 64}
     CASINO_JACKPOT_REWARD = 300
     CASINO_DICE_DELAY = 1  # Delay between dice rolls (seconds)
-    CASINO_JACKPOT_DELAY = 2  # Dramatic pause before jackpot message (seconds)
+    CASINO_ANIMATION_WAIT = 3  # Wait after last die for animations to finish
 
     # Roll game animation delays
     ROLL_JACKPOT_DELAY = 2  # Delay before jackpot announcement (seconds)

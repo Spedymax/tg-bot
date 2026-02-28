@@ -94,23 +94,26 @@ class GameHandlers:
                 dice_msg_ids = []
                 total_wins = 0
 
-                for i in range(6):
-                    dice_msg = self.bot.send_dice(
-                        message.chat.id, emoji='🎰',
-                        disable_notification=True
-                    )
-                    dice_msg_ids.append(dice_msg.message_id)
-                    dice_value = dice_msg.dice.value
+                try:
+                    for i in range(6):
+                        dice_msg = self.bot.send_dice(
+                            message.chat.id, emoji='🎰',
+                            disable_notification=True
+                        )
+                        dice_msg_ids.append(dice_msg.message_id)
+                        dice_value = dice_msg.dice.value
 
-                    if dice_value in GameConfig.CASINO_JACKPOT_VALUES:
-                        total_wins += 1
-                        player.add_coins(GameConfig.CASINO_JACKPOT_REWARD)
+                        if dice_value in GameConfig.CASINO_JACKPOT_VALUES:
+                            total_wins += 1
+                            player.add_coins(GameConfig.CASINO_JACKPOT_REWARD)
 
-                    if i < 5:
-                        time.sleep(GameConfig.CASINO_DICE_DELAY)
+                        if i < 5:
+                            time.sleep(GameConfig.CASINO_DICE_DELAY)
+                except Exception:
+                    pass  # Partial result — still deliver summary below
 
                 # Wait for last animation to finish, then delete all dice
-                time.sleep(3)
+                time.sleep(GameConfig.CASINO_ANIMATION_WAIT)
                 for msg_id in dice_msg_ids:
                     try:
                         self.bot.delete_message(message.chat.id, msg_id)
