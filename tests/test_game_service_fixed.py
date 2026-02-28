@@ -259,6 +259,34 @@ class TestGameServiceFixed(unittest.TestCase):
             self.assertIn('cost', result)
             self.assertIn('new_size', result)
     
+    def _make_service_and_player(self):
+        """Helper: return a (GameService, Player) tuple ready for roll tests."""
+        from services.game_service import GameService
+        from models.player import Player
+
+        self.mock_player_service.save_player.return_value = True
+        service = GameService(self.mock_player_service)
+        player_data = {**self.test_player_data, 'coins': 100.0}
+        player = Player(**player_data)
+        return service, player
+
+    @patch('services.game_service.random.randint')
+    def test_jackpot_fires_at_1_in_300(self, mock_randint):
+        """Jackpot fires when randint returns 14; upper bound is now 300."""
+        service, player = self._make_service_and_player()
+        # 1 roll: dice value 4 (win size), jackpot check returns 14 (hits)
+        mock_randint.side_effect = [4, 14]
+        result = service.execute_roll_command(player, 1)
+        assert result['jackpots'] == 1
+
+    @patch('services.game_service.random.randint')
+    def test_jackpot_misses_when_not_14(self, mock_randint):
+        """Jackpot does not fire when randint returns any value other than 14."""
+        service, player = self._make_service_and_player()
+        mock_randint.side_effect = [4, 15]
+        result = service.execute_roll_command(player, 1)
+        assert result['jackpots'] == 0
+
     def test_theft_execution_cooldown(self):
         """Test theft execution during cooldown"""
         from services.game_service import GameService

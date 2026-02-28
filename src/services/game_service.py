@@ -206,8 +206,8 @@ class GameService:
             else:
                 player.pisunchik_size += GameConfig.DICE_SIZE_CHANGE
             
-            # Check for jackpot (1% chance)
-            if random.randint(1, 101) == 14:
+            # Check for jackpot (~1/300 chance)
+            if random.randint(1, 300) == 14:
                 jackpots += 1
                 player.add_coins(400)
         
