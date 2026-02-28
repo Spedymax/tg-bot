@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import httpx
+import google.generativeai as genai
 from datetime import datetime, timezone
 from config.settings import Settings
 
@@ -45,7 +46,9 @@ class MoltbotHandlers:
         self._bot_username = None  # lazily cached
         self._history_reset_time: dict[int, datetime] = {}  # chat_id → reset timestamp
         self._user_key_suffix: dict[int, str] = {}  # chat_id → suffix added after reset
+        self._gemini_model = None
         self._load_state()
+        self._init_gemini()
 
     # ── Persistence ──────────────────────────────────────────────────────────
 
@@ -125,6 +128,18 @@ class MoltbotHandlers:
                     return True
         return False
 
+    def _is_bot_mentioned_in_caption(self, message) -> bool:
+        """Return True if @botname appears in photo/video caption entities."""
+        if not message.caption_entities or not message.caption:
+            return False
+        bot_username = self._get_bot_username().lower()
+        for entity in message.caption_entities:
+            if entity.type == 'mention':
+                name = message.caption[entity.offset:entity.offset + entity.length].lstrip('@').lower()
+                if name == bot_username:
+                    return True
+        return False
+
     def _extract_user_text(self, message) -> str:
         """Strip @botname mention(s) from message text."""
         text = message.text or ""
@@ -139,6 +154,47 @@ class MoltbotHandlers:
                     last = entity.offset + entity.length
         parts.append(text[last:])
         return "".join(parts).strip()
+
+    def _extract_caption_text(self, message) -> str:
+        """Strip @botname mention(s) from photo caption."""
+        text = message.caption or ""
+        bot_username = self._get_bot_username().lower()
+        parts = []
+        last = 0
+        for entity in sorted(message.caption_entities or [], key=lambda e: e.offset):
+            if entity.type == 'mention':
+                name = text[entity.offset:entity.offset + entity.length].lstrip('@').lower()
+                if name == bot_username:
+                    parts.append(text[last:entity.offset])
+                    last = entity.offset + entity.length
+        parts.append(text[last:])
+        return "".join(parts).strip()
+
+    def _init_gemini(self):
+        """Initialize Gemini model for image analysis."""
+        try:
+            genai.configure(api_key=Settings.GEMINI_API_KEY)
+            self._gemini_model = genai.GenerativeModel('gemini-3-flash-preview')
+            logger.info("MoltBot: Gemini vision initialized (gemini-3-flash-preview)")
+        except Exception as e:
+            logger.warning(f"MoltBot: Gemini init failed: {e}")
+
+    def _analyze_image_with_gemini(self, image_bytes: bytes, user_question: str) -> str:
+        """Send image to Gemini and get a description / answer to the question."""
+        if not self._gemini_model:
+            return "[Анализ изображения недоступен — Gemini не настроен]"
+        try:
+            prompt = "Подробно опиши что изображено на картинке. Если есть текст — прочитай его дословно."
+            if user_question:
+                prompt += f" Также ответь на вопрос: {user_question}"
+            response = self._gemini_model.generate_content([
+                {"mime_type": "image/jpeg", "data": image_bytes},
+                prompt,
+            ])
+            return response.text
+        except Exception as e:
+            logger.error(f"MoltBot: Gemini image analysis failed: {e}")
+            return "[Не удалось проанализировать изображение]"
 
     def _get_recent_group_messages(self, limit: int = 50, chat_id: int | None = None) -> list[str]:
         """Fetch last `limit` messages from the group chat history in DB."""
@@ -225,6 +281,42 @@ class MoltbotHandlers:
                 self.bot.reply_to(message, reply)
             except Exception as e:
                 logger.error(f"MoltBot API error: {e}")
+                self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
+
+        @self.bot.message_handler(
+            content_types=['photo'],
+            func=lambda m: self._is_bot_mentioned_in_caption(m),
+        )
+        def handle_photo_mention(message):
+            sender_name = self._resolve_sender_name(message.from_user)
+            user_question = self._extract_caption_text(message)
+            chat_context = self._get_chat_context(message)
+            user_key = self._resolve_user_key(message)
+
+            history = None
+            if message.chat.type in ('group', 'supergroup'):
+                history = self._get_recent_group_messages(limit=50, chat_id=message.chat.id)
+
+            try:
+                file_info = self.bot.get_file(message.photo[-1].file_id)
+                image_bytes = self.bot.download_file(file_info.file_path)
+            except Exception as e:
+                logger.error(f"MoltBot: failed to download photo: {e}")
+                self.bot.reply_to(message, "Не могу загрузить картинку. Попробуй ещё раз.")
+                return
+
+            image_analysis = self._analyze_image_with_gemini(image_bytes, user_question)
+
+            if user_question:
+                combined_text = f"[Картинка: {image_analysis}]\n{user_question}"
+            else:
+                combined_text = f"[Картинка: {image_analysis}]"
+
+            try:
+                reply = self._ask_moltbot(sender_name, combined_text, chat_context, user_key, history)
+                self.bot.reply_to(message, reply)
+            except Exception as e:
+                logger.error(f"MoltBot API error (photo): {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
 
         @self.bot.message_handler(commands=['мут_сброс', 'mut_reset'])
