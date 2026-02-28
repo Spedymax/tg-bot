@@ -1,6 +1,9 @@
+import logging
 import random
 import time
 from telebot import types
+
+logger = logging.getLogger(__name__)
 from config.game_config import GameConfig
 from config.settings import Settings
 from utils.helpers import safe_split_callback, safe_int, escape_html, safe_username
@@ -117,8 +120,8 @@ class GameHandlers:
                 for msg_id in dice_msg_ids:
                     try:
                         self.bot.delete_message(message.chat.id, msg_id)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Casino: failed to delete dice msg {msg_id}: {e}")
 
                 # Pet activity tracking + death notice
                 import random as _rand
@@ -183,6 +186,11 @@ class GameHandlers:
                 pet_badge = _pet_svc.get_pet_badge(player)
             else:
                 pet_badge = ''
+
+            try:
+                self.bot.delete_message(call.message.chat.id, call.message.message_id)
+            except Exception as e:
+                logger.warning(f"Roll: failed to delete selection message: {e}")
 
             dice_str = ' '.join(map(str, result['results']))
             self.bot.send_message(
