@@ -110,8 +110,17 @@ class PetHandlers:
                     f"⚡ {ulta_name}", callback_data="pet_ulta"
                 ))
             else:
+                remaining = self.pet_service.get_ulta_cooldown_remaining(player)
+                if remaining is not None:
+                    total_min = int(remaining.total_seconds() // 60)
+                    if total_min >= 60:
+                        timer_str = f"через {total_min // 60}ч"
+                    else:
+                        timer_str = f"через {total_min}м"
+                else:
+                    timer_str = "не готова"
                 markup.add(types.InlineKeyboardButton(
-                    "⚡ Ульта (не готова)", callback_data="pet_ulta_info"
+                    f"⚡ Ульта ({timer_str})", callback_data="pet_ulta_info"
                 ))
             markup.add(types.InlineKeyboardButton("💀 Убить", callback_data="pet_kill_confirm"))
             markup.add(types.InlineKeyboardButton("🍖 Покормить", callback_data="pet_feed"))
