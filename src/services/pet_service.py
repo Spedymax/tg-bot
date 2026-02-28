@@ -297,6 +297,20 @@ class PetService:
         """Get display name for ulta at given stage."""
         return self.ULTA_NAMES.get(stage, '⚡ Ульта')
 
+    def get_ulta_cooldown_remaining(self, player) -> 'Optional[timedelta]':
+        """Return remaining ulta cooldown as timedelta, or None if ready/never used."""
+        from datetime import timedelta
+        used = getattr(player, 'pet_ulta_used_date', None)
+        if used is None:
+            return None
+        happiness = getattr(player, 'pet_happiness', 50)
+        cooldown_h = 48 if happiness < 20 else 24
+        elapsed = (datetime.now(timezone.utc) - used).total_seconds()
+        remaining_s = cooldown_h * 3600 - elapsed
+        if remaining_s <= 0:
+            return None
+        return timedelta(seconds=remaining_s)
+
     def get_pet_badge(self, player) -> str:
         """Return state-aware pet badge for appending to game result lines.
         Returns empty string if pet is absent, dead, or not yet confirmed.

@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
+from datetime import datetime, timezone, timedelta
 from services.pet_service import PetService
 
 @pytest.fixture
@@ -72,3 +73,34 @@ def test_badge_depressed_only_no_hunger(svc):
     badge = svc.get_pet_badge(p)
     assert '[Подавлен]' in badge
     assert '[Голоден' not in badge
+
+
+def test_cooldown_none_when_never_used(svc):
+    p = make_player()
+    p.pet_ulta_used_date = None
+    p.pet_happiness = 50
+    assert svc.get_ulta_cooldown_remaining(p) is None
+
+
+def test_cooldown_returns_timedelta_when_active(svc):
+    p = make_player()
+    p.pet_happiness = 50
+    p.pet_ulta_used_date = datetime.now(timezone.utc) - timedelta(hours=10)
+    remaining = svc.get_ulta_cooldown_remaining(p)
+    assert remaining is not None
+    assert 0 < remaining.total_seconds() < 14 * 3600
+
+
+def test_cooldown_none_when_expired(svc):
+    p = make_player()
+    p.pet_happiness = 50
+    p.pet_ulta_used_date = datetime.now(timezone.utc) - timedelta(hours=25)
+    assert svc.get_ulta_cooldown_remaining(p) is None
+
+
+def test_cooldown_48h_when_depressed(svc):
+    p = make_player(happiness=10)
+    p.pet_ulta_used_date = datetime.now(timezone.utc) - timedelta(hours=25)
+    remaining = svc.get_ulta_cooldown_remaining(p)
+    assert remaining is not None  # 48h cooldown, only 25h elapsed
+    assert remaining.total_seconds() > 0
