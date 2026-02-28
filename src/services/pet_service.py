@@ -245,6 +245,7 @@ class PetService:
         player.pet_hunger_last_decay = last + timedelta(hours=12 * ticks)
         if player.pet_hunger == 0:
             player.pet['is_alive'] = False
+            player.pet_death_pending_notify = True
             return True
         return False
 
