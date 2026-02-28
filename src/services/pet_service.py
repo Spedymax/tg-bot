@@ -186,7 +186,12 @@ class PetService:
 
         if not pet['is_alive']:
             remaining = self.max_revives - revives_used
-            text += f"Возрождений: {remaining}/{self.max_revives} осталось\n"
+            if remaining == 0:
+                text += f"💀 Возрождений больше нет в этом месяце\n"
+            elif remaining == 1:
+                text += f"⚠️ Последнее возрождение! (1/{self.max_revives})\n"
+            else:
+                text += f"Возрождений: {remaining}/{self.max_revives} осталось\n"
 
         if not pet.get('is_locked'):
             text += "\n⚙️ Статус: Настройка..."
