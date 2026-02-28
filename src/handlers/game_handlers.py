@@ -91,26 +91,33 @@ class GameHandlers:
                 return
             
             if result.get('send_dice'):
-                # Send 6 casino dice one by one
-                dice_results = []
+                dice_msg_ids = []
                 total_wins = 0
-                
-                for i in range(6):
-                    dice_msg = self.bot.send_dice(message.chat.id, emoji='🎰')
-                    dice_value = dice_msg.dice.value
-                    dice_results.append(dice_value)
 
-                    # Check if this dice is a winning value
+                for i in range(6):
+                    dice_msg = self.bot.send_dice(
+                        message.chat.id, emoji='🎰',
+                        disable_notification=True
+                    )
+                    dice_msg_ids.append(dice_msg.message_id)
+                    dice_value = dice_msg.dice.value
+
                     if dice_value in GameConfig.CASINO_JACKPOT_VALUES:
                         total_wins += 1
                         player.add_coins(GameConfig.CASINO_JACKPOT_REWARD)
-                        time.sleep(GameConfig.CASINO_JACKPOT_DELAY)
-                        self.bot.send_message(message.chat.id, f"🎰 ДЖЕКПОТ ЕБАТЬ! Вы получаете {GameConfig.CASINO_JACKPOT_REWARD} BTC!")
 
-                    if i < 5:  # Don't sleep after the last dice
+                    if i < 5:
                         time.sleep(GameConfig.CASINO_DICE_DELAY)
-                
-                # Save player with updated coins
+
+                # Wait for last animation to finish, then delete all dice
+                time.sleep(3)
+                for msg_id in dice_msg_ids:
+                    try:
+                        self.bot.delete_message(message.chat.id, msg_id)
+                    except Exception:
+                        pass
+
+                # Pet activity tracking + death notice
                 import random as _rand
                 from datetime import datetime, timezone
                 from services.pet_service import PetService as _PetSvc
@@ -121,7 +128,12 @@ class GameHandlers:
 
                 self._maybe_send_death_notice(message.chat.id, player)
                 self.player_service.save_player(player)
-                self.bot.send_message(message.chat.id, f"🎉 Всего выигрышей: {total_wins}! Общий выигрыш: {total_wins * GameConfig.CASINO_JACKPOT_REWARD} BTC!")
+
+                if total_wins > 0:
+                    summary = f"🎰 Казино: {total_wins}/6 побед! Выигрыш: {total_wins * GameConfig.CASINO_JACKPOT_REWARD} BTC 🎉"
+                else:
+                    summary = "🎰 Казино: 0/6. Ничего не выиграл."
+                self.bot.send_message(message.chat.id, summary, disable_notification=True)
 
         
         @self.bot.message_handler(commands=['roll'])
