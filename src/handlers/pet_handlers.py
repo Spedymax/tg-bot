@@ -110,18 +110,21 @@ class PetHandlers:
                     f"⚡ {ulta_name}", callback_data="pet_ulta"
                 ))
             else:
+                stage = player.pet.get('stage', 'egg')
+                ulta_name = self.pet_service.get_ulta_name(stage)
                 remaining = self.pet_service.get_ulta_cooldown_remaining(player)
                 if remaining is not None:
-                    total_min = int(remaining.total_seconds() // 60)
-                    if total_min >= 60:
-                        timer_str = f"через {total_min // 60}ч"
+                    total_minutes = int(remaining.total_seconds() // 60)
+                    if total_minutes >= 60:
+                        time_label = f"через {total_minutes // 60}ч"
                     else:
-                        timer_str = f"через {total_min}м"
+                        time_label = f"через {total_minutes}м"
+                    happiness = getattr(player, 'pet_happiness', 50)
+                    suffix = ' 😢' if happiness < 20 else ''
+                    label = f"⚡ {ulta_name} ({time_label}){suffix}"
                 else:
-                    timer_str = "не готова"
-                markup.add(types.InlineKeyboardButton(
-                    f"⚡ Ульта ({timer_str})", callback_data="pet_ulta_info"
-                ))
+                    label = f"⚡ {ulta_name} (не готова)"
+                markup.add(types.InlineKeyboardButton(label, callback_data="pet_ulta_info"))
             markup.add(types.InlineKeyboardButton("💀 Убить", callback_data="pet_kill_confirm"))
             markup.add(types.InlineKeyboardButton("🍖 Покормить", callback_data="pet_feed"))
 
