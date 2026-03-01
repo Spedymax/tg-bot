@@ -498,9 +498,18 @@ class MoltbotHandlers:
             if result not in self._REACTION_EMOJIS:
                 logger.info(f"MoltBot: no reaction (Qwen returned {repr(result)!r}) for msg {message.message_id}")
                 return
-            import telebot.types as tbtypes
-            reaction = tbtypes.ReactionTypeEmoji(result)
-            self.bot.set_message_reaction(chat_id, message.message_id, [reaction], is_big=False)
+            token = Settings.TELEGRAM_BOT_TOKEN
+            with httpx.Client() as client:
+                client.post(
+                    f"https://api.telegram.org/bot{token}/setMessageReaction",
+                    json={
+                        "chat_id": chat_id,
+                        "message_id": message.message_id,
+                        "reaction": [{"type": "emoji", "emoji": result}],
+                        "is_big": False,
+                    },
+                    timeout=10,
+                )
             logger.info(f"MoltBot: reacted {result} to msg {message.message_id} in {chat_id}")
         except Exception as e:
             logger.warning(f"MoltBot: reaction error: {e}")
