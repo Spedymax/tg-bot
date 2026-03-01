@@ -997,12 +997,24 @@ class MoltbotHandlers:
                 logger.error(f"MoltBot API error (reply): {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
 
+        def _has_other_mention(m) -> bool:
+            """True if message mentions any user that is NOT the bot."""
+            if not m.entities or not m.text:
+                return False
+            bot_username = self._get_bot_username().lower()
+            return any(
+                e.type == 'mention'
+                and m.text[e.offset:e.offset + e.length].lstrip('@').lower() != bot_username
+                for e in m.entities
+            )
+
         @self.bot.message_handler(func=lambda m: (
             m.chat.type in ('group', 'supergroup')
             and m.text
             and not m.text.startswith('/')
             and not m.from_user.is_bot
             and not self._is_bot_mentioned(m)
+            and not _has_other_mention(m)
             and not (m.reply_to_message and m.reply_to_message.from_user
                      and m.reply_to_message.from_user.id == self.bot.get_me().id)
         ))
