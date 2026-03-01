@@ -367,10 +367,32 @@ class MoltbotHandlers:
             logger.warning(f"MoltBot: classifier error, defaulting to complex: {e}")
             return "complex"
 
+    _DISSATISFIED_PATTERNS = [
+        "не понял", "непонял", "не понятно", "непонятно", "не понимаю",
+        "не то", "не так", "не правильно", "неправильно", "не верно", "неверно",
+        "объясни", "поясни", "расскажи подробнее", "подробнее", "поподробнее",
+        "ещё раз", "еще раз", "повтори",
+        "что ты имеешь", "что имеешь в виду", "ты о чём", "о чём ты",
+        "то есть", "т.е.", "иными словами",
+        "не помог", "не помогло", "не работает", "всё равно", "все равно",
+        "а что если", "а если", "но что если", "но если",
+        "почему именно", "зачем именно", "как именно",
+    ]
+
+    def _is_dissatisfied_or_followup(self, text: str) -> bool:
+        """Return True if message looks like dissatisfaction or a clarifying follow-up."""
+        lower = text.lower()
+        return any(p in lower for p in self._DISSATISFIED_PATTERNS)
+
     def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                             chat_context: str, user_key: str,
                             history: list[str] | None = None) -> str:
         """Classify complexity, then route to Qwen (simple) or Claude (complex)."""
+        # Fast pre-check: dissatisfaction / follow-up → always Claude
+        if self._is_dissatisfied_or_followup(user_text):
+            logger.info(f"MoltBot: dissatisfied/followup → claude for: {user_text[:60]}")
+            return self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
+
         complexity = self._classify_complexity(user_text, history)
         logger.info(f"MoltBot: complexity={complexity} for: {user_text[:60]}")
         if complexity == "simple":
