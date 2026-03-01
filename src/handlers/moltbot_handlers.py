@@ -256,7 +256,8 @@ class MoltbotHandlers:
 
     def _ask_moltbot(self, sender_name: str, user_text: str,
                      chat_context: str, user_key: str,
-                     history: list[str] | None = None) -> str:
+                     history: list[str] | None = None,
+                     model: str = "openclaw:main") -> str:
         """Call the local MoltBot/OpenClaw API synchronously."""
         context_prefix = f"[Сообщение отправлено из: {chat_context}]\n" if chat_context else ""
 
@@ -274,7 +275,7 @@ class MoltbotHandlers:
             f"{context_prefix}{sender_name}: Привет!"
         )
 
-        return self._call_openclaw(user_content, user_key)
+        return self._call_openclaw(user_content, user_key, model=model)
 
     def _count_recent_messages(self, minutes: int) -> int:
         """Count messages in DB written in the last `minutes` minutes."""
@@ -346,6 +347,35 @@ class MoltbotHandlers:
         """Called after spike delay — send proactive message and clear queue flag."""
         self._proactive_queued.discard(chat_id)
         self._send_proactive_message(chat_id)
+
+    def _classify_complexity(self, user_text: str, history: list[str] | None = None) -> str:
+        """Ask Qwen if the question is simple or complex. Returns 'simple' or 'complex'."""
+        history_block = "\n".join(history[-5:]) if history else ""
+        prompt = (
+            f"{('Контекст разговора:\n' + history_block + '\n\n') if history_block else ''}"
+            f"Вопрос или сообщение: {user_text}\n\n"
+            "Оцени сложность: требует ли это глубокого анализа, написания кода, длинного объяснения "
+            "или работы с большим объёмом информации?\n"
+            "Ответь одним словом: simple или complex"
+        )
+        try:
+            result = self._call_openclaw(prompt, "classifier", model="ollama/qwen2.5:14b")
+            result = result.strip().lower()
+            return "complex" if "complex" in result else "simple"
+        except Exception as e:
+            logger.warning(f"MoltBot: classifier error, defaulting to complex: {e}")
+            return "complex"
+
+    def _ask_moltbot_routed(self, sender_name: str, user_text: str,
+                            chat_context: str, user_key: str,
+                            history: list[str] | None = None) -> str:
+        """Classify complexity, then route to Qwen (simple) or Claude (complex)."""
+        complexity = self._classify_complexity(user_text, history)
+        logger.info(f"MoltBot: complexity={complexity} for: {user_text[:60]}")
+        if complexity == "simple":
+            return self._ask_moltbot(sender_name, user_text, chat_context,
+                                     user_key, history, model="ollama/qwen2.5:14b")
+        return self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
 
     def _maybe_reply_probabilistic(self, message) -> bool:
         """Ask local LLM if the bot should reply to this message. Returns True if replied."""
@@ -437,7 +467,7 @@ class MoltbotHandlers:
                 history = self._get_recent_group_messages(limit=50, chat_id=message.chat.id)
 
             try:
-                reply = self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
+                reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 self.bot.reply_to(message, reply)
             except Exception as e:
                 logger.error(f"MoltBot API error: {e}")
@@ -460,7 +490,7 @@ class MoltbotHandlers:
                 history = self._get_recent_group_messages(limit=50, chat_id=message.chat.id)
 
             try:
-                reply = self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
+                reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 self.bot.reply_to(message, reply)
             except Exception as e:
                 logger.error(f"MoltBot API error (reply): {e}")
