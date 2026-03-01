@@ -591,13 +591,24 @@ class MoltbotHandlers:
         if last and (datetime.now(timezone.utc) - last).total_seconds() < self._REACTION_COOLDOWN_SECS:
             return
 
+        # Random gate — only consider reacting ~45% of the time
+        if random.random() > self._REACTION_PROBABILITY:
+            return
+
         emoji_list = ' '.join(self._REACTION_EMOJIS)
+        if not hasattr(self, '_last_used_emoji'):
+            self._last_used_emoji: dict[int, str] = {}
+        last_emoji = self._last_used_emoji.get(chat_id, "")
+        avoid_hint = f"Не используй {last_emoji} — только что ставил.\n" if last_emoji else ""
+
         prompt = (
             f"Сообщение: {text}\n\n"
             f"Выбери одну emoji-реакцию из этого списка: {emoji_list}\n"
+            f"{avoid_hint}"
             "Реагируй только если сообщение реально вызывает эмоцию: смешно, эпично, грустно, "
             "удивительно, провокационно или вызывает сильный отклик.\n"
             "На обычный бытовой разговор, нейтральные фразы, простые вопросы — верни пустую строку.\n"
+            "🤔 — только для реально загадочных/неоднозначных сообщений, не как дефолт.\n"
             "Верни ТОЛЬКО один emoji из списка или пустую строку. Никакого текста."
         )
 
@@ -621,6 +632,7 @@ class MoltbotHandlers:
                     timeout=10,
                 )
             self._last_reaction_time[chat_id] = datetime.now(timezone.utc)
+            self._last_used_emoji[chat_id] = result
             logger.info(f"MoltBot: reacted {result} to msg {message.message_id} in {chat_id}")
         except Exception as e:
             logger.warning(f"MoltBot: reaction error: {e}")
@@ -919,16 +931,11 @@ class MoltbotHandlers:
         ))
         def handle_reply_to_bot(message):
             chat_id = message.chat.id
-            # Route to danetka if replying to an active danetka message
-            active = self._active_danetka.get(chat_id)
-            if active:
-                reply_mid = message.reply_to_message.message_id
-                danetka_mid = active.get('message_id')
-                logger.debug(f"MoltBot: danetka check reply_mid={reply_mid} danetka_mid={danetka_mid}")
-                if reply_mid == danetka_mid:
-                    threading.Thread(target=self._handle_danetka_reply, args=(message,),
-                                     daemon=True).start()
-                    return
+            # Route to danetka: any reply to bot while game is active
+            if chat_id in self._active_danetka:
+                threading.Thread(target=self._handle_danetka_reply, args=(message,),
+                                 daemon=True).start()
+                return
 
             sender_name = self._resolve_sender_name(message.from_user)
             user_text = message.text or ""
