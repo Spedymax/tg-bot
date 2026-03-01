@@ -351,8 +351,9 @@ class MoltbotHandlers:
     def _classify_complexity(self, user_text: str, history: list[str] | None = None) -> str:
         """Ask Qwen if the question is simple or complex. Returns 'simple' or 'complex'."""
         history_block = "\n".join(history[-5:]) if history else ""
+        context_part = f"Контекст разговора:\n{history_block}\n\n" if history_block else ""
         prompt = (
-            f"{('Контекст разговора:\n' + history_block + '\n\n') if history_block else ''}"
+            f"{context_part}"
             f"Вопрос или сообщение: {user_text}\n\n"
             "Оцени сложность: требует ли это глубокого анализа, написания кода, длинного объяснения "
             "или работы с большим объёмом информации?\n"
