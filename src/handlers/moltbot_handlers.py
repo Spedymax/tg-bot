@@ -309,7 +309,19 @@ class MoltbotHandlers:
 
             user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
             reply = self._call_openclaw(user_content, user_key)
-            self.bot.send_message(chat_id, reply)
+
+            # Reply to the most recent stored message if we have its Telegram message_id
+            reply_to = None
+            try:
+                rows = self.db.execute_query(
+                    "SELECT message_id FROM messages WHERE message_id IS NOT NULL ORDER BY timestamp DESC LIMIT 1"
+                )
+                if rows and rows[0][0]:
+                    reply_to = rows[0][0]
+            except Exception:
+                pass
+
+            self.bot.send_message(chat_id, reply, reply_to_message_id=reply_to)
             self._last_proactive_sent[chat_id] = datetime.now(timezone.utc)
             logger.info(f"MoltBot: proactive message sent to chat {chat_id}")
         except Exception as e:
