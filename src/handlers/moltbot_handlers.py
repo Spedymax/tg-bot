@@ -254,9 +254,15 @@ class MoltbotHandlers:
             )
             r.raise_for_status()
             content = r.json()["choices"][0]["message"]["content"]
-            # Filter out OpenClaw error strings that shouldn't be sent to users
-            if content and "no response" in content.lower() and "openclaw" in content.lower():
-                logger.warning(f"MoltBot: OpenClaw returned error string, treating as empty")
+            if not content:
+                return ""
+            # Strip action error lines injected by OpenClaw (e.g. "⚠️ ✉️ Message failed: ...")
+            lines = content.split('\n')
+            lines = [l for l in lines if not ('⚠' in l and ('failed' in l.lower() or 'action' in l.lower() or 'target' in l.lower()))]
+            content = '\n'.join(lines).strip()
+            # Filter full "No response from OpenClaw" fallback
+            if "no response" in content.lower() and "openclaw" in content.lower():
+                logger.warning("MoltBot: OpenClaw returned no-response string, treating as empty")
                 return ""
             return content
 
@@ -296,8 +302,6 @@ class MoltbotHandlers:
             f"{context_prefix}{sender_name}: Привет!"
         )
 
-        if model.startswith("ollama/"):
-            return self._call_ollama_direct(user_content)
         return self._call_openclaw(user_content, user_key, model=model)
 
     def _count_recent_messages(self, minutes: int) -> int:
@@ -451,8 +455,9 @@ class MoltbotHandlers:
             "Ответ (только текст сообщения или пустая строка):]"
         )
 
+        user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
         try:
-            reply = self._call_ollama_direct(prompt)
+            reply = self._call_openclaw(prompt, user_key, model="ollama/qwen2.5:14b")
             reply = reply.strip()
             if not reply:
                 return False
