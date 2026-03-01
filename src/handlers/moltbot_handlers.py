@@ -529,11 +529,14 @@ class MoltbotHandlers:
         sender_name = self._resolve_sender_name(message.from_user)
         user_text = message.text or ""
 
-        history = self._get_recent_group_messages(limit=10, chat_id=chat_id)
+        history = self._get_recent_group_messages(limit=30, chat_id=chat_id)
         history_block = "\n".join(history) if history else "(нет истории)"
+        summary = _load_chat_summary()
+        summary_block = f"[Долгосрочная память о чате:\n{summary}\n]\n" if summary else ""
 
         prompt = (
-            f"[История чата (последние 10 сообщений):\n{history_block}\n]\n\n"
+            f"{summary_block}"
+            f"[История чата (последние {len(history)} сообщений):\n{history_block}\n]\n\n"
             f"Новое сообщение от {sender_name}: {user_text}\n\n"
             "[Ты участник этого группового чата. Реши: стоит ли тебе вмешаться в разговор?\n"
             "- Если вопрос явно адресован другому конкретному участнику — НЕ отвечай\n"
