@@ -595,11 +595,15 @@ class MoltbotHandlers:
         if random.random() > self._REACTION_PROBABILITY:
             return
 
-        emoji_list = ' '.join(self._REACTION_EMOJIS)
         if not hasattr(self, '_last_used_emoji'):
-            self._last_used_emoji: dict[int, str] = {}
-        last_emoji = self._last_used_emoji.get(chat_id, "")
-        avoid_hint = f"Не используй {last_emoji} — только что ставил.\n" if last_emoji else ""
+            self._last_used_emoji: dict[int, list[str]] = {}
+        recent = self._last_used_emoji.get(chat_id, [])
+        avoid_hint = f"Не используй эти (недавно ставил): {' '.join(recent)}\n" if recent else ""
+
+        # Shuffle so Qwen doesn't always pick from the same start of list
+        shuffled = self._REACTION_EMOJIS.copy()
+        random.shuffle(shuffled)
+        emoji_list = ' '.join(shuffled)
 
         prompt = (
             f"Сообщение: {text}\n\n"
@@ -608,7 +612,8 @@ class MoltbotHandlers:
             "Реагируй только если сообщение реально вызывает эмоцию: смешно, эпично, грустно, "
             "удивительно, провокационно или вызывает сильный отклик.\n"
             "На обычный бытовой разговор, нейтральные фразы, простые вопросы — верни пустую строку.\n"
-            "🤔 — только для реально загадочных/неоднозначных сообщений, не как дефолт.\n"
+            "Выбирай разнообразно — иногда редкие и неожиданные эмодзи лучше передают эмоцию.\n"
+            "🤔 👍 ❤ — только если реально подходят, не как дефолт.\n"
             "Верни ТОЛЬКО один emoji из списка или пустую строку. Никакого текста."
         )
 
@@ -632,7 +637,9 @@ class MoltbotHandlers:
                     timeout=10,
                 )
             self._last_reaction_time[chat_id] = datetime.now(timezone.utc)
-            self._last_used_emoji[chat_id] = result
+            recent_list = self._last_used_emoji.get(chat_id, [])
+            recent_list.append(result)
+            self._last_used_emoji[chat_id] = recent_list[-3:]
             logger.info(f"MoltBot: reacted {result} to msg {message.message_id} in {chat_id}")
         except Exception as e:
             logger.warning(f"MoltBot: reaction error: {e}")
