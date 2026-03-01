@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import random
+import re
 import threading
 import time
 import httpx
@@ -48,6 +49,10 @@ SPIKE_THRESHOLD = 15       # messages in 30 min
 SPIKE_COOLDOWN_HOURS = 2
 SPIKE_DELAY_MIN, SPIKE_DELAY_MAX = 5 * 60, 20 * 60  # seconds
 
+# Smart summary config
+SUMMARY_UPDATE_INTERVAL = 40  # update chat-summary.md every N group messages
+SUMMARY_FETCH_LIMIT = 300     # messages to analyze when updating
+
 
 class MoltbotHandlers:
     def __init__(self, bot, db_manager):
@@ -61,8 +66,11 @@ class MoltbotHandlers:
         self._proactive_queued: set[int] = set()
         self._last_probabilistic_sent: dict[int, datetime] = {}
         self._last_reaction_time: dict[int, datetime] = {}
+        self._messages_since_summary: int = 0
+        self._active_danetka: dict[int, dict] = {}
         self._load_state()
         self._init_gemini()
+        self._ensure_danetki_table()
 
     # ── Persistence ──────────────────────────────────────────────────────────
 
@@ -329,8 +337,11 @@ class MoltbotHandlers:
                 history_block = "\n".join(history)
                 context_prefix += f"[История чата (последние {len(history)} сообщений):\n{history_block}\n]\n"
 
+            topic = self._get_current_topic(history) if history else ""
+            topic_hint = f"[Текущая тема разговора: {topic}]\n" if topic else ""
+
             user_content = (
-                f"{context_prefix}"
+                f"{context_prefix}{topic_hint}"
                 "[Ты сам захотел что-то написать в чат — не в ответ на обращение, "
                 "а потому что тебе пришла мысль или хочется поучаствовать. "
                 "Напиши одно короткое сообщение как участник разговора.]"
@@ -374,6 +385,83 @@ class MoltbotHandlers:
         """Called after spike delay — send proactive message and clear queue flag."""
         self._proactive_queued.discard(chat_id)
         self._send_proactive_message(chat_id)
+
+    # ── Smart summary ─────────────────────────────────────────────────────────
+
+    def _update_summary_via_qwen(self):
+        """Fetch recent messages and ask Qwen to rewrite chat-summary.md."""
+        try:
+            rows = self.db.execute_query(
+                "SELECT name, message_text FROM messages ORDER BY timestamp DESC LIMIT %s",
+                (SUMMARY_FETCH_LIMIT,),
+            )
+            if not rows:
+                return
+            messages = [f"{r[0] or 'Аноним'}: {r[1]}" for r in reversed(rows)]
+            history_text = "\n".join(messages)
+
+            current_summary = _load_chat_summary()
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+            prompt = f"""[СЛУЖЕБНЫЙ ЗАПРОС — обновление долгосрочной памяти чата]
+
+Ты Джарвис. Тебя попросили обновить файл chat-summary.md на основе последних сообщений группового чата.
+
+== ТЕКУЩИЙ SUMMARY ==
+{current_summary or '(пусто)'}
+
+== ПОСЛЕДНИЕ {len(messages)} СООБЩЕНИЙ ==
+{history_text}
+
+== ИНСТРУКЦИЯ ==
+Обнови summary. Правила:
+- Сохрани всё важное из текущего summary: персонажи, правила, мемы, внутренние шутки, проекты, незакрытые темы
+- Добавь новое что появилось в последних сообщениях: шутки, события, пари, внутренние мемы, новые темы
+- Убери то, что явно устарело и больше не актуально
+- Держи размер ~4000 слов — сохраняй все детали, выкидывай только совсем устаревшее и неактуальное
+- Обнови поле "Последнее обновление" на {now}
+- Верни ТОЛЬКО текст нового summary в формате markdown, без пояснений, без обёртки в ```"""
+
+            new_summary = self._call_ollama_direct(prompt)
+            if not new_summary or len(new_summary) < 100:
+                logger.warning("MoltBot: Qwen returned suspiciously short summary, skipping save")
+                return
+
+            os.makedirs(os.path.dirname(CHAT_SUMMARY_PATH), exist_ok=True)
+            with open(CHAT_SUMMARY_PATH, "w", encoding="utf-8") as f:
+                f.write(new_summary)
+            logger.info(f"MoltBot: chat-summary.md updated via Qwen ({len(new_summary)} chars)")
+        except Exception as e:
+            logger.error(f"MoltBot: summary update failed: {e}")
+
+    def _maybe_update_summary(self):
+        """Increment message counter and trigger summary update every N messages."""
+        self._messages_since_summary += 1
+        if self._messages_since_summary >= SUMMARY_UPDATE_INTERVAL:
+            self._messages_since_summary = 0
+            threading.Thread(target=self._update_summary_via_qwen, daemon=True,
+                             name="moltbot-summary").start()
+            logger.info("MoltBot: triggered background summary update")
+
+    # ── Topic detection ───────────────────────────────────────────────────────
+
+    def _get_current_topic(self, history: list[str]) -> str:
+        """Ask Qwen to summarise the current chat topic in a few words."""
+        if not history:
+            return ""
+        snippet = "\n".join(history[-15:])
+        prompt = (
+            f"Вот последние сообщения из группового чата:\n{snippet}\n\n"
+            "Определи текущую тему разговора в 3-6 словах. "
+            "Если тем несколько — выбери самую последнюю/активную. "
+            "Верни ТОЛЬКО краткое описание темы, без лишних слов."
+        )
+        try:
+            result = self._call_ollama_direct(prompt)
+            return result.strip()
+        except Exception as e:
+            logger.warning(f"MoltBot: topic detection error: {e}")
+            return ""
 
     def _classify_complexity(self, user_text: str, history: list[str] | None = None) -> str:
         """Ask Qwen if the question is simple or complex. Returns 'simple' or 'complex'."""
@@ -469,34 +557,53 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: probabilistic reply error: {e}")
             return False
 
-    # Valid Telegram emoji reactions (subset that works well)
+    # Valid Telegram emoji reactions
     _REACTION_EMOJIS = [
         '👍', '👎', '❤', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱',
         '😢', '🎉', '🤩', '💩', '🙏', '👌', '🤡', '🥱', '😍', '💯',
         '🤣', '⚡', '🏆', '💔', '😴', '🤓', '👻', '👀', '😇', '🤗',
-        '🤪', '🗿', '🆒', '😘', '😎', '🫡', '🤝',
+        '🤪', '🗿', '🆒', '😘', '😎', '🫡', '🤝', '🫶', '💅', '🥶',
+        '🤨', '😏', '🥲', '😤', '🤬', '😈', '☠', '🤮', '🫠', '🤌',
+        '💀', '🙈', '🙉', '🙊', '🐳', '🦄', '🍾', '🎸', '🎯', '🎲',
+        '🚀', '🛸', '🌚', '🌝', '🌞', '🍕', '🤑', '💸', '🎃', '👾',
+        '🧠', '💪', '🦾', '🦿', '🎭', '🎪', '🫣', '🤫', '🤭', '🫀',
     ]
 
+    # Probability of asking Qwen at all (saves calls on boring messages)
+    _REACTION_PROBABILITY = 0.45
+    # Minimum seconds between reactions in the same chat
+    _REACTION_COOLDOWN_SECS = 90
+
     def _maybe_react(self, message) -> None:
-        """Ask Qwen to pick an emoji reaction for every message (Qwen decides whether to react)."""
+        """Probabilistically ask Qwen to pick a reaction; enforces per-chat cooldown."""
         chat_id = message.chat.id
         text = message.text or ""
+
+        # Skip short/trivial messages early
+        if len(text) < 3:
+            return
+
+        # Cooldown: don't spam reactions in the same chat
+        last = self._last_reaction_time.get(chat_id)
+        if last and (datetime.now(timezone.utc) - last).total_seconds() < self._REACTION_COOLDOWN_SECS:
+            return
+
         emoji_list = ' '.join(self._REACTION_EMOJIS)
         prompt = (
             f"Сообщение: {text}\n\n"
             f"Выбери одну emoji-реакцию из этого списка: {emoji_list}\n"
-            "Реагируй только если сообщение вызывает чёткую эмоцию (смешно, круто, грустно, wow и т.д.).\n"
-            "На скучные, нейтральные или короткие приветствия — верни пустую строку.\n"
-            "Верни ТОЛЬКО emoji (один символ) или пустую строку. Никакого текста."
+            "Реагируй только если сообщение реально вызывает эмоцию: смешно, эпично, грустно, "
+            "удивительно, провокационно или вызывает сильный отклик.\n"
+            "На обычный бытовой разговор, нейтральные фразы, простые вопросы — верни пустую строку.\n"
+            "Верни ТОЛЬКО один emoji из списка или пустую строку. Никакого текста."
         )
 
         try:
             result = self._call_ollama_direct(prompt)
             result = result.strip()
-            # Keep only first "word" in case model returns extra text
             result = result.split()[0] if result else ""
             if result not in self._REACTION_EMOJIS:
-                logger.info(f"MoltBot: no reaction (Qwen returned {repr(result)!r}) for msg {message.message_id}")
+                logger.debug(f"MoltBot: no reaction (got {repr(result)}) for msg {message.message_id}")
                 return
             token = Settings.TELEGRAM_BOT_TOKEN
             with httpx.Client() as client:
@@ -510,9 +617,178 @@ class MoltbotHandlers:
                     },
                     timeout=10,
                 )
+            self._last_reaction_time[chat_id] = datetime.now(timezone.utc)
             logger.info(f"MoltBot: reacted {result} to msg {message.message_id} in {chat_id}")
         except Exception as e:
             logger.warning(f"MoltBot: reaction error: {e}")
+
+    # ── Данетка ───────────────────────────────────────────────────────────────
+
+    def _ensure_danetki_table(self):
+        try:
+            self.db.execute_query(
+                "CREATE TABLE IF NOT EXISTS danetki ("
+                "id SERIAL PRIMARY KEY, "
+                "situation TEXT NOT NULL, "
+                "answer TEXT NOT NULL, "
+                "used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+                ()
+            )
+        except Exception as e:
+            logger.error(f"MoltBot: failed to create danetki table: {e}")
+
+    def _get_used_situations(self, limit: int = 25) -> list[str]:
+        try:
+            rows = self.db.execute_query(
+                "SELECT situation FROM danetki ORDER BY used_at DESC LIMIT %s",
+                (limit,)
+            )
+            return [r[0] for r in rows] if rows else []
+        except Exception:
+            return []
+
+    def _generate_danetka(self) -> dict | None:
+        used = self._get_used_situations()
+        used_text = "\n".join(f"- {s[:80]}" for s in used) if used else "(нет)"
+        prompt = (
+            "Придумай данетку (логическую загадку) для игры в групповом чате.\n\n"
+            "Верни ТОЛЬКО JSON без лишнего текста:\n"
+            '{"situation": "загадочная ситуация в 1-3 предложениях", '
+            '"answer": "полное объяснение что произошло на самом деле"}\n\n'
+            "Требования:\n"
+            "- Ситуация должна быть загадочной и неочевидной\n"
+            "- Хорошие темы: бытовые парадоксы, природные явления, исторические казусы, "
+            "психологические ситуации, криминальные загадки\n"
+            "- Пиши на русском языке\n"
+            f"- Не повторяй эти уже использованные ситуации:\n{used_text}"
+        )
+        try:
+            raw = self._call_ollama_direct(prompt)
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if not match:
+                return None
+            data = json.loads(match.group())
+            if 'situation' in data and 'answer' in data:
+                return data
+        except Exception as e:
+            logger.error(f"MoltBot: danetka generation error: {e}")
+        return None
+
+    def _save_danetka(self, situation: str, answer: str):
+        try:
+            self.db.execute_query(
+                "INSERT INTO danetki (situation, answer) VALUES (%s, %s)",
+                (situation, answer)
+            )
+        except Exception as e:
+            logger.error(f"MoltBot: failed to save danetka: {e}")
+
+    def _judge_danetka(self, question: str, answer: str) -> str:
+        prompt = (
+            f"Ты ведущий игры «данетка».\n"
+            f"Правильный ответ (только ты знаешь): {answer}\n\n"
+            f"Игрок написал: {question}\n\n"
+            "Выбери ОДИН вариант:\n"
+            "- «Да» — если утверждение верное\n"
+            "- «Нет» — если неверное\n"
+            "- «Не важно» — если не относится к ситуации\n"
+            "- «Близко! 🔥» — если очень близко к разгадке\n"
+            "- «УГАДАЛ! 🎉» — ТОЛЬКО если игрок полностью раскрыл суть\n\n"
+            "Верни только один из этих вариантов, ничего больше."
+        )
+        try:
+            result = self._call_ollama_direct(prompt).strip()
+            for v in ["УГАДАЛ! 🎉", "Близко! 🔥", "Да", "Нет", "Не важно"]:
+                if v.lower() in result.lower():
+                    return v
+            return "Не важно"
+        except Exception as e:
+            logger.error(f"MoltBot: danetka judge error: {e}")
+            return "Не важно"
+
+    def _handle_danetka_reply(self, message):
+        chat_id = message.chat.id
+        active = self._active_danetka.get(chat_id)
+        if not active:
+            return
+        question = (message.text or "").strip()
+        if not question:
+            return
+        active['questions_count'] = active.get('questions_count', 0) + 1
+        judgment = self._judge_danetka(question, active['answer'])
+        self.bot.reply_to(message, judgment)
+        if "УГАДАЛ" in judgment:
+            del self._active_danetka[chat_id]
+            self.bot.send_message(
+                chat_id,
+                f"🎉 Правильно! Вот полный ответ:\n\n{active['answer']}\n\n"
+                f"Вопросов задано: {active['questions_count']}"
+            )
+
+    # ── Недельная аналитика ───────────────────────────────────────────────────
+
+    def _send_weekly_analytics(self, chat_id: int):
+        try:
+            total_rows = self.db.execute_query(
+                "SELECT COUNT(*) FROM messages WHERE timestamp > NOW() - INTERVAL '7 days'",
+                ()
+            )
+            total = total_rows[0][0] if total_rows else 0
+            if total == 0:
+                self.bot.send_message(chat_id, "📊 За эту неделю сообщений не было.")
+                return
+
+            per_person = self.db.execute_query(
+                "SELECT name, COUNT(*) FROM messages "
+                "WHERE timestamp > NOW() - INTERVAL '7 days' "
+                "GROUP BY name ORDER BY COUNT(*) DESC LIMIT 10",
+                ()
+            )
+            top_hours = self.db.execute_query(
+                "SELECT EXTRACT(HOUR FROM timestamp)::int, COUNT(*) FROM messages "
+                "WHERE timestamp > NOW() - INTERVAL '7 days' "
+                "GROUP BY 1 ORDER BY 2 DESC LIMIT 3",
+                ()
+            )
+
+            # Qwen topic summary
+            recent = self._get_recent_group_messages(limit=150, chat_id=chat_id)
+            topics = ""
+            if recent:
+                snippet = "\n".join(recent[-100:])
+                try:
+                    topics = self._call_ollama_direct(
+                        f"Вот сообщения из чата за неделю:\n{snippet}\n\n"
+                        "Выдели 3-5 главных тем этой недели. "
+                        "Каждую тему — одной строкой с подходящим emoji. "
+                        "Только список, без вступлений и пояснений."
+                    )
+                except Exception:
+                    pass
+
+            lines = ["📊 *Аналитика чата за неделю*", f"Всего сообщений: *{total}*", ""]
+
+            if per_person:
+                lines.append("👥 *Кто писал:*")
+                medals = ["🥇", "🥈", "🥉"]
+                for i, row in enumerate(per_person):
+                    medal = medals[i] if i < 3 else "▫️"
+                    lines.append(f"{medal} {row[0]}: {row[1]} сообщ.")
+                lines.append("")
+
+            if top_hours:
+                hours_str = ", ".join(f"{r[0]}:00" for r in top_hours)
+                lines.append(f"🕐 *Самые активные часы:* {hours_str}")
+                lines.append("")
+
+            if topics:
+                lines.append("💬 *Темы недели:*")
+                lines.append(topics)
+
+            self.bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+            logger.info(f"MoltBot: weekly analytics sent to {chat_id}")
+        except Exception as e:
+            logger.error(f"MoltBot: weekly analytics error: {e}")
 
     def start_proactive_scheduler(self, chat_id: int):
         """Start scheduled (2x/day) and activity-spike proactive messaging."""
@@ -532,6 +808,12 @@ class MoltbotHandlers:
                             self._send_proactive_message(chat_id)
                         else:
                             logger.info(f"MoltBot: skipping {t} proactive — chat inactive")
+                # Weekly analytics: Sunday 21:00
+                weekly_key = f"{day_key}-weekly"
+                if now.weekday() == 6 and hhmm == "21:00" and weekly_key not in sent_today:
+                    sent_today.add(weekly_key)
+                    threading.Thread(target=self._send_weekly_analytics, args=(chat_id,),
+                                     daemon=True, name="moltbot-analytics").start()
                 # Purge old day keys to avoid unbounded growth
                 if len(sent_today) > 20:
                     sent_today = {k for k in sent_today if k.startswith(day_key)}
@@ -572,6 +854,59 @@ class MoltbotHandlers:
                 logger.error(f"MoltBot API error: {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
 
+        @self.bot.message_handler(commands=['данетка', 'danetka'])
+        def handle_danetka_start(message):
+            chat_id = message.chat.id
+            if chat_id in self._active_danetka:
+                self.bot.reply_to(message, "⚠️ Игра уже идёт! Используй /сдаюсь чтобы сдаться.")
+                return
+            waiting = self.bot.reply_to(message, "🎲 Придумываю данетку...")
+
+            def generate_and_post():
+                danetka = self._generate_danetka()
+                if not danetka:
+                    self.bot.edit_message_text("❌ Не смог придумать, попробуй ещё раз.",
+                                               chat_id, waiting.message_id)
+                    return
+                self._save_danetka(danetka['situation'], danetka['answer'])
+                edited = self.bot.edit_message_text(
+                    f"🎲 *Данетка!*\n\n{danetka['situation']}\n\n"
+                    "_Задавайте вопросы — отвечаю только Да / Нет / Не важно_\n"
+                    "Используй /сдаюсь чтобы узнать ответ",
+                    chat_id, waiting.message_id, parse_mode="Markdown"
+                )
+                self._active_danetka[chat_id] = {
+                    'situation': danetka['situation'],
+                    'answer': danetka['answer'],
+                    'message_id': edited.message_id,
+                    'started_at': datetime.now(timezone.utc),
+                    'questions_count': 0,
+                }
+
+            threading.Thread(target=generate_and_post, daemon=True).start()
+
+        @self.bot.message_handler(commands=['сдаюсь', 'sdayus'])
+        def handle_danetka_surrender(message):
+            chat_id = message.chat.id
+            active = self._active_danetka.pop(chat_id, None)
+            if not active:
+                self.bot.reply_to(message, "Нет активной игры.")
+                return
+            self.bot.reply_to(
+                message,
+                f"🏳️ Сдаётесь! Вот ответ:\n\n{active['answer']}\n\n"
+                f"Вопросов было задано: {active.get('questions_count', 0)}"
+            )
+
+        @self.bot.message_handler(commands=['аналитика', 'analitika'])
+        def handle_analytics_command(message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                self.bot.reply_to(message, "У вас нет доступа.")
+                return
+            self.bot.reply_to(message, "📊 Собираю статистику...")
+            threading.Thread(target=self._send_weekly_analytics, args=(message.chat.id,),
+                             daemon=True).start()
+
         @self.bot.message_handler(func=lambda m: (
             m.reply_to_message is not None
             and m.reply_to_message.from_user is not None
@@ -579,6 +914,14 @@ class MoltbotHandlers:
             and not self._is_bot_mentioned(m)
         ))
         def handle_reply_to_bot(message):
+            chat_id = message.chat.id
+            # Route to danetka if replying to an active danetka message
+            active = self._active_danetka.get(chat_id)
+            if active and message.reply_to_message.message_id == active.get('message_id'):
+                threading.Thread(target=self._handle_danetka_reply, args=(message,),
+                                 daemon=True).start()
+                return
+
             sender_name = self._resolve_sender_name(message.from_user)
             user_text = message.text or ""
             chat_context = self._get_chat_context(message)
@@ -606,6 +949,7 @@ class MoltbotHandlers:
                      and m.reply_to_message.from_user.id == self.bot.get_me().id)
         ))
         def handle_probabilistic(message):
+            self._maybe_update_summary()
             threading.Thread(
                 target=self._maybe_reply_probabilistic,
                 args=(message,),

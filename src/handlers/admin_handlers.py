@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import socket
 from struct import pack
 import google.generativeai as genai
+import httpx
 import logging
 
 logger = logging.getLogger(__name__)
@@ -114,7 +115,6 @@ class AdminHandlers:
             return "📭 За последние 12 часов не было сообщений для анализа."
 
         try:
-            # Prepare the prompt
             messages_text = "\n".join(messages)
             prompt = f"""Ты бот-анализатор чата. Тебе дан список сообщений от пользователей за последние 12 часов.
 
@@ -131,13 +131,50 @@ class AdminHandlers:
 Сообщения:
 {messages_text}
 """
-
-            # Generate response
             response = self.gemini_model.generate_content(prompt)
             return response.text
 
         except Exception as e:
             logger.error(f"Error analyzing messages with Gemini: {e}")
+            return f"❌ Ошибка при анализе сообщений: {str(e)}"
+
+    def _analyze_messages_with_qwen(self, messages):
+        """Analyze messages using Qwen via OpenClaw."""
+        if not messages:
+            return "📭 За последние 12 часов не было сообщений для анализа."
+
+        messages_text = "\n".join(messages)
+        prompt = f"""Ты бот-анализатор чата. Тебе дан список сообщений от пользователей за последние 12 часов.
+
+Твоя задача: сделать краткую сводку того, о чём была речь в этих сообщениях.
+
+Требования:
+1. Начни сообщение с: "За последние 12 часов речь шла о том что:"
+2. Раздели темы на отдельные абзацы
+3. Используй эмодзи для наглядности
+4. Будь кратким и информативным
+5. Если были какие-то забавные моменты — упомяни их
+6. Пиши на русском языке
+
+Сообщения:
+{messages_text}
+"""
+        try:
+            with httpx.Client() as client:
+                r = client.post(
+                    Settings.JARVIS_URL,
+                    headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
+                    json={
+                        "model": "ollama/qwen2.5:14b",
+                        "user": "sho-tam-novogo",
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                    timeout=90,
+                )
+                r.raise_for_status()
+                return r.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            logger.error(f"Error analyzing messages with Qwen: {e}")
             return f"❌ Ошибка при анализе сообщений: {str(e)}"
         
     def wake_on_lan(self, mac_address, broadcast_ip='255.255.255.255'):
@@ -545,8 +582,8 @@ class AdminHandlers:
                     # Get recent messages
                     messages = self._get_recent_messages(hours=12, limit=100)
 
-                    # Analyze with Gemini
-                    analysis = self._analyze_messages_with_gemini(messages)
+                    # Analyze with Qwen via OpenClaw
+                    analysis = self._analyze_messages_with_qwen(messages)
 
                     # Send analysis result
                     self.bot.edit_message_text(
