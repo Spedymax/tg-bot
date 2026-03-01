@@ -42,7 +42,7 @@ CHAT_KEYS = {
 }
 
 # Proactive messaging config
-PROACTIVE_CHAT_ID = 741542965  # тест; поменять на -1001294162183 для прода
+PROACTIVE_CHAT_ID = -1001294162183  # tg-group-main
 PROACTIVE_SCHEDULE_TIMES = ["13:00", "21:00"]
 SPIKE_THRESHOLD = 15       # messages in 30 min
 SPIKE_COOLDOWN_HOURS = 2
