@@ -496,6 +496,7 @@ class MoltbotHandlers:
             # Keep only first "word" in case model returns extra text
             result = result.split()[0] if result else ""
             if result not in self._REACTION_EMOJIS:
+                logger.info(f"MoltBot: no reaction (Qwen returned {repr(result)!r}) for msg {message.message_id}")
                 return
             import telebot.types as tbtypes
             reaction = tbtypes.ReactionTypeEmoji(result)
