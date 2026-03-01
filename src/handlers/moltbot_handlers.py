@@ -502,7 +502,7 @@ class MoltbotHandlers:
             self.bot.set_message_reaction(chat_id, message.message_id, [reaction], is_big=False)
             logger.info(f"MoltBot: reacted {result} to msg {message.message_id} in {chat_id}")
         except Exception as e:
-            logger.debug(f"MoltBot: reaction error: {e}")
+            logger.warning(f"MoltBot: reaction error: {e}")
 
     def start_proactive_scheduler(self, chat_id: int):
         """Start scheduled (2x/day) and activity-spike proactive messaging."""
