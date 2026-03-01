@@ -59,6 +59,7 @@ class MoltbotHandlers:
         self._gemini_model = None
         self._last_proactive_sent: dict[int, datetime] = {}
         self._proactive_queued: set[int] = set()
+        self._last_probabilistic_sent: dict[int, datetime] = {}
         self._load_state()
         self._init_gemini()
 
@@ -237,14 +238,14 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: error fetching chat history: {e}")
             return []
 
-    def _call_openclaw(self, content: str, user_key: str) -> str:
+    def _call_openclaw(self, content: str, user_key: str, model: str = "openclaw:main") -> str:
         """Raw API call to OpenClaw. Returns response text or empty string on error."""
         with httpx.Client() as client:
             r = client.post(
                 Settings.JARVIS_URL,
                 headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
                 json={
-                    "model": "openclaw:main",
+                    "model": model,
                     "user": user_key,
                     "messages": [{"role": "user", "content": content}],
                 },
@@ -346,6 +347,45 @@ class MoltbotHandlers:
         self._proactive_queued.discard(chat_id)
         self._send_proactive_message(chat_id)
 
+    def _maybe_reply_probabilistic(self, message) -> bool:
+        """Ask local LLM if the bot should reply to this message. Returns True if replied."""
+        # Cooldown: max once per 15 minutes per chat
+        chat_id = message.chat.id
+        last = self._last_probabilistic_sent.get(chat_id)
+        if last and (datetime.now(timezone.utc) - last) < timedelta(minutes=15):
+            return False
+
+        sender_name = self._resolve_sender_name(message.from_user)
+        user_text = message.text or ""
+
+        history = self._get_recent_group_messages(limit=10, chat_id=chat_id)
+        history_block = "\n".join(history) if history else "(нет истории)"
+
+        prompt = (
+            f"[История чата (последние 10 сообщений):\n{history_block}\n]\n\n"
+            f"Новое сообщение от {sender_name}: {user_text}\n\n"
+            "[Ты участник этого группового чата. Реши: стоит ли тебе вмешаться в разговор?\n"
+            "- Если вопрос явно адресован другому конкретному участнику — НЕ отвечай\n"
+            "- Если разговор идёт между людьми и тебя не касается — НЕ отвечай\n"
+            "- Если есть что добавить уместно, смешно или интересно — ответь коротко (1-2 предложения)\n"
+            "- Если не стоит отвечать — верни ровно пустую строку без пробелов\n"
+            "Ответ (только текст сообщения или пустая строка):]"
+        )
+
+        user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
+        try:
+            reply = self._call_openclaw(prompt, user_key, model="ollama/qwen2.5:14b")
+            reply = reply.strip()
+            if not reply:
+                return False
+            self.bot.reply_to(message, reply)
+            self._last_probabilistic_sent[chat_id] = datetime.now(timezone.utc)
+            logger.info(f"MoltBot: probabilistic reply sent in chat {chat_id}")
+            return True
+        except Exception as e:
+            logger.error(f"MoltBot: probabilistic reply error: {e}")
+            return False
+
     def start_proactive_scheduler(self, chat_id: int):
         """Start scheduled (2x/day) and activity-spike proactive messaging."""
         def _scheduled_loop():
@@ -425,6 +465,22 @@ class MoltbotHandlers:
             except Exception as e:
                 logger.error(f"MoltBot API error (reply): {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
+
+        @self.bot.message_handler(func=lambda m: (
+            m.chat.type in ('group', 'supergroup')
+            and m.text
+            and not m.text.startswith('/')
+            and not m.from_user.is_bot
+            and not self._is_bot_mentioned(m)
+            and not (m.reply_to_message and m.reply_to_message.from_user
+                     and m.reply_to_message.from_user.id == self.bot.get_me().id)
+        ))
+        def handle_probabilistic(message):
+            threading.Thread(
+                target=self._maybe_reply_probabilistic,
+                args=(message,),
+                daemon=True,
+            ).start()
 
         @self.bot.message_handler(
             content_types=['photo'],
