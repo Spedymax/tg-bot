@@ -249,45 +249,64 @@ class MoltbotHandlers:
 
     def _call_openclaw(self, content: str, user_key: str, model: str = "openclaw:main") -> str:
         """Raw API call to OpenClaw. Returns response text or empty string on error."""
-        with httpx.Client() as client:
-            r = client.post(
-                Settings.JARVIS_URL,
-                headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
-                json={
-                    "model": model,
-                    "user": user_key,
-                    "messages": [{"role": "user", "content": content}],
-                },
-                timeout=60,
-            )
-            r.raise_for_status()
-            content = r.json()["choices"][0]["message"]["content"]
-            if not content:
-                return ""
-            # Strip action error lines injected by OpenClaw (e.g. "⚠️ ✉️ Message failed: ...")
-            lines = content.split('\n')
-            lines = [l for l in lines if not ('⚠' in l and ('failed' in l.lower() or 'action' in l.lower() or 'target' in l.lower()))]
-            content = '\n'.join(lines).strip()
-            # Filter full "No response from OpenClaw" fallback
-            if "no response" in content.lower() and "openclaw" in content.lower():
-                logger.warning("MoltBot: OpenClaw returned no-response string, treating as empty")
-                return ""
-            return content
+        last_exc = None
+        for attempt in range(3):
+            try:
+                with httpx.Client() as client:
+                    r = client.post(
+                        Settings.JARVIS_URL,
+                        headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
+                        json={
+                            "model": model,
+                            "user": user_key,
+                            "messages": [{"role": "user", "content": content}],
+                        },
+                        timeout=60,
+                    )
+                    r.raise_for_status()
+                    text = r.json()["choices"][0]["message"]["content"]
+                    if not text:
+                        return ""
+                    # Strip action error lines injected by OpenClaw
+                    lines = text.split('\n')
+                    lines = [l for l in lines if not ('⚠' in l and ('failed' in l.lower() or 'action' in l.lower() or 'target' in l.lower()))]
+                    text = '\n'.join(lines).strip()
+                    if "no response" in text.lower() and "openclaw" in text.lower():
+                        logger.warning("MoltBot: OpenClaw returned no-response string, treating as empty")
+                        return ""
+                    return text
+            except Exception as e:
+                last_exc = e
+                if attempt < 2:
+                    logger.warning(f"MoltBot: OpenClaw attempt {attempt + 1} failed: {e}, retrying...")
+                    import time; time.sleep(2)
+        logger.error(f"MoltBot: OpenClaw all retries failed: {last_exc}")
+        return ""
 
     def _call_ollama_direct(self, content: str) -> str:
         """Call Ollama directly (bypasses OpenClaw) — for classifiers and reactions."""
         url = f"{Settings.LOCAL_LLM_URL}/v1/chat/completions"
-        with httpx.Client() as client:
-            r = client.post(
-                url,
-                json={
-                    "model": Settings.LOCAL_LLM_MODEL,
-                    "messages": [{"role": "user", "content": content}],
-                },
-                timeout=30,
-            )
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+        last_exc = None
+        for attempt in range(3):
+            try:
+                with httpx.Client() as client:
+                    r = client.post(
+                        url,
+                        json={
+                            "model": Settings.LOCAL_LLM_MODEL,
+                            "messages": [{"role": "user", "content": content}],
+                        },
+                        timeout=30,
+                    )
+                    r.raise_for_status()
+                    return r.json()["choices"][0]["message"]["content"]
+            except Exception as e:
+                last_exc = e
+                if attempt < 2:
+                    logger.warning(f"MoltBot: Ollama attempt {attempt + 1} failed: {e}, retrying...")
+                    import time; time.sleep(2)
+        logger.error(f"MoltBot: Ollama all retries failed: {last_exc}")
+        return ""
 
     def _ask_moltbot(self, sender_name: str, user_text: str,
                      chat_context: str, user_key: str,
