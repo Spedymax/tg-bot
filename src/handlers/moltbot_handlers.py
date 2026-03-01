@@ -469,9 +469,8 @@ class MoltbotHandlers:
             "Верни ТОЛЬКО emoji (один символ) или пустую строку. Никакого текста."
         )
 
-        user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
         try:
-            result = self._call_openclaw(prompt, user_key, model="ollama/qwen2.5:14b")
+            result = self._call_openclaw(prompt, "reactor", model="ollama/qwen2.5:14b")
             result = result.strip()
             # Keep only first "word" in case model returns extra text
             result = result.split()[0] if result else ""
