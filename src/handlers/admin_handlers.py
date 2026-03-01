@@ -42,10 +42,15 @@ class AdminHandlers:
                     user_id INTEGER,
                     message_text TEXT,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    name TEXT
+                    name TEXT,
+                    message_id BIGINT
                 )
             """
             self.player_service.db.execute_query(query)
+            # Add message_id column if it doesn't exist yet (migration for existing installs)
+            self.player_service.db.execute_query("""
+                ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_id BIGINT
+            """)
             logger.info("Messages table created/verified successfully")
         except Exception as e:
             logger.error(f"Error creating messages table: {e}")
@@ -57,15 +62,16 @@ class AdminHandlers:
             if message.text and not message.text.startswith('/') and not message.from_user.is_bot:
                 # Use existing table structure: id, user_id, message_text, timestamp, name
                 query = """
-                    INSERT INTO messages (user_id, message_text, timestamp, name)
-                    VALUES (%s, %s, CURRENT_TIMESTAMP, %s)
+                    INSERT INTO messages (user_id, message_text, timestamp, name, message_id)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s)
                 """
                 # Combine first_name and username for the name field
                 name = message.from_user.first_name or message.from_user.username or 'Аноним'
                 params = (
                     message.from_user.id,
                     message.text,
-                    name
+                    name,
+                    message.message_id,
                 )
                 self.player_service.db.execute_query(query, params)
         except Exception as e:
