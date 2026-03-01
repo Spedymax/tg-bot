@@ -322,7 +322,10 @@ class TelegramBot:
             # Start the quiz scheduler
             logger.info("Starting quiz scheduler...")
             self.quiz_scheduler.start_scheduler()
-            
+
+            # Start proactive OpenClaw messaging (test: private chat; prod: -1001294162183)
+            self.moltbot_handlers.start_proactive_scheduler(741542965)
+
             logger.info("Starting bot polling...")
             self.bot.send_message(Settings.ADMIN_IDS[0], 'Bot restarted with new architecture!')
             
