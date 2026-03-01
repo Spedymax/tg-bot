@@ -873,7 +873,8 @@ class MoltbotHandlers:
             threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
             try:
                 reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
-                self.bot.reply_to(message, reply)
+                if reply and reply.strip():
+                    self.bot.reply_to(message, reply)
             except Exception as e:
                 logger.error(f"MoltBot API error: {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
@@ -958,7 +959,8 @@ class MoltbotHandlers:
             threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
             try:
                 reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
-                self.bot.reply_to(message, reply)
+                if reply and reply.strip():
+                    self.bot.reply_to(message, reply)
             except Exception as e:
                 logger.error(f"MoltBot API error (reply): {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
