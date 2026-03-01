@@ -326,6 +326,26 @@ class TelegramBot:
             # Start proactive OpenClaw messaging
             self.moltbot_handlers.start_proactive_scheduler(-1001294162183)
 
+            # Register bot commands in Telegram menu
+            self.bot.set_my_commands([
+                telebot.types.BotCommand("start",        "Профиль / начать игру"),
+                telebot.types.BotCommand("pisunchik",    "Прокачать писунчик"),
+                telebot.types.BotCommand("leaderboard",  "Таблица лидеров"),
+                telebot.types.BotCommand("shop",         "Магазин предметов"),
+                telebot.types.BotCommand("items",        "Мой инвентарь"),
+                telebot.types.BotCommand("kazik",        "Казино"),
+                telebot.types.BotCommand("roll",         "Бросить кубик"),
+                telebot.types.BotCommand("trivia",       "Запустить викторину"),
+                telebot.types.BotCommand("pet",          "Мой питомец"),
+                telebot.types.BotCommand("danetka",      "Загадать данетку"),
+                telebot.types.BotCommand("sdayus",       "Сдаться в данетке"),
+                telebot.types.BotCommand("anekdot",      "Случайный анекдот"),
+                telebot.types.BotCommand("mut_reset",    "Сбросить контекст бота"),
+                telebot.types.BotCommand("sho_tam_novogo", "Что нового в чате (адм)"),
+                telebot.types.BotCommand("analitika",    "Аналитика за неделю (адм)"),
+            ])
+            logger.info("Bot commands registered in Telegram menu")
+
             logger.info("Starting bot polling...")
             self.bot.send_message(Settings.ADMIN_IDS[0], 'Bot restarted with new architecture!')
             
