@@ -958,19 +958,6 @@ class MoltbotHandlers:
         ))
         def handle_probabilistic(message):
             self._maybe_update_summary()
-            # If danetka is active in this chat — route to judge instead
-            if message.chat.id in self._active_danetka:
-                threading.Thread(
-                    target=self._handle_danetka_reply,
-                    args=(message,),
-                    daemon=True,
-                ).start()
-                threading.Thread(
-                    target=self._maybe_react,
-                    args=(message,),
-                    daemon=True,
-                ).start()
-                return
             threading.Thread(
                 target=self._maybe_reply_probabilistic,
                 args=(message,),
