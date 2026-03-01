@@ -252,7 +252,12 @@ class MoltbotHandlers:
                 timeout=60,
             )
             r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            content = r.json()["choices"][0]["message"]["content"]
+            # Filter out OpenClaw error strings that shouldn't be sent to users
+            if content and "no response" in content.lower() and "openclaw" in content.lower():
+                logger.warning(f"MoltBot: OpenClaw returned error string, treating as empty")
+                return ""
+            return content
 
     def _ask_moltbot(self, sender_name: str, user_text: str,
                      chat_context: str, user_key: str,
@@ -429,7 +434,7 @@ class MoltbotHandlers:
         try:
             reply = self._call_openclaw(prompt, user_key, model="ollama/qwen2.5:14b")
             reply = reply.strip()
-            if not reply:
+            if not reply or "no response" in reply.lower() or "openclaw" in reply.lower():
                 return False
             self.bot.reply_to(message, reply)
             self._last_probabilistic_sent[chat_id] = datetime.now(timezone.utc)
