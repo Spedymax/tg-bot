@@ -51,7 +51,7 @@ SPIKE_DELAY_MIN, SPIKE_DELAY_MAX = 5 * 60, 20 * 60  # seconds
 
 # Smart summary config
 SUMMARY_UPDATE_INTERVAL = 40  # update chat-summary.md every N group messages
-SUMMARY_FETCH_LIMIT = 300     # messages to analyze when updating
+SUMMARY_FETCH_LIMIT = 600     # messages to analyze when updating
 
 
 class MoltbotHandlers:
@@ -217,6 +217,17 @@ class MoltbotHandlers:
         except Exception as e:
             logger.error(f"MoltBot: Gemini image analysis failed: {e}")
             return "[Не удалось проанализировать изображение]"
+
+    def _store_bot_reply(self, text: str, msg_id: int | None = None):
+        """Store Jarvis bot reply in the messages table."""
+        try:
+            self.db.execute_query(
+                "INSERT INTO messages (user_id, message_text, timestamp, name, message_id) "
+                "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s)",
+                (0, text, "Jarvis", msg_id),
+            )
+        except Exception as e:
+            logger.warning(f"MoltBot: failed to store bot reply: {e}")
 
     def _get_recent_group_messages(self, limit: int = 50, chat_id: int | None = None) -> list[str]:
         """Fetch last `limit` messages from the group chat history in DB."""
@@ -793,10 +804,10 @@ class MoltbotHandlers:
             )
 
             # Qwen topic summary
-            recent = self._get_recent_group_messages(limit=150, chat_id=chat_id)
+            recent = self._get_recent_group_messages(limit=300, chat_id=chat_id)
             topics = ""
             if recent:
-                snippet = "\n".join(recent[-100:])
+                snippet = "\n".join(recent[-200:])
                 try:
                     raw_topics = self._call_ollama_direct(
                         f"Вот сообщения из чата за неделю:\n{snippet}\n\n"
@@ -887,13 +898,14 @@ class MoltbotHandlers:
             # Fetch group history only for group chats
             history = None
             if message.chat.type in ('group', 'supergroup'):
-                history = self._get_recent_group_messages(limit=50, chat_id=message.chat.id)
+                history = self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
             threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
             try:
                 reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 if reply and reply.strip():
-                    self.bot.reply_to(message, reply)
+                    sent = self.bot.reply_to(message, reply)
+                    self._store_bot_reply(reply, sent.message_id)
             except Exception as e:
                 logger.error(f"MoltBot API error: {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
@@ -973,13 +985,14 @@ class MoltbotHandlers:
 
             history = None
             if message.chat.type in ('group', 'supergroup'):
-                history = self._get_recent_group_messages(limit=50, chat_id=message.chat.id)
+                history = self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
             threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
             try:
                 reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 if reply and reply.strip():
-                    self.bot.reply_to(message, reply)
+                    sent = self.bot.reply_to(message, reply)
+                    self._store_bot_reply(reply, sent.message_id)
             except Exception as e:
                 logger.error(f"MoltBot API error (reply): {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
@@ -1031,7 +1044,7 @@ class MoltbotHandlers:
 
             history = None
             if message.chat.type in ('group', 'supergroup'):
-                history = self._get_recent_group_messages(limit=50, chat_id=message.chat.id)
+                history = self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
             try:
                 file_info = self.bot.get_file(message.photo[-1].file_id)
@@ -1050,7 +1063,9 @@ class MoltbotHandlers:
 
             try:
                 reply = self._ask_moltbot(sender_name, combined_text, chat_context, user_key, history)
-                self.bot.reply_to(message, reply)
+                if reply and reply.strip():
+                    sent = self.bot.reply_to(message, reply)
+                    self._store_bot_reply(reply, sent.message_id)
             except Exception as e:
                 logger.error(f"MoltBot API error (photo): {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
