@@ -779,12 +779,14 @@ class MoltbotHandlers:
             if recent:
                 snippet = "\n".join(recent[-100:])
                 try:
-                    topics = self._call_ollama_direct(
+                    raw_topics = self._call_ollama_direct(
                         f"Вот сообщения из чата за неделю:\n{snippet}\n\n"
                         "Выдели 3-5 главных тем этой недели. "
                         "Каждую тему — одной строкой с подходящим emoji. "
-                        "Только список на русском языке, без вступлений, пояснений и китайских символов."
+                        "Только список на русском языке, без вступлений и пояснений."
                     )
+                    import re as _re
+                    topics = _re.sub(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3000-\u303f\uff00-\uffef]+', '', raw_topics).strip()
                 except Exception:
                     pass
 
