@@ -585,6 +585,19 @@ class MoltbotHandlers:
                 daemon=True,
             ).start()
 
+        @self.bot.message_handler(func=lambda m: (
+            m.chat.type == 'private'
+            and m.text
+            and not m.text.startswith('/')
+            and not m.from_user.is_bot
+        ))
+        def handle_dm_reaction(message):
+            threading.Thread(
+                target=self._maybe_react,
+                args=(message,),
+                daemon=True,
+            ).start()
+
         @self.bot.message_handler(
             content_types=['photo'],
             func=lambda m: self._is_bot_mentioned_in_caption(m),
