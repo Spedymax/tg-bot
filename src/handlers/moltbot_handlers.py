@@ -60,6 +60,7 @@ class MoltbotHandlers:
         self._last_proactive_sent: dict[int, datetime] = {}
         self._proactive_queued: set[int] = set()
         self._last_probabilistic_sent: dict[int, datetime] = {}
+        self._last_reaction_time: dict[int, datetime] = {}
         self._load_state()
         self._init_gemini()
 
@@ -447,6 +448,42 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: probabilistic reply error: {e}")
             return False
 
+    # Valid Telegram emoji reactions (subset that works well)
+    _REACTION_EMOJIS = [
+        '👍', '👎', '❤', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱',
+        '😢', '🎉', '🤩', '💩', '🙏', '👌', '🤡', '🥱', '😍', '💯',
+        '🤣', '⚡', '🏆', '💔', '😴', '🤓', '👻', '👀', '😇', '🤗',
+        '🤪', '🗿', '🆒', '😘', '😎', '🫡', '🤝',
+    ]
+
+    def _maybe_react(self, message) -> None:
+        """Ask Qwen to pick an emoji reaction for every message (Qwen decides whether to react)."""
+        chat_id = message.chat.id
+        text = message.text or ""
+        emoji_list = ' '.join(self._REACTION_EMOJIS)
+        prompt = (
+            f"Сообщение: {text}\n\n"
+            f"Выбери одну emoji-реакцию из этого списка: {emoji_list}\n"
+            "Реагируй только если сообщение вызывает чёткую эмоцию (смешно, круто, грустно, wow и т.д.).\n"
+            "На скучные, нейтральные или короткие приветствия — верни пустую строку.\n"
+            "Верни ТОЛЬКО emoji (один символ) или пустую строку. Никакого текста."
+        )
+
+        user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
+        try:
+            result = self._call_openclaw(prompt, user_key, model="ollama/qwen2.5:14b")
+            result = result.strip()
+            # Keep only first "word" in case model returns extra text
+            result = result.split()[0] if result else ""
+            if result not in self._REACTION_EMOJIS:
+                return
+            import telebot.types as tbtypes
+            reaction = tbtypes.ReactionTypeEmoji(result)
+            self.bot.set_message_reaction(chat_id, message.message_id, [reaction], is_big=False)
+            logger.info(f"MoltBot: reacted {result} to msg {message.message_id} in {chat_id}")
+        except Exception as e:
+            logger.debug(f"MoltBot: reaction error: {e}")
+
     def start_proactive_scheduler(self, chat_id: int):
         """Start scheduled (2x/day) and activity-spike proactive messaging."""
         def _scheduled_loop():
@@ -539,6 +576,11 @@ class MoltbotHandlers:
         def handle_probabilistic(message):
             threading.Thread(
                 target=self._maybe_reply_probabilistic,
+                args=(message,),
+                daemon=True,
+            ).start()
+            threading.Thread(
+                target=self._maybe_react,
                 args=(message,),
                 daemon=True,
             ).start()
