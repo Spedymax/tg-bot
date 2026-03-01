@@ -401,8 +401,11 @@ class MoltbotHandlers:
         complexity = self._classify_complexity(user_text, history)
         logger.info(f"MoltBot: complexity={complexity} for: {user_text[:60]}")
         if complexity == "simple":
-            return self._ask_moltbot(sender_name, user_text, chat_context,
-                                     user_key, history, model="ollama/qwen2.5:14b")
+            reply = self._ask_moltbot(sender_name, user_text, chat_context,
+                                      user_key, history, model="ollama/qwen2.5:14b")
+            if reply and reply.strip():
+                return reply
+            logger.info("MoltBot: Qwen returned empty, falling back to Claude")
         return self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
 
     def _maybe_reply_probabilistic(self, message) -> bool:
