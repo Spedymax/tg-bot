@@ -872,16 +872,17 @@ class MoltbotHandlers:
                                                chat_id, waiting.message_id)
                     return
                 self._save_danetka(danetka['situation'], danetka['answer'])
-                edited = self.bot.edit_message_text(
+                self.bot.edit_message_text(
                     f"🎲 *Данетка!*\n\n{danetka['situation']}\n\n"
                     "_Задавайте вопросы — отвечаю только Да / Нет / Не важно_\n"
                     "Используй /сдаюсь чтобы узнать ответ",
                     chat_id, waiting.message_id, parse_mode="Markdown"
                 )
+                # waiting.message_id == edited message_id (editing doesn't change it)
                 self._active_danetka[chat_id] = {
                     'situation': danetka['situation'],
                     'answer': danetka['answer'],
-                    'message_id': edited.message_id,
+                    'message_id': waiting.message_id,
                     'started_at': datetime.now(timezone.utc),
                     'questions_count': 0,
                 }
@@ -920,10 +921,14 @@ class MoltbotHandlers:
             chat_id = message.chat.id
             # Route to danetka if replying to an active danetka message
             active = self._active_danetka.get(chat_id)
-            if active and message.reply_to_message.message_id == active.get('message_id'):
-                threading.Thread(target=self._handle_danetka_reply, args=(message,),
-                                 daemon=True).start()
-                return
+            if active:
+                reply_mid = message.reply_to_message.message_id
+                danetka_mid = active.get('message_id')
+                logger.debug(f"MoltBot: danetka check reply_mid={reply_mid} danetka_mid={danetka_mid}")
+                if reply_mid == danetka_mid:
+                    threading.Thread(target=self._handle_danetka_reply, args=(message,),
+                                     daemon=True).start()
+                    return
 
             sender_name = self._resolve_sender_name(message.from_user)
             user_text = message.text or ""
