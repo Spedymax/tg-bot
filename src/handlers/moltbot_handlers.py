@@ -260,6 +260,21 @@ class MoltbotHandlers:
                 return ""
             return content
 
+    def _call_ollama_direct(self, content: str) -> str:
+        """Call Ollama directly (bypasses OpenClaw) — for classifiers and reactions."""
+        url = f"{Settings.LOCAL_LLM_URL}/v1/chat/completions"
+        with httpx.Client() as client:
+            r = client.post(
+                url,
+                json={
+                    "model": Settings.LOCAL_LLM_MODEL,
+                    "messages": [{"role": "user", "content": content}],
+                },
+                timeout=30,
+            )
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"]
+
     def _ask_moltbot(self, sender_name: str, user_text: str,
                      chat_context: str, user_key: str,
                      history: list[str] | None = None,
@@ -281,6 +296,8 @@ class MoltbotHandlers:
             f"{context_prefix}{sender_name}: Привет!"
         )
 
+        if model.startswith("ollama/"):
+            return self._call_ollama_direct(user_content)
         return self._call_openclaw(user_content, user_key, model=model)
 
     def _count_recent_messages(self, minutes: int) -> int:
@@ -366,7 +383,7 @@ class MoltbotHandlers:
             "Ответь одним словом: simple или complex"
         )
         try:
-            result = self._call_openclaw(prompt, "classifier", model="ollama/qwen2.5:14b")
+            result = self._call_ollama_direct(prompt)
             result = result.strip().lower()
             return "complex" if "complex" in result else "simple"
         except Exception as e:
@@ -434,11 +451,10 @@ class MoltbotHandlers:
             "Ответ (только текст сообщения или пустая строка):]"
         )
 
-        user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
         try:
-            reply = self._call_openclaw(prompt, user_key, model="ollama/qwen2.5:14b")
+            reply = self._call_ollama_direct(prompt)
             reply = reply.strip()
-            if not reply or "no response" in reply.lower() or "openclaw" in reply.lower():
+            if not reply:
                 return False
             self.bot.reply_to(message, reply)
             self._last_probabilistic_sent[chat_id] = datetime.now(timezone.utc)
@@ -470,7 +486,7 @@ class MoltbotHandlers:
         )
 
         try:
-            result = self._call_openclaw(prompt, "reactor", model="ollama/qwen2.5:14b")
+            result = self._call_ollama_direct(prompt)
             result = result.strip()
             # Keep only first "word" in case model returns extra text
             result = result.split()[0] if result else ""
