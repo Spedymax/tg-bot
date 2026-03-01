@@ -1,9 +1,12 @@
 import json
 import logging
 import os
+import random
+import threading
+import time
 import httpx
 import google.generativeai as genai
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from config.settings import Settings
 
 CHAT_SUMMARY_PATH = os.path.expanduser("~/.openclaw/workspace/memory/chat-summary.md")
@@ -38,6 +41,13 @@ CHAT_KEYS = {
     -1002491624152: "tg-group-secondary",
 }
 
+# Proactive messaging config
+PROACTIVE_CHAT_ID = 741542965  # тест; поменять на -1001294162183 для прода
+PROACTIVE_SCHEDULE_TIMES = ["13:00", "21:00"]
+SPIKE_THRESHOLD = 15       # messages in 30 min
+SPIKE_COOLDOWN_HOURS = 2
+SPIKE_DELAY_MIN, SPIKE_DELAY_MAX = 5 * 60, 20 * 60  # seconds
+
 
 class MoltbotHandlers:
     def __init__(self, bot, db_manager):
@@ -47,6 +57,8 @@ class MoltbotHandlers:
         self._history_reset_time: dict[int, datetime] = {}  # chat_id → reset timestamp
         self._user_key_suffix: dict[int, str] = {}  # chat_id → suffix added after reset
         self._gemini_model = None
+        self._last_proactive_sent: dict[int, datetime] = {}
+        self._proactive_queued: set[int] = set()
         self._load_state()
         self._init_gemini()
 
@@ -225,6 +237,22 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: error fetching chat history: {e}")
             return []
 
+    def _call_openclaw(self, content: str, user_key: str) -> str:
+        """Raw API call to OpenClaw. Returns response text or empty string on error."""
+        with httpx.Client() as client:
+            r = client.post(
+                Settings.JARVIS_URL,
+                headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
+                json={
+                    "model": "openclaw:main",
+                    "user": user_key,
+                    "messages": [{"role": "user", "content": content}],
+                },
+                timeout=60,
+            )
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"]
+
     def _ask_moltbot(self, sender_name: str, user_text: str,
                      chat_context: str, user_key: str,
                      history: list[str] | None = None) -> str:
@@ -245,21 +273,101 @@ class MoltbotHandlers:
             f"{context_prefix}{sender_name}: Привет!"
         )
 
-        with httpx.Client() as client:
-            r = client.post(
-                Settings.JARVIS_URL,
-                headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
-                json={
-                    "model": "openclaw:main",
-                    "user": user_key,
-                    "messages": [
-                        {"role": "user", "content": user_content},
-                    ],
-                },
-                timeout=60,
+        return self._call_openclaw(user_content, user_key)
+
+    def _count_recent_messages(self, minutes: int) -> int:
+        """Count messages in DB written in the last `minutes` minutes."""
+        try:
+            rows = self.db.execute_query(
+                "SELECT COUNT(*) FROM messages WHERE timestamp > NOW() - INTERVAL '%s minutes'",
+                (minutes,)
             )
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            return rows[0][0] if rows else 0
+        except Exception as e:
+            logger.error(f"MoltBot: error counting recent messages: {e}")
+            return 0
+
+    def _send_proactive_message(self, chat_id: int):
+        """Build context and send a proactive (unprompted) message to the chat."""
+        try:
+            history = self._get_recent_group_messages(30, chat_id)
+            summary = _load_chat_summary()
+
+            context_prefix = ""
+            if summary:
+                context_prefix += f"[Долгосрочная память о чате:\n{summary}\n]\n"
+            if history:
+                history_block = "\n".join(history)
+                context_prefix += f"[История чата (последние {len(history)} сообщений):\n{history_block}\n]\n"
+
+            user_content = (
+                f"{context_prefix}"
+                "[Ты сам захотел что-то написать в чат — не в ответ на обращение, "
+                "а потому что тебе пришла мысль или хочется поучаствовать. "
+                "Напиши одно короткое сообщение как участник разговора.]"
+            )
+
+            user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
+            reply = self._call_openclaw(user_content, user_key)
+            self.bot.send_message(chat_id, reply)
+            self._last_proactive_sent[chat_id] = datetime.now(timezone.utc)
+            logger.info(f"MoltBot: proactive message sent to chat {chat_id}")
+        except Exception as e:
+            logger.error(f"MoltBot: failed to send proactive message to {chat_id}: {e}")
+
+    def _check_activity_spike(self, chat_id: int):
+        """Queue a proactive message if chat activity is high and cooldown has passed."""
+        if chat_id in self._proactive_queued:
+            return
+        last = self._last_proactive_sent.get(chat_id)
+        if last and (datetime.now(timezone.utc) - last) < timedelta(hours=SPIKE_COOLDOWN_HOURS):
+            return
+        count = self._count_recent_messages(30)
+        if count >= SPIKE_THRESHOLD:
+            self._proactive_queued.add(chat_id)
+            delay = random.randint(SPIKE_DELAY_MIN, SPIKE_DELAY_MAX)
+            logger.info(f"MoltBot: activity spike ({count} msgs), queuing proactive in {delay}s")
+            threading.Timer(delay, self._fire_spike_proactive, args=[chat_id]).start()
+
+    def _fire_spike_proactive(self, chat_id: int):
+        """Called after spike delay — send proactive message and clear queue flag."""
+        self._proactive_queued.discard(chat_id)
+        self._send_proactive_message(chat_id)
+
+    def start_proactive_scheduler(self, chat_id: int):
+        """Start scheduled (2x/day) and activity-spike proactive messaging."""
+        def _scheduled_loop():
+            """Fire proactive messages at fixed times using a simple polling loop."""
+            sent_today: set[str] = set()
+            while True:
+                now = datetime.now()
+                day_key = now.strftime("%Y-%m-%d")
+                hhmm = now.strftime("%H:%M")
+                for t in PROACTIVE_SCHEDULE_TIMES:
+                    job_key = f"{day_key}-{t}"
+                    if hhmm == t and job_key not in sent_today:
+                        sent_today.add(job_key)
+                        # Only send if chat was active recently
+                        if self._count_recent_messages(8 * 60) >= 5:
+                            self._send_proactive_message(chat_id)
+                        else:
+                            logger.info(f"MoltBot: skipping {t} proactive — chat inactive")
+                # Purge old day keys to avoid unbounded growth
+                if len(sent_today) > 20:
+                    sent_today = {k for k in sent_today if k.startswith(day_key)}
+                time.sleep(30)
+
+        def _monitor_loop():
+            while True:
+                time.sleep(600)
+                try:
+                    self._check_activity_spike(chat_id)
+                except Exception as e:
+                    logger.error(f"MoltBot: proactive monitor error: {e}")
+
+        threading.Thread(target=_scheduled_loop, daemon=True, name="moltbot-scheduler").start()
+        threading.Thread(target=_monitor_loop, daemon=True, name="moltbot-monitor").start()
+        logger.info(f"MoltBot: proactive scheduler started for chat {chat_id}")
 
     # ── Handlers ──────────────────────────────────────────────────────────────
 
