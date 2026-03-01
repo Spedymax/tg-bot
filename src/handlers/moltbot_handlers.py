@@ -403,6 +403,29 @@ class MoltbotHandlers:
                 logger.error(f"MoltBot API error: {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
 
+        @self.bot.message_handler(func=lambda m: (
+            m.reply_to_message is not None
+            and m.reply_to_message.from_user is not None
+            and m.reply_to_message.from_user.id == self.bot.get_me().id
+            and not self._is_bot_mentioned(m)
+        ))
+        def handle_reply_to_bot(message):
+            sender_name = self._resolve_sender_name(message.from_user)
+            user_text = message.text or ""
+            chat_context = self._get_chat_context(message)
+            user_key = self._resolve_user_key(message)
+
+            history = None
+            if message.chat.type in ('group', 'supergroup'):
+                history = self._get_recent_group_messages(limit=50, chat_id=message.chat.id)
+
+            try:
+                reply = self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
+                self.bot.reply_to(message, reply)
+            except Exception as e:
+                logger.error(f"MoltBot API error (reply): {e}")
+                self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
+
         @self.bot.message_handler(
             content_types=['photo'],
             func=lambda m: self._is_bot_mentioned_in_caption(m),
