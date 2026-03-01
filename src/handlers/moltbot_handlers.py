@@ -554,6 +554,7 @@ class MoltbotHandlers:
             if message.chat.type in ('group', 'supergroup'):
                 history = self._get_recent_group_messages(limit=50, chat_id=message.chat.id)
 
+            threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
             try:
                 reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 self.bot.reply_to(message, reply)
@@ -577,6 +578,7 @@ class MoltbotHandlers:
             if message.chat.type in ('group', 'supergroup'):
                 history = self._get_recent_group_messages(limit=50, chat_id=message.chat.id)
 
+            threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
             try:
                 reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 self.bot.reply_to(message, reply)
