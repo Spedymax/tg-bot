@@ -1,4 +1,5 @@
 from __future__ import annotations
+import subprocess
 import threading
 import time
 import logging
@@ -94,12 +95,72 @@ class OllamaWakeManager:
         except Exception as e:
             logger.warning(f"OllamaWakeManager: admin notify failed: {e}")
 
+    def _ssh_run(self, command: str, timeout: int = 10) -> str:
+        """Run a command on Windows PC via SSH. Returns stdout."""
+        from src.config.settings import Settings
+        result = subprocess.run(
+            ['ssh', '-i', Settings.PC_SSH_KEY,
+             '-o', 'StrictHostKeyChecking=no',
+             '-o', 'ConnectTimeout=8',
+             f"{Settings.PC_SSH_USER}@{Settings.PC_SSH_HOST}",
+             command],
+            capture_output=True, text=True, timeout=timeout
+        )
+        return result.stdout.strip()
+
+    def _get_windows_idle_seconds(self) -> float:
+        """Returns seconds since last user input on Windows PC. Returns 0 on error (conservative)."""
+        try:
+            output = self._ssh_run('powershell -File C:\\idle_check.ps1')
+            return float(output)
+        except Exception as e:
+            logger.warning(f"OllamaWakeManager: idle check failed: {e}")
+            return 0.0  # conservative: assume user is active
+
+    def _send_sleep_command(self):
+        """SSH to Windows PC and put it to sleep."""
+        try:
+            self._ssh_run('rundll32.exe powrprof.dll,SetSuspendState 0,1,0', timeout=5)
+            logger.info("OllamaWakeManager: sleep command sent")
+        except Exception as e:
+            logger.error(f"OllamaWakeManager: sleep command failed: {e}")
+            self._notify_admin(f"⚠️ Failed to put PC to sleep: {e}")
+
+    def _sleep_check_tick(self):
+        """Called every 5 min. Sleeps PC if both bot and user have been idle 15+ min."""
+        if self._state != WakeState.ONLINE:
+            return
+        from src.config.settings import Settings
+        threshold = Settings.OLLAMA_IDLE_SLEEP_MINUTES * 60
+        bot_idle = time.time() - self._last_ollama_request
+        if bot_idle < threshold:
+            return
+        user_idle = self._get_windows_idle_seconds()
+        if user_idle < threshold:
+            return
+        self._notify_admin(
+            f"😴 PC going to sleep (bot idle {int(bot_idle // 60)}m, "
+            f"user idle {int(user_idle // 60)}m)"
+        )
+        self._send_sleep_command()
+        self._set_state(WakeState.OFFLINE)
+
+    def _sleep_check_loop(self):
+        while True:
+            try:
+                time.sleep(300)  # every 5 min
+                self._sleep_check_tick()
+            except Exception as e:
+                logger.error(f"OllamaWakeManager: sleep check loop error: {e}")
+
     def start(self, bot):
         """Start background threads. Call once at bot startup."""
         self._bot = bot
         t = threading.Thread(target=self._heartbeat_loop, daemon=True, name="ollama-heartbeat")
         t.start()
-        logger.info("OllamaWakeManager: started heartbeat thread")
+        s = threading.Thread(target=self._sleep_check_loop, daemon=True, name="ollama-sleep-check")
+        s.start()
+        logger.info("OllamaWakeManager: started heartbeat and sleep-check threads")
 
     def _heartbeat_loop(self):
         while True:

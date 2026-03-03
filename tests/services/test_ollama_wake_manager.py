@@ -1,4 +1,5 @@
 import pytest
+import time
 from unittest.mock import MagicMock, patch
 from src.services.ollama_wake_manager import OllamaWakeManager, WakeState
 
@@ -217,3 +218,51 @@ class TestCallMethod:
         result = mgr.call("prompt", bot=None, message=None)
         assert result is None
         assert len(mgr._queue) == 0
+
+
+class TestSleepController:
+    def setup_method(self):
+        OllamaWakeManager._instance = None
+
+    def teardown_method(self):
+        OllamaWakeManager._instance = None
+
+    def _make_mgr(self):
+        mgr = OllamaWakeManager.__new__(OllamaWakeManager)
+        mgr._init_state()
+        mgr._bot = MagicMock()
+        mgr._notify_admin = MagicMock()
+        mgr._last_ollama_request = 0.0  # very old
+        return mgr
+
+    def test_sleep_check_skips_when_not_online(self):
+        mgr = self._make_mgr()
+        mgr._state = WakeState.WAKING
+        with patch.object(mgr, '_send_sleep_command') as mock_sleep:
+            mgr._sleep_check_tick()
+        mock_sleep.assert_not_called()
+
+    def test_sleep_check_skips_when_bot_recently_active(self):
+        mgr = self._make_mgr()
+        mgr._state = WakeState.ONLINE
+        mgr._last_ollama_request = time.time()  # just now
+        with patch.object(mgr, '_get_windows_idle_seconds', return_value=9999):
+            with patch.object(mgr, '_send_sleep_command') as mock_sleep:
+                mgr._sleep_check_tick()
+        mock_sleep.assert_not_called()
+
+    def test_sleep_check_skips_when_user_active_on_pc(self):
+        mgr = self._make_mgr()
+        mgr._state = WakeState.ONLINE
+        with patch.object(mgr, '_get_windows_idle_seconds', return_value=30):
+            with patch.object(mgr, '_send_sleep_command') as mock_sleep:
+                mgr._sleep_check_tick()
+        mock_sleep.assert_not_called()
+
+    def test_sleep_check_sleeps_when_both_idle(self):
+        mgr = self._make_mgr()
+        mgr._state = WakeState.ONLINE
+        with patch.object(mgr, '_get_windows_idle_seconds', return_value=9999):
+            with patch.object(mgr, '_send_sleep_command') as mock_sleep:
+                mgr._sleep_check_tick()
+        mock_sleep.assert_called_once()
