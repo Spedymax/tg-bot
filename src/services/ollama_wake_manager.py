@@ -45,7 +45,7 @@ class OllamaWakeManager:
         self._state = WakeState.ONLINE
         self._queue: list[WakeRequest] = []
         self._queue_lock = threading.Lock()
-        self._last_ollama_request: float = 0.0
+        self._last_ollama_request: float = time.time()
         self._bot = None
         self._initialized = True
 
@@ -106,6 +106,8 @@ class OllamaWakeManager:
              command],
             capture_output=True, text=True, timeout=timeout
         )
+        if result.returncode != 0:
+            raise RuntimeError(f"SSH command failed (exit {result.returncode}): {result.stderr.strip()}")
         return result.stdout.strip()
 
     def _get_windows_idle_seconds(self) -> float:
