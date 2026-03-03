@@ -44,6 +44,7 @@ class OllamaWakeManager:
         self._queue: list[WakeRequest] = []
         self._queue_lock = threading.Lock()
         self._last_ollama_request: float = 0.0
+        self._bot = None
         self._initialized = True
 
     @property
@@ -101,5 +102,8 @@ class OllamaWakeManager:
 
     def _heartbeat_loop(self):
         while True:
-            time.sleep(30)
-            self._heartbeat_tick()
+            try:
+                time.sleep(30)
+                self._heartbeat_tick()
+            except Exception as e:
+                logger.error(f"OllamaWakeManager: heartbeat loop error: {e}")
