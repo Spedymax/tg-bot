@@ -137,6 +137,8 @@ class OllamaWakeManager:
                 self._set_state(WakeState.ONLINE)
                 self._notify_admin("✅ PC is online (Ollama ready)")
                 self._drain_queue(self._call_ollama_raw)
+                # Second drain catches requests that arrived during the WAKING→ONLINE transition
+                self._drain_queue(self._call_ollama_raw)
                 return
             except Exception:
                 time.sleep(interval)
@@ -160,6 +162,9 @@ class OllamaWakeManager:
     def _call_claude_fallback(self, prompt: str) -> str:
         """Call OpenClaw/Claude as fallback when Ollama is unavailable."""
         from src.config.settings import Settings
+        if not Settings.JARVIS_TOKEN:
+            logger.error("OllamaWakeManager: JARVIS_TOKEN not configured, cannot use Claude fallback")
+            return ""
         try:
             r = httpx.post(
                 Settings.JARVIS_URL,
