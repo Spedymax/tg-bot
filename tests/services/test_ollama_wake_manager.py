@@ -210,3 +210,10 @@ class TestCallMethod:
 
         assert result is None
         assert mgr.state == WakeState.OFFLINE
+
+    def test_call_offline_with_no_message_returns_none_gracefully(self):
+        mgr = self._make_mgr()
+        mgr._state = WakeState.OFFLINE
+        result = mgr.call("prompt", bot=None, message=None)
+        assert result is None
+        assert len(mgr._queue) == 0
