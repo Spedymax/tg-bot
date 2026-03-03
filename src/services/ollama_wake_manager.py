@@ -180,6 +180,11 @@ class OllamaWakeManager:
                 # Fall through to wake flow
 
         # OFFLINE or WAKING — queue it
+        # Cannot queue without message context
+        if message is None or bot is None:
+            logger.warning("OllamaWakeManager: call() invoked without message context in OFFLINE/WAKING state")
+            return None
+
         if reply_fn is None:
             def reply_fn(text: str):
                 try:
