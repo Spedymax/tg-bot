@@ -3,6 +3,7 @@ import threading
 import time
 import logging
 import httpx
+import wakeonlan
 from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional
@@ -107,3 +108,68 @@ class OllamaWakeManager:
                 self._heartbeat_tick()
             except Exception as e:
                 logger.error(f"OllamaWakeManager: heartbeat loop error: {e}")
+
+    def _trigger_wake(self):
+        """Send WoL packet and start polling. No-op if already waking."""
+        if self._state == WakeState.WAKING:
+            return
+        self._set_state(WakeState.WAKING)
+        try:
+            from src.config.settings import Settings
+            if Settings.PC_MAC_ADDRESS:
+                wakeonlan.send_magic_packet(Settings.PC_MAC_ADDRESS)
+                logger.info(f"OllamaWakeManager: WoL packet sent to {Settings.PC_MAC_ADDRESS}")
+            else:
+                logger.warning("OllamaWakeManager: PC_MAC_ADDRESS not set, skipping WoL")
+        except Exception as e:
+            logger.error(f"OllamaWakeManager: WoL send failed: {e}")
+        t = threading.Thread(target=self._poll_until_online, daemon=True, name="ollama-poll")
+        t.start()
+
+    def _poll_until_online(self, timeout: float = 180.0, interval: float = 5.0):
+        """Poll Ollama every interval seconds up to timeout. Drain queue when ready."""
+        from src.config.settings import Settings
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                r = httpx.get(f"{Settings.LOCAL_LLM_URL}/api/tags", timeout=5)
+                r.raise_for_status()
+                self._set_state(WakeState.ONLINE)
+                self._notify_admin("✅ PC is online (Ollama ready)")
+                self._drain_queue(self._call_ollama_raw)
+                return
+            except Exception:
+                time.sleep(interval)
+        logger.warning("OllamaWakeManager: PC did not wake within timeout, using Claude fallback")
+        self._notify_admin("⚠️ PC did not wake (3 min timeout) — using Claude fallback")
+        self._drain_queue(self._call_claude_fallback)
+        self._set_state(WakeState.OFFLINE)
+
+    def _call_ollama_raw(self, prompt: str) -> str:
+        """Direct Ollama call (no WoL logic)."""
+        from src.config.settings import Settings
+        r = httpx.post(
+            f"{Settings.LOCAL_LLM_URL}/v1/chat/completions",
+            json={"model": Settings.LOCAL_LLM_MODEL,
+                  "messages": [{"role": "user", "content": prompt}]},
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
+
+    def _call_claude_fallback(self, prompt: str) -> str:
+        """Call OpenClaw/Claude as fallback when Ollama is unavailable."""
+        from src.config.settings import Settings
+        try:
+            r = httpx.post(
+                Settings.JARVIS_URL,
+                headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
+                json={"model": "openclaw:main",
+                      "messages": [{"role": "user", "content": prompt}]},
+                timeout=30,
+            )
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            logger.error(f"OllamaWakeManager: Claude fallback also failed: {e}")
+            return ""

@@ -85,3 +85,59 @@ class TestHeartbeat:
             mgr._heartbeat_tick()
 
         assert mgr.state == WakeState.ONLINE
+
+
+class TestWakeFlow:
+    def setup_method(self):
+        OllamaWakeManager._instance = None
+
+    def teardown_method(self):
+        OllamaWakeManager._instance = None
+
+    def _make_mgr(self):
+        mgr = OllamaWakeManager.__new__(OllamaWakeManager)
+        mgr._init_state()
+        mgr._state = WakeState.OFFLINE
+        mgr._notify_admin = MagicMock()
+        return mgr
+
+    def test_trigger_wake_sends_wol_and_transitions_to_waking(self):
+        mgr = self._make_mgr()
+        with patch('src.services.ollama_wake_manager.wakeonlan.send_magic_packet') as mock_wol:
+            with patch.object(mgr, '_poll_until_online'):
+                with patch('src.config.settings.Settings.PC_MAC_ADDRESS', new="AA:BB:CC:DD:EE:FF"):
+                    mgr._trigger_wake()
+        mock_wol.assert_called_once()
+        assert mgr.state == WakeState.WAKING
+
+    def test_second_trigger_does_not_send_duplicate_wol(self):
+        mgr = self._make_mgr()
+        mgr._state = WakeState.WAKING
+        with patch('src.services.ollama_wake_manager.wakeonlan.send_magic_packet') as mock_wol:
+            mgr._trigger_wake()
+        mock_wol.assert_not_called()
+
+    def test_poll_until_online_succeeds_and_drains(self):
+        mgr = self._make_mgr()
+        results = []
+        mgr._enqueue("hi", 1, 1, lambda r: results.append(r))
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch('src.services.ollama_wake_manager.httpx.get', return_value=mock_resp):
+            with patch.object(mgr, '_call_ollama_raw', return_value="hello"):
+                mgr._poll_until_online()
+
+        assert mgr.state == WakeState.ONLINE
+        assert results == ["hello"]
+
+    def test_poll_until_online_timeout_uses_claude_fallback(self):
+        mgr = self._make_mgr()
+        results = []
+        mgr._enqueue("hi", 1, 1, lambda r: results.append(r))
+
+        with patch('src.services.ollama_wake_manager.httpx.get', side_effect=Exception("timeout")):
+            with patch.object(mgr, '_call_claude_fallback', return_value="claude reply"):
+                mgr._poll_until_online(timeout=0.1, interval=0.05)
+
+        assert results == ["claude reply"]
