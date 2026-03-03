@@ -11,6 +11,9 @@ class TestWakeManagerState:
         self.mgr._queue_lock = __import__('threading').Lock()
         self.mgr._last_ollama_request = 0.0
 
+    def teardown_method(self):
+        OllamaWakeManager._instance = None
+
     def test_initial_state_is_online(self):
         mgr = OllamaWakeManager.__new__(OllamaWakeManager)
         mgr._init_state()

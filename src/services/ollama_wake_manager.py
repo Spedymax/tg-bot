@@ -34,6 +34,10 @@ class OllamaWakeManager:
                 cls._instance._initialized = False
             return cls._instance
 
+    def __init__(self):
+        if not getattr(self, '_initialized', False):
+            self._init_state()
+
     def _init_state(self):
         self._state = WakeState.ONLINE
         self._queue: list[WakeRequest] = []
