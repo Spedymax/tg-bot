@@ -39,12 +39,13 @@ ssh -i ~/.ssh/mac-max spedymax@192.168.1.35
 - User: `spedymax` (password: `123`)
 - Sudo: NOPASSWD configured for systemctl → `echo '123' | sudo -S systemctl restart bot-manager.service`
 
-**Mac → Windows PC (direct, not used in code):**
+**Mac → Windows PC:**
 ```bash
-sshpass -p '123123' ssh localssh@192.168.1.3
+ssh Spedy@192.168.1.3          # key-based, no password
+sshpass -p '123123' ssh localssh@192.168.1.3   # admin fallback
 ```
+- Mac key (`~/.ssh/id_ed25519`) added to `C:\ProgramData\ssh\administrators_authorized_keys`
 - `localssh` — local account with admin rights, password `123123`
-- `Spedy` — main Windows user (Microsoft account), SSH key-based only
 
 **Linux Server → Windows PC (used by deploy scripts if needed):**
 ```bash
