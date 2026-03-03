@@ -306,9 +306,11 @@ class MoltbotHandlers:
 
         # Synchronous path (internal calls — no user waiting for this specific response)
         if manager.state == WakeState.OFFLINE:
-            # Trigger wake so future requests work; current request returns ""
             manager._trigger_wake()
             logger.info("MoltBot: Ollama offline, WoL triggered, returning empty")
+            return ""
+        if manager.state == WakeState.WAKING:
+            logger.info("MoltBot: Ollama waking up, returning empty")
             return ""
 
         try:
