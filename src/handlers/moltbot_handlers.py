@@ -196,8 +196,8 @@ class MoltbotHandlers:
         """Initialize Gemini model for image analysis."""
         try:
             genai.configure(api_key=Settings.GEMINI_API_KEY)
-            self._gemini_model = genai.GenerativeModel('gemini-3-flash-preview')
-            logger.info("MoltBot: Gemini vision initialized (gemini-3-flash-preview)")
+            self._gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+            logger.info("MoltBot: Gemini vision initialized (gemini-1.5-flash)")
         except Exception as e:
             logger.warning(f"MoltBot: Gemini init failed: {e}")
 
