@@ -294,30 +294,30 @@ class MoltbotHandlers:
         logger.error(f"MoltBot: OpenClaw all retries failed: {last_exc}")
         return ""
 
-    def _call_ollama_direct(self, content: str) -> str:
-        """Call Ollama directly (bypasses OpenClaw) — for classifiers and reactions."""
-        url = f"{Settings.LOCAL_LLM_URL}/v1/chat/completions"
-        last_exc = None
-        for attempt in range(2):
-            try:
-                with httpx.Client() as client:
-                    r = client.post(
-                        url,
-                        json={
-                            "model": Settings.LOCAL_LLM_MODEL,
-                            "messages": [{"role": "user", "content": content}],
-                        },
-                        timeout=10,
-                    )
-                    r.raise_for_status()
-                    return r.json()["choices"][0]["message"]["content"]
-            except Exception as e:
-                last_exc = e
-                if attempt < 1:
-                    logger.warning(f"MoltBot: Ollama attempt {attempt + 1} failed: {e}, retrying...")
-                    import time; time.sleep(1)
-        logger.error(f"MoltBot: Ollama all retries failed: {last_exc}")
-        return ""
+    def _call_ollama_direct(self, content: str, bot=None, message=None) -> str:
+        """Call Ollama directly. Routes through OllamaWakeManager for auto-wake."""
+        from services.ollama_wake_manager import OllamaWakeManager, WakeState
+        manager = OllamaWakeManager()
+
+        # Future use: if message context provided, use async wake flow
+        if bot is not None and message is not None:
+            result = manager.call(content, bot=bot, message=message)
+            return result if result is not None else ""
+
+        # Synchronous path (internal calls — no user waiting for this specific response)
+        if manager.state == WakeState.OFFLINE:
+            # Trigger wake so future requests work; current request returns ""
+            manager._trigger_wake()
+            logger.info("MoltBot: Ollama offline, WoL triggered, returning empty")
+            return ""
+
+        try:
+            return manager._call_ollama_raw(content)
+        except Exception as e:
+            logger.warning(f"MoltBot: Ollama call failed: {e}, triggering wake")
+            manager._set_state(WakeState.OFFLINE)
+            manager._trigger_wake()
+            return ""
 
     def _ask_moltbot(self, sender_name: str, user_text: str,
                      chat_context: str, user_key: str,

@@ -72,6 +72,11 @@ class TelegramBot:
         # Initialize pet handlers
         self.pet_handlers = PetHandlers(self.bot, self.player_service, self.game_service)
 
+        # Start Ollama Wake Manager
+        from services.ollama_wake_manager import OllamaWakeManager
+        OllamaWakeManager().start(self.bot)
+        logger.info("OllamaWakeManager started")
+
         # Initialize quiz scheduler
         self.quiz_scheduler = QuizScheduler(self.bot, self.db_manager, self.trivia_handlers.trivia_service)
         
