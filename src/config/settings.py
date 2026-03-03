@@ -65,3 +65,11 @@ class Settings:
     JARVIS_TOKEN = os.getenv('JARVIS_TOKEN')
     LOCAL_LLM_URL = os.getenv('LOCAL_LLM_URL', 'http://192.168.1.3:11434')
     LOCAL_LLM_MODEL = os.getenv('LOCAL_LLM_MODEL', 'qwen2.5:14b')
+
+    # Wake-on-LAN / PC sleep control
+    PC_MAC_ADDRESS = os.getenv('PC_MAC_ADDRESS', '')          # e.g. "AA:BB:CC:DD:EE:FF"
+    PC_SSH_HOST = os.getenv('PC_SSH_HOST', '192.168.1.3')
+    PC_SSH_USER = os.getenv('PC_SSH_USER', 'Spedy')
+    PC_SSH_KEY = os.getenv('PC_SSH_KEY', os.path.expanduser('~/.ssh/id_ed25519'))
+    OLLAMA_IDLE_SLEEP_MINUTES = int(os.getenv('OLLAMA_IDLE_SLEEP_MINUTES', '15'))
+    ADMIN_TELEGRAM_ID = int(os.getenv('ADMIN_TELEGRAM_ID', '0'))
