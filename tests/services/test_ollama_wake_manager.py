@@ -141,3 +141,72 @@ class TestWakeFlow:
                 mgr._poll_until_online(timeout=0.1, interval=0.05)
 
         assert results == ["claude reply"]
+
+
+class TestCallMethod:
+    def setup_method(self):
+        OllamaWakeManager._instance = None
+
+    def teardown_method(self):
+        OllamaWakeManager._instance = None
+
+    def _make_mgr(self):
+        mgr = OllamaWakeManager.__new__(OllamaWakeManager)
+        mgr._init_state()
+        mgr._notify_admin = MagicMock()
+        return mgr
+
+    def test_call_when_online_returns_synchronously(self):
+        mgr = self._make_mgr()
+        mgr._state = WakeState.ONLINE
+        with patch.object(mgr, '_call_ollama_raw', return_value="hello"):
+            result = mgr.call("prompt", bot=None, message=None)
+        assert result == "hello"
+
+    def test_call_when_offline_sends_waking_message_and_returns_none(self):
+        mgr = self._make_mgr()
+        mgr._state = WakeState.OFFLINE
+        bot = MagicMock()
+        message = MagicMock()
+        message.chat.id = 99
+        message.message_id = 77
+
+        with patch.object(mgr, '_trigger_wake'):
+            result = mgr.call("prompt", bot=bot, message=message,
+                              reply_fn=lambda r: None)
+
+        assert result is None
+        bot.send_message.assert_called_once()
+        sent_text = bot.send_message.call_args[0][1]
+        assert "⏳" in sent_text or "waking" in sent_text.lower()
+
+    def test_call_when_waking_queues_without_sending_message(self):
+        mgr = self._make_mgr()
+        mgr._state = WakeState.WAKING
+        bot = MagicMock()
+        message = MagicMock()
+        message.chat.id = 99
+        message.message_id = 77
+
+        result = mgr.call("prompt", bot=bot, message=message,
+                          reply_fn=lambda r: None)
+
+        assert result is None
+        bot.send_message.assert_not_called()
+        assert len(mgr._queue) == 1
+
+    def test_call_online_failure_triggers_wake_flow(self):
+        mgr = self._make_mgr()
+        mgr._state = WakeState.ONLINE
+        bot = MagicMock()
+        message = MagicMock()
+        message.chat.id = 99
+        message.message_id = 77
+
+        with patch.object(mgr, '_call_ollama_raw', side_effect=Exception("conn refused")):
+            with patch.object(mgr, '_trigger_wake'):
+                result = mgr.call("prompt", bot=bot, message=message,
+                                  reply_fn=lambda r: None)
+
+        assert result is None
+        assert mgr.state == WakeState.OFFLINE

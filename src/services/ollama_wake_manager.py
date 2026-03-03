@@ -159,6 +159,46 @@ class OllamaWakeManager:
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
 
+    def call(self, prompt: str, bot, message,
+             reply_fn: Callable[[str], None] | None = None) -> str | None:
+        """
+        Main entry point for all Ollama calls.
+
+        If ONLINE: calls Ollama synchronously and returns the result string.
+        If OFFLINE/WAKING: enqueues request, sends "waking up" message (OFFLINE only),
+        returns None. reply_fn is called from background thread when result is ready.
+        If reply_fn is None, defaults to bot.reply_to(message, result).
+        """
+        self._last_ollama_request = time.time()
+
+        if self._state == WakeState.ONLINE:
+            try:
+                return self._call_ollama_raw(prompt)
+            except Exception as e:
+                logger.warning(f"OllamaWakeManager: online call failed: {e}")
+                self._set_state(WakeState.OFFLINE)
+                # Fall through to wake flow
+
+        # OFFLINE or WAKING — queue it
+        if reply_fn is None:
+            def reply_fn(text: str):
+                try:
+                    bot.reply_to(message, text)
+                except Exception as ex:
+                    logger.error(f"OllamaWakeManager: reply failed: {ex}")
+
+        self._enqueue(prompt, message.chat.id, message.message_id, reply_fn)
+
+        if self._state == WakeState.OFFLINE:
+            try:
+                bot.send_message(message.chat.id,
+                    "⏳ Ollama is waking up… (~1–3 min). I'll reply when ready!")
+            except Exception:
+                pass
+            self._trigger_wake()
+
+        return None
+
     def _call_claude_fallback(self, prompt: str) -> str:
         """Call OpenClaw/Claude as fallback when Ollama is unavailable."""
         from src.config.settings import Settings
