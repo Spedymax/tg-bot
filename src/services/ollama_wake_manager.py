@@ -2,6 +2,7 @@ from __future__ import annotations
 import threading
 import time
 import logging
+import httpx
 from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional
@@ -69,3 +70,36 @@ class OllamaWakeManager:
                 req.reply_fn(result)
             except Exception as e:
                 logger.error(f"OllamaWakeManager: drain error: {e}")
+
+    def _heartbeat_tick(self):
+        """Called by background thread every 30s. Detects PC going to sleep."""
+        if self._state != WakeState.ONLINE:
+            return
+        try:
+            from src.config.settings import Settings
+            r = httpx.get(f"{Settings.LOCAL_LLM_URL}/api/tags", timeout=5)
+            r.raise_for_status()
+        except Exception:
+            self._set_state(WakeState.OFFLINE)
+            self._notify_admin("😴 PC went to sleep (Ollama unreachable)")
+
+    def _notify_admin(self, text: str):
+        """Send DM to admin. No-op if bot or admin_id not configured."""
+        try:
+            from src.config.settings import Settings
+            if self._bot and Settings.ADMIN_TELEGRAM_ID:
+                self._bot.send_message(Settings.ADMIN_TELEGRAM_ID, text)
+        except Exception as e:
+            logger.warning(f"OllamaWakeManager: admin notify failed: {e}")
+
+    def start(self, bot):
+        """Start background threads. Call once at bot startup."""
+        self._bot = bot
+        t = threading.Thread(target=self._heartbeat_loop, daemon=True, name="ollama-heartbeat")
+        t.start()
+        logger.info("OllamaWakeManager: started heartbeat thread")
+
+    def _heartbeat_loop(self):
+        while True:
+            time.sleep(30)
+            self._heartbeat_tick()

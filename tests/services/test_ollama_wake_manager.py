@@ -51,3 +51,37 @@ class TestWakeManagerState:
         self.mgr._enqueue("p", 1, 1, lambda r: None)
         self.mgr._drain_queue(lambda p: "x")
         assert len(self.mgr._queue) == 0
+
+
+class TestHeartbeat:
+    def setup_method(self):
+        OllamaWakeManager._instance = None
+
+    def teardown_method(self):
+        OllamaWakeManager._instance = None
+
+    def test_heartbeat_transitions_to_offline_on_failure(self):
+        mgr = OllamaWakeManager.__new__(OllamaWakeManager)
+        mgr._init_state()
+        mgr._state = WakeState.ONLINE
+        mgr._bot = None
+        notify_calls = []
+        mgr._notify_admin = lambda msg: notify_calls.append(msg)
+
+        with patch('src.services.ollama_wake_manager.httpx.get', side_effect=Exception("timeout")):
+            mgr._heartbeat_tick()
+
+        assert mgr.state == WakeState.OFFLINE
+        assert any("sleep" in m.lower() or "went" in m.lower() for m in notify_calls)
+
+    def test_heartbeat_stays_online_on_success(self):
+        mgr = OllamaWakeManager.__new__(OllamaWakeManager)
+        mgr._init_state()
+        mgr._bot = None
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch('src.services.ollama_wake_manager.httpx.get', return_value=mock_resp):
+            mgr._heartbeat_tick()
+
+        assert mgr.state == WakeState.ONLINE
