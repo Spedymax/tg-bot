@@ -22,6 +22,75 @@ A collection of Telegram bots with gaming features, memory diary functionality, 
 
 ---
 
+## 🖥️ Infrastructure & Access
+
+### Network Map
+| Host | IP | Role |
+|------|----|------|
+| Linux Server | `192.168.1.35` | Runs all bots (systemd/Gunicorn) |
+| Windows PC | `192.168.1.3` | Runs Ollama local LLM |
+
+### SSH Access
+
+**Mac → Linux Server:**
+```bash
+ssh -i ~/.ssh/mac-max spedymax@192.168.1.35
+```
+- User: `spedymax` (password: `123`)
+- Sudo: NOPASSWD configured for systemctl → `echo '123' | sudo -S systemctl restart bot-manager.service`
+
+**Mac → Windows PC (direct, not used in code):**
+```bash
+sshpass -p '123123' ssh localssh@192.168.1.3
+```
+- `localssh` — local account with admin rights, password `123123`
+- `Spedy` — main Windows user (Microsoft account), SSH key-based only
+
+**Linux Server → Windows PC (used by deploy scripts if needed):**
+```bash
+ssh Spedy@192.168.1.3          # key-based, no password
+sshpass -p '123123' ssh localssh@192.168.1.3   # password-based fallback
+```
+- `Spedy` key is at `/home/spedymax/.ssh/id_rsa` on server
+- Key added to `C:\ProgramData\ssh\administrators_authorized_keys` on Windows
+
+### Ollama (Local LLM)
+- **Host:** Windows PC `192.168.1.3:11434`
+- **Models:** `qwen2.5:14b`, `qwen2.5:32b`, `qwen3-coder:30b`
+- **Bot uses:** `qwen2.5:14b` for reactions/classifier/summary/danetka
+- **Autostart:** Scheduled task `OllamaServe` runs on `Spedy` login
+- **Env var:** `OLLAMA_HOST=0.0.0.0` set system-wide via `setx /M`
+- **Note:** Ping blocked by Windows Firewall (ICMP), but TCP 11434 works fine
+
+### OpenClaw (Claude gateway)
+- **URL:** `http://127.0.0.1:18789` (local to server)
+- **Token:** `JARVIS_TOKEN` env var
+- **Models:** `openclaw:main` (Claude), `ollama/qwen2.5:14b` (Qwen via gateway)
+
+### Bot Services on Server
+```bash
+sudo systemctl restart bot-manager.service    # main bot + dashboard
+sudo systemctl restart memories_bot.service   # memories bot
+sudo systemctl restart songcontest_bot.service
+```
+- Logs: `/home/spedymax/logs/main-bot.log`, `memories-bot.log`, etc.
+- Dashboard: `http://192.168.1.35:8888`
+
+### Gemini API
+- Model: `gemini-2.5-flash-lite` (1000 req/day free tier)
+- Used for: image analysis (vision in moltbot), trivia questions, sho_tam_novogo
+- Key: `GEMINI_API_KEY` in `.env`
+
+### Windows PC Users
+| User | Type | Notes |
+|------|------|-------|
+| `Spedy` | Main (Microsoft account) | Primary user, Ollama runs here |
+| `localssh` | Local admin | Created for SSH access |
+| `Administrator` | Built-in | |
+| `RemotePC` | Local | |
+
+---
+
 ## 📊 Implementation Progress Summary
 
 ### Overall Progress: **42% Complete** (21/50 tasks)
