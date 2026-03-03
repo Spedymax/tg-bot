@@ -298,7 +298,7 @@ class MoltbotHandlers:
         """Call Ollama directly (bypasses OpenClaw) — for classifiers and reactions."""
         url = f"{Settings.LOCAL_LLM_URL}/v1/chat/completions"
         last_exc = None
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 with httpx.Client() as client:
                     r = client.post(
@@ -307,15 +307,15 @@ class MoltbotHandlers:
                             "model": Settings.LOCAL_LLM_MODEL,
                             "messages": [{"role": "user", "content": content}],
                         },
-                        timeout=30,
+                        timeout=10,
                     )
                     r.raise_for_status()
                     return r.json()["choices"][0]["message"]["content"]
             except Exception as e:
                 last_exc = e
-                if attempt < 2:
+                if attempt < 1:
                     logger.warning(f"MoltBot: Ollama attempt {attempt + 1} failed: {e}, retrying...")
-                    import time; time.sleep(2)
+                    import time; time.sleep(1)
         logger.error(f"MoltBot: Ollama all retries failed: {last_exc}")
         return ""
 
