@@ -280,6 +280,7 @@ class AdminHandlers:
                         types.InlineKeyboardButton("💾 Бэкап данных", callback_data="action_backupData"),
                         types.InlineKeyboardButton("📢 Рассылка", callback_data="action_broadcast"),
                         types.InlineKeyboardButton("💻 Включить ПК", callback_data="action_wakePc"),
+                        types.InlineKeyboardButton("😴 Выключить ПК", callback_data="action_sleepPc"),
                         types.InlineKeyboardButton("🧠 Управление квизами", callback_data="admin_quizManagement"),
                         types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back")
                     ]
@@ -329,24 +330,36 @@ class AdminHandlers:
 
                 if action == "wakePc":
                     try:
+                        from src.services.ollama_wake_manager import OllamaWakeManager
+                        wake_manager = OllamaWakeManager()
+                        wake_manager.trigger_wake()
                         self.bot.edit_message_text(
-                            "Отправляю Wake-on-LAN пакет на ваш ПК...",
+                            "✅ WoL пакет отправлен, ПК просыпается (~1–3 мин).",
                             call.message.chat.id,
                             call.message.message_id
                         )
-                        result = self.wake_on_lan('D8:43:AE:BD:2B:F1')
-                        if result:
-                            self.bot.edit_message_text(
-                                "✅ Wake-on-LAN пакет успешно отправлен! Ваш ПК должен включиться.",
-                                call.message.chat.id,
-                                call.message.message_id
-                            )
-                        else:
-                            self.bot.edit_message_text(
-                                "❌ Не удалось отправить Wake-on-LAN пакет. Проверьте логи для деталей.",
-                                call.message.chat.id,
-                                call.message.message_id
-                            )
+                    except Exception as e:
+                        self.bot.edit_message_text(
+                            f"❌ Ошибка: {str(e)}",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+
+                elif action == "sleepPc":
+                    try:
+                        from src.services.ollama_wake_manager import OllamaWakeManager
+                        wake_manager = OllamaWakeManager()
+                        self.bot.edit_message_text(
+                            "😴 Отправляю команду сна...",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
+                        wake_manager.sleep_pc()
+                        self.bot.edit_message_text(
+                            "😴 Команда отправлена, ПК засыпает.",
+                            call.message.chat.id,
+                            call.message.message_id
+                        )
                     except Exception as e:
                         self.bot.edit_message_text(
                             f"❌ Ошибка: {str(e)}",

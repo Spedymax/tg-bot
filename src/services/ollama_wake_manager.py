@@ -114,7 +114,9 @@ class OllamaWakeManager:
         """Returns seconds since last user input on Windows PC. Returns 0 on error (conservative)."""
         try:
             output = self._ssh_run('powershell -File C:\\idle_check.ps1')
-            return float(output.replace(',', '.'))
+            seconds = float(output.replace(',', '.'))
+            # GetLastInputInfo tick counter wraps at ~49.7 days; cap at 2h to avoid false triggers
+            return min(seconds, 7200.0)
         except Exception as e:
             logger.warning(f"OllamaWakeManager: idle check failed: {e}")
             return 0.0  # conservative: assume user is active
@@ -124,6 +126,9 @@ class OllamaWakeManager:
         try:
             self._ssh_run('rundll32.exe powrprof.dll,SetSuspendState 0,1,0', timeout=5)
             logger.info("OllamaWakeManager: sleep command sent")
+        except subprocess.TimeoutExpired:
+            # PC went to sleep mid-SSH — connection killed before exit; this is expected
+            logger.info("OllamaWakeManager: sleep command timed out (PC likely asleep — OK)")
         except Exception as e:
             logger.error(f"OllamaWakeManager: sleep command failed: {e}")
             self._notify_admin(f"⚠️ Failed to put PC to sleep: {e}")
@@ -144,8 +149,7 @@ class OllamaWakeManager:
             f"😴 PC going to sleep (bot idle {int(bot_idle // 60)}m, "
             f"user idle {int(user_idle // 60)}m)"
         )
-        self._send_sleep_command()
-        self._set_state(WakeState.OFFLINE)
+        self.sleep_pc()
 
     def _sleep_check_loop(self):
         while True:
@@ -163,6 +167,18 @@ class OllamaWakeManager:
         s = threading.Thread(target=self._sleep_check_loop, daemon=True, name="ollama-sleep-check")
         s.start()
         logger.info("OllamaWakeManager: started heartbeat and sleep-check threads")
+
+    def trigger_wake(self):
+        """Public: send WoL and transition to WAKING. No-op if already waking/online."""
+        if self._state == WakeState.ONLINE:
+            logger.info("OllamaWakeManager: trigger_wake called but already ONLINE")
+            return
+        self._trigger_wake()
+
+    def sleep_pc(self):
+        """Public: SSH to Windows PC and put it to sleep."""
+        self._send_sleep_command()
+        self._set_state(WakeState.OFFLINE)
 
     def _heartbeat_loop(self):
         while True:
