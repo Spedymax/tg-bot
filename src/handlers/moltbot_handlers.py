@@ -259,7 +259,9 @@ class MoltbotHandlers:
             return []
 
     def _call_openclaw(self, content: str, user_key: str, model: str = "openclaw:main") -> str:
-        """Raw API call to OpenClaw. Returns response text or empty string on error."""
+        """Raw API call to OpenClaw. Returns response text or empty string on error.
+        Only retries on connection errors — NOT on timeouts, because OpenClaw is stateful
+        (tracks history per user_key) and a timeout means the message was already received."""
         last_exc = None
         for attempt in range(3):
             try:
@@ -286,6 +288,10 @@ class MoltbotHandlers:
                         logger.warning("MoltBot: OpenClaw returned no-response string, treating as empty")
                         return ""
                     return text
+            except httpx.TimeoutException as e:
+                # Timeout = OpenClaw already received the message, don't retry (would cause duplicates)
+                logger.warning(f"MoltBot: OpenClaw timed out (attempt {attempt + 1}), not retrying to avoid duplicate context")
+                return ""
             except Exception as e:
                 last_exc = e
                 if attempt < 2:
