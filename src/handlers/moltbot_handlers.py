@@ -14,6 +14,13 @@ CHAT_SUMMARY_PATH = os.path.expanduser("~/.openclaw/workspace/memory/chat-summar
 STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "moltbot_state.json")
 
 
+class _AIConnectionError(Exception):
+    """Raised when AI backend is unreachable or timed out."""
+
+class _AIRefusalError(Exception):
+    """Raised when AI explicitly refuses to respond."""
+
+
 def _load_chat_summary() -> str:
     """Load the long-term chat summary written by the AI."""
     try:
@@ -285,20 +292,20 @@ class MoltbotHandlers:
                     lines = [l for l in lines if not ('⚠' in l and ('failed' in l.lower() or 'action' in l.lower() or 'target' in l.lower()))]
                     text = '\n'.join(lines).strip()
                     if "no response" in text.lower() and "openclaw" in text.lower():
-                        logger.warning("MoltBot: OpenClaw returned no-response string, treating as empty")
-                        return ""
+                        logger.warning("MoltBot: OpenClaw returned no-response string, treating as refusal")
+                        raise _AIRefusalError("AI refused to respond")
                     return text
             except httpx.TimeoutException as e:
                 # Timeout = OpenClaw already received the message, don't retry (would cause duplicates)
                 logger.warning(f"MoltBot: OpenClaw timed out (attempt {attempt + 1}), not retrying to avoid duplicate context")
-                return ""
+                raise _AIConnectionError("timed out") from e
             except Exception as e:
                 last_exc = e
                 if attempt < 2:
                     logger.warning(f"MoltBot: OpenClaw attempt {attempt + 1} failed: {e}, retrying...")
                     import time; time.sleep(2)
         logger.error(f"MoltBot: OpenClaw all retries failed: {last_exc}")
-        return ""
+        raise _AIConnectionError(str(last_exc))
 
     def _call_ollama_direct(self, content: str, bot=None, message=None) -> str:
         """Call Ollama directly. Routes through OllamaWakeManager for auto-wake."""
@@ -549,11 +556,15 @@ class MoltbotHandlers:
         complexity = self._classify_complexity(user_text, history)
         logger.info(f"MoltBot: complexity={complexity} for: {user_text[:60]}")
         if complexity == "simple":
-            reply = self._ask_moltbot(sender_name, user_text, chat_context,
-                                      user_key, history, model="ollama/qwen3.5:9b")
-            if reply and reply.strip():
-                return reply
-            logger.info("MoltBot: Qwen returned empty, falling back to Claude")
+            try:
+                reply = self._ask_moltbot(sender_name, user_text, chat_context,
+                                          user_key, history, model="ollama/qwen3.5:9b")
+                if reply and reply.strip():
+                    return reply
+            except (_AIConnectionError, _AIRefusalError) as e:
+                logger.info(f"MoltBot: Qwen failed ({e}), falling back to Claude")
+            else:
+                logger.info("MoltBot: Qwen returned empty, falling back to Claude")
         return self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
 
     def _maybe_reply_probabilistic(self, message) -> bool:
@@ -917,6 +928,10 @@ class MoltbotHandlers:
                 if reply and reply.strip():
                     sent = self.bot.reply_to(message, reply)
                     self._store_bot_reply(reply, sent.message_id)
+            except _AIConnectionError:
+                self.bot.reply_to(message, "⚠️ Не могу подключиться к AI, попробуй позже")
+            except _AIRefusalError:
+                self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
             except Exception as e:
                 logger.error(f"MoltBot API error: {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
@@ -1004,6 +1019,10 @@ class MoltbotHandlers:
                 if reply and reply.strip():
                     sent = self.bot.reply_to(message, reply)
                     self._store_bot_reply(reply, sent.message_id)
+            except _AIConnectionError:
+                self.bot.reply_to(message, "⚠️ Не могу подключиться к AI, попробуй позже")
+            except _AIRefusalError:
+                self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
             except Exception as e:
                 logger.error(f"MoltBot API error (reply): {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
@@ -1089,6 +1108,10 @@ class MoltbotHandlers:
                 if reply and reply.strip():
                     sent = self.bot.reply_to(message, reply)
                     self._store_bot_reply(reply, sent.message_id)
+            except _AIConnectionError:
+                self.bot.reply_to(message, "⚠️ Не могу подключиться к AI, попробуй позже")
+            except _AIRefusalError:
+                self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
             except Exception as e:
                 logger.error(f"MoltBot API error (photo): {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
