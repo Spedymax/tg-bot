@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Implement a 3-player Telegram courtroom party game where an AI judge (OpenClaw) runs the trial, players receive hidden evidence cards via DM, and a dramatic multi-message verdict is delivered after 4 rounds.
+**Goal:** Implement a 3-player Telegram courtroom party game where an AI judge (Qwen via Ollama) runs the trial, players receive hidden evidence cards via DM, and a dramatic multi-message verdict is delivered after 4 rounds.
 
 **Architecture:** Two new files (`court_service.py` for game logic + AI prompts, `court_handlers.py` for Telegram interactions) backed by two PostgreSQL tables (`court_games`, `court_messages`). Follows the existing `game_service.py + game_handlers.py` pattern. Game state lives in DB; ephemeral wait-states (e.g. "waiting for crime text") live in an in-memory dict on the handler.
 
-**Tech Stack:** pyTelegramBotAPI (telebot), psycopg2, httpx, OpenClaw at `Settings.JARVIS_URL` (OpenAI-compatible API)
+**Tech Stack:** pyTelegramBotAPI (telebot), psycopg2, httpx, Ollama на `Settings.LOCAL_LLM_URL` (модель: `qwen2.5:14b`). OpenClaw НЕ используется — у него есть персонаж лиса, который конфликтует с ролью судьи. Вместо этого вызываем Qwen напрямую с system prompt, устанавливающим характер судьи.
 
 ---
 
@@ -17,13 +17,19 @@
 self.db.execute_query("SELECT ...", (param,))
 ```
 
-**OpenClaw call** (from `moltbot_handlers.py:276`):
+**Ollama call** (Qwen напрямую, без OpenClaw):
 ```python
 import httpx
 r = httpx.Client().post(
-    Settings.JARVIS_URL,
-    headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
-    json={"model": "openclaw:main", "user": user_key, "messages": [{"role": "user", "content": prompt}]},
+    f"{Settings.LOCAL_LLM_URL}/v1/chat/completions",
+    json={
+        "model": "qwen2.5:14b",
+        "messages": [
+            {"role": "system", "content": JUDGE_SYSTEM_PROMPT},  # только для судьи
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+    },
     timeout=90,
 )
 text = r.json()["choices"][0]["message"]["content"]
@@ -293,8 +299,8 @@ Add to `tests/test_court_service.py`:
 ```python
 def test_generate_cards_returns_three_lists():
     svc = make_service()
-    # Patch _call_openclaw
-    svc._call_openclaw = MagicMock(return_value="""
+    # Patch _call_judge_llm
+    svc._call_judge_llm = MagicMock(return_value="""
 ПРОКУРОР:
 1. Знайдено крихти чіпсів на місці злочину
 2. Підозрюваний відмовився від поліграфу
@@ -322,7 +328,7 @@ def test_generate_cards_returns_three_lists():
 
 def test_generate_cards_handles_parse_error():
     svc = make_service()
-    svc._call_openclaw = MagicMock(return_value="broken response")
+    svc._call_judge_llm = MagicMock(return_value="broken response")
     prosecutor, lawyer, witness = svc.generate_cards(defendant="Кіт", crime="украв чіпси")
     # Should return empty lists on parse error, not raise
     assert isinstance(prosecutor, list)
@@ -343,24 +349,34 @@ Add at the bottom of the `CourtService` class in `src/services/court_service.py`
 ```python
     # ── AI calls ───────────────────────────────────────────────────────────
 
-    def _call_openclaw(self, prompt: str, user_key: str = "court-game") -> str:
-        """Call OpenClaw. Returns response text or empty string on error."""
+    JUDGE_SYSTEM_PROMPT = (
+        "Ты — строгий судья на судебном заседании. Тебя зовут Судья Железный.\n\n"
+        "Характер:\n"
+        "- Строгий, но справедливый. Убедить тебя можно только фактами, не давлением.\n"
+        "- Театральный и красноречивый, но краткий.\n"
+        "- Фиксируешь все противоречия. Если сторона противоречит себе — указываешь на это.\n"
+        "- 'Я не так сказал' — не аргумент. Всё сказанное идёт в протокол.\n"
+        "- Говоришь от первого лица, только на украинском языке.\n"
+        "- Не выходишь из роли ни при каких обстоятельствах."
+    )
+
+    def _call_judge_llm(self, prompt: str, use_judge_persona: bool = True) -> str:
+        """Вызов Ollama/Qwen напрямую. use_judge_persona=False для генерации карт."""
+        messages = []
+        if use_judge_persona:
+            messages.append({"role": "system", "content": self.JUDGE_SYSTEM_PROMPT})
+        messages.append({"role": "user", "content": prompt})
         try:
             with httpx.Client() as client:
                 r = client.post(
-                    Settings.JARVIS_URL,
-                    headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
-                    json={
-                        "model": "openclaw:main",
-                        "user": user_key,
-                        "messages": [{"role": "user", "content": prompt}],
-                    },
+                    f"{Settings.LOCAL_LLM_URL}/v1/chat/completions",
+                    json={"model": "qwen2.5:14b", "messages": messages, "stream": False},
                     timeout=90,
                 )
                 r.raise_for_status()
                 return r.json()["choices"][0]["message"]["content"].strip()
         except Exception as e:
-            logger.error(f"CourtService: OpenClaw error: {e}")
+            logger.error(f"CourtService: Ollama error: {e}")
             return ""
 
     def generate_cards(self, defendant: str, crime: str) -> tuple[list, list, list]:
@@ -394,7 +410,7 @@ Add at the bottom of the `CourtService` class in `src/services/court_service.py`
 3. [карта]
 4. [карта]"""
 
-        raw = self._call_openclaw(prompt, user_key="court-card-gen")
+        raw = self._call_judge_llm(prompt, use_judge_persona=False)
         return self._parse_cards(raw)
 
     def _parse_cards(self, raw: str) -> tuple[list, list, list]:
@@ -431,7 +447,7 @@ Add at the bottom of the `CourtService` class in `src/services/court_service.py`
 
 Дай коротку реакцію судді (1-3 речення). Якщо аргумент слабкий або суперечить попередньому — вкажи на це або постав уточнювальне запитання. Якщо сильний — визнай, але стримано. Говори від першої особи як суддя. Відповідай тільки українською."""
 
-        reaction = self._call_openclaw(prompt, user_key=f"court-judge-{game_id}")
+        reaction = self._call_judge_llm(prompt)
         self.log_message(game_id, "judge", reaction, round_num)
         return reaction
 
@@ -465,7 +481,7 @@ Add at the bottom of the `CourtService` class in `src/services/court_service.py`
 
 Говори від першої особи як суддя. Тільки українська. Будь суворим — один слабкий аргумент не перекреслює сильний."""
 
-        raw = self._call_openclaw(prompt, user_key=f"court-verdict-{game_id}")
+        raw = self._call_judge_llm(prompt)
         parts = [p.strip() for p in raw.split("---") if p.strip()]
         if len(parts) < 4:
             parts = [raw] + [""] * (4 - len(parts))
@@ -899,6 +915,6 @@ ssh -i ~/.ssh/mac-max spedymax@192.168.1.35 \
 ## Known constraints
 
 - Each player must have started a private chat with the bot before playing (Telegram limitation)
-- OpenClaw card generation takes ~30s — the "Генерую матеріали справи..." message covers this wait
+- Ollama/Qwen card generation takes ~30s — the "Генерую матеріали справи..." message covers this wait
 - Round advancement is simple: prosecutor plays → any defense plays → round ends. If defense has 0 cards left, round auto-advances after prosecutor plays.
 - The `court_play` callback validates user_id against the role, so other players can't play each other's cards
