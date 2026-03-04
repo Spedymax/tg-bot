@@ -544,7 +544,7 @@ class MoltbotHandlers:
         logger.info(f"MoltBot: complexity={complexity} for: {user_text[:60]}")
         if complexity == "simple":
             reply = self._ask_moltbot(sender_name, user_text, chat_context,
-                                      user_key, history, model="ollama/qwen2.5:14b")
+                                      user_key, history, model="ollama/qwen3.5:9b")
             if reply and reply.strip():
                 return reply
             logger.info("MoltBot: Qwen returned empty, falling back to Claude")
@@ -582,7 +582,7 @@ class MoltbotHandlers:
 
         user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
         try:
-            reply = self._call_openclaw(prompt, user_key, model="ollama/qwen2.5:14b")
+            reply = self._call_openclaw(prompt, user_key, model="ollama/qwen3.5:9b")
             reply = reply.strip()
             if not reply:
                 return False
