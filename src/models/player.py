@@ -119,8 +119,7 @@ class Player:
 
     def add_item(self, item_name: str):
         """Add an item to player's inventory"""
-        if item_name not in self.items:
-            self.items.append(item_name)
+        self.items.append(item_name)
 
     def remove_item(self, item_name: str) -> bool:
         """Remove an item from player's inventory. Returns True if removed, False if not found"""

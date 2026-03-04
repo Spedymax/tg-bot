@@ -59,7 +59,8 @@ class GameHandlers:
             from services.pet_service import PetService as _PetSvc
             _pet_svc = _PetSvc()
             _pet_svc.record_game_activity(player, 'pisunchik', datetime.now(timezone.utc))
-            if player.pet and player.pet.get('is_alive') and _rand.random() < 0.20:
+            got_food = player.pet and player.pet.get('is_alive') and _rand.random() < 0.20
+            if got_food:
                 player.add_item('pet_food_basic')
             self._maybe_send_death_notice(message.chat.id, player)
             self.player_service.save_player(player)
@@ -71,6 +72,8 @@ class GameHandlers:
                 f"Изменения: {result['size_change']} см\n"
                 f"Также вы получили: {result['coins_change']} BTC"
             )
+            if got_food:
+                reply_message += "\n🍖 +1 корм для питомца!"
             
             for effect in result['effects']:
                 reply_message += f"\n{effect}"
@@ -129,7 +132,8 @@ class GameHandlers:
                 from services.pet_service import PetService as _PetSvc
                 _pet_svc = _PetSvc()
                 _pet_svc.record_game_activity(player, 'casino', datetime.now(timezone.utc))
-                if total_wins > 0 and player.pet and player.pet.get('is_alive') and _rand.random() < 0.15:
+                got_food = total_wins > 0 and player.pet and player.pet.get('is_alive') and _rand.random() < 0.15
+                if got_food:
                     player.add_item('pet_food_basic')
 
                 self._maybe_send_death_notice(message.chat.id, player)
@@ -139,6 +143,8 @@ class GameHandlers:
                     summary = f"🎰 Казино: {total_wins}/6 побед! Выигрыш: {total_wins * GameConfig.CASINO_JACKPOT_REWARD} BTC 🎉"
                 else:
                     summary = "🎰 Казино: 0/6. Ничего не выиграл."
+                if got_food:
+                    summary += "\n🍖 +1 корм для питомца!"
                 self.bot.send_message(message.chat.id, summary, disable_notification=True)
 
         
