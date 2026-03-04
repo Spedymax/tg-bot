@@ -47,6 +47,7 @@ class OllamaWakeManager:
         self._queue_lock = threading.Lock()
         self._last_ollama_request: float = time.time()
         self._bot = None
+        self._woke_by_bot: bool = False  # True only when bot sent WoL for Ollama
         self._initialized = True
 
     @property
@@ -134,8 +135,8 @@ class OllamaWakeManager:
             self._notify_admin(f"⚠️ Failed to put PC to sleep: {e}")
 
     def _sleep_check_tick(self):
-        """Called every 5 min. Sleeps PC if user has been idle 15+ min."""
-        if self._state != WakeState.ONLINE:
+        """Called every 5 min. Sleeps PC only if bot woke it and user has been idle 15+ min."""
+        if self._state != WakeState.ONLINE or not self._woke_by_bot:
             return
         from src.config.settings import Settings
         threshold = Settings.OLLAMA_IDLE_SLEEP_MINUTES * 60
@@ -174,6 +175,7 @@ class OllamaWakeManager:
     def sleep_pc(self):
         """Public: SSH to Windows PC and put it to sleep."""
         self._send_sleep_command()
+        self._woke_by_bot = False
         self._set_state(WakeState.OFFLINE)
 
     def _heartbeat_loop(self):
@@ -275,6 +277,7 @@ class OllamaWakeManager:
                     "⏳ Ollama is waking up… (~1–3 min). I'll reply when ready!")
             except Exception:
                 pass
+            self._woke_by_bot = True
             self._trigger_wake()
 
         return None
