@@ -134,20 +134,16 @@ class OllamaWakeManager:
             self._notify_admin(f"⚠️ Failed to put PC to sleep: {e}")
 
     def _sleep_check_tick(self):
-        """Called every 5 min. Sleeps PC if both bot and user have been idle 15+ min."""
+        """Called every 5 min. Sleeps PC if user has been idle 15+ min."""
         if self._state != WakeState.ONLINE:
             return
         from src.config.settings import Settings
         threshold = Settings.OLLAMA_IDLE_SLEEP_MINUTES * 60
-        bot_idle = time.time() - self._last_ollama_request
-        if bot_idle < threshold:
-            return
         user_idle = self._get_windows_idle_seconds()
         if user_idle < threshold:
             return
         self._notify_admin(
-            f"😴 PC going to sleep (bot idle {int(bot_idle // 60)}m, "
-            f"user idle {int(user_idle // 60)}m)"
+            f"😴 PC going to sleep (user idle {int(user_idle // 60)}m)"
         )
         self.sleep_pc()
 
