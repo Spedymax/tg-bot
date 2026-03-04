@@ -114,7 +114,7 @@ class OllamaWakeManager:
         """Returns seconds since last user input on Windows PC. Returns 0 on error (conservative)."""
         try:
             output = self._ssh_run('powershell -File C:\\idle_check.ps1')
-            return float(output)
+            return float(output.replace(',', '.'))
         except Exception as e:
             logger.warning(f"OllamaWakeManager: idle check failed: {e}")
             return 0.0  # conservative: assume user is active
