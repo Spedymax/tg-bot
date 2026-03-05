@@ -335,7 +335,7 @@ class TriviaHandlers:
                     import random as _rand
                     if player.pet and player.pet.get('is_alive') and _rand.random() < 0.25:
                         player.add_item('pet_food_basic')
-                        self.bot.send_message(chat_id, "🍖 +1 корм для питомца!", disable_notification=True)
+                        self.bot.send_message(chat_id, f"🍖 {player.player_name} получил +1 корм для питомца!", disable_notification=True)
 
                     self._maybe_send_death_notice(chat_id, player)
                     self.player_service.save_player(player)
