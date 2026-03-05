@@ -42,6 +42,7 @@ class CourtHandlers:
         # Состояния ожидания по чату: chat_id → {'state': str, 'game_id': int, ...}
         self._wait: dict[int, dict] = {}
         self._bot_username: str | None = None
+        self._bot_id: int | None = None
         # Финальное слово: user_id → {game_id, role, chat_id}
         self._pending_final_word: dict[int, dict] = {}
         # Сбор финальных слов по игре: game_id → {statements: {role: text}, needed: set, chat_id}
@@ -63,7 +64,7 @@ class CourtHandlers:
             self._wait.pop(chat_id, None)
 
             self.bot.send_message(chat_id, RULES_TEXT, parse_mode='HTML')
-            self.bot.send_message(chat_id, "👤 Кого обвиняем? Напишите имя или описание подсудимого (например: «Кот Леопольд», «Юра с 3-го этажа», «ChatGPT»):")
+            self.bot.send_message(chat_id, "👤 Кого обвиняем? Напишите имя или описание подсудимого (например: «Кот Леопольд», «Юра с 3-го этажа», «ChatGPT»):\n\n<i>Ответьте реплаем на любое сообщение в чате.</i>", parse_mode='HTML')
             self._wait[chat_id] = {'state': 'waiting_defendant', 'initiator': message.from_user.id}
 
         @self.bot.message_handler(commands=['court_stop', 'sud_stop'])
@@ -107,12 +108,19 @@ class CourtHandlers:
 
         @self.bot.message_handler(func=lambda m: m.chat.type != 'private' and m.chat.id in self._wait)
         def handle_wait_state(message):
+            # Игнорируем команды
+            if message.text and message.text.startswith('/'):
+                return
             chat_id = message.chat.id
             state_data = self._wait.get(chat_id)
             if not state_data:
                 return
 
             state = state_data['state']
+
+            # Требуем реплай на сообщение бота
+            if not message.reply_to_message or message.reply_to_message.from_user.id != self._get_bot_id():
+                return
 
             if state == 'waiting_defendant':
                 defendant = message.text.strip()
@@ -121,7 +129,7 @@ class CourtHandlers:
                     return
                 state_data['defendant'] = defendant
                 state_data['state'] = 'waiting_crime'
-                self.bot.send_message(chat_id, f"📋 Подсудимый: <b>{defendant}</b>\n\nТеперь опишите преступление:", parse_mode='HTML')
+                self.bot.send_message(chat_id, f"📋 Подсудимый: <b>{defendant}</b>\n\nТеперь опишите преступление:\n\n<i>Ответьте реплаем на любое сообщение в чате.</i>", parse_mode='HTML')
 
             elif state == 'waiting_crime':
                 crime = message.text.strip()
@@ -133,6 +141,7 @@ class CourtHandlers:
                 state_data['game_id'] = game_id
                 state_data['state'] = 'role_selection'
                 state_data['roles_taken'] = {}
+                state_data.pop('prompt_msg_id', None)
                 self._wait[chat_id] = state_data
                 self._send_role_keyboard(chat_id, game_id)
 
@@ -445,10 +454,20 @@ class CourtHandlers:
             except Exception:
                 pass
 
+    def _get_bot_id(self) -> int:
+        if not self._bot_id:
+            try:
+                self._bot_id = self.bot.get_me().id
+            except Exception:
+                return -1
+        return self._bot_id
+
     def _get_bot_username(self) -> str:
         if not self._bot_username:
             try:
-                self._bot_username = self.bot.get_me().username
+                me = self.bot.get_me()
+                self._bot_username = me.username
+                self._bot_id = me.id
             except Exception:
                 return "бот"
         return self._bot_username
