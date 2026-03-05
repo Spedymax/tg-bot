@@ -184,6 +184,9 @@ class CourtService:
 4. [карта]"""
 
         raw = self._call_judge_llm(prompt, use_judge_persona=False)
+        if not raw:
+            logger.error("CourtService: пустой ответ от LLM при генерации карт")
+            return [], [], []
         return self._parse_cards(raw)
 
     def _parse_cards(self, raw: str) -> tuple[list, list, list]:
@@ -199,7 +202,9 @@ class CourtService:
                         break
                 else:
                     if current and line and line[0].isdigit() and ". " in line:
-                        sections[current].append(line.split(". ", 1)[1])
+                        parts = line.split(". ", 1)
+                        if len(parts) == 2 and parts[1]:
+                            sections[current].append(parts[1])
             return sections["ПРОКУРОР"][:8], sections["АДВОКАТ"][:4], sections["СВИДЕТЕЛЬ"][:4]
         except Exception as e:
             logger.error(f"CourtService: ошибка парсинга карт: {e}\nRaw: {raw}")
