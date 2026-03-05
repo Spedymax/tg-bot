@@ -141,7 +141,10 @@ class TelegramBot:
     def setup_handlers(self):
         """Set up all bot command handlers"""
 
-        # Setup MoltBot handlers FIRST — must run before the admin catch-all text handler
+        # Setup admin priority handlers FIRST — must run before moltbot text handlers
+        self.admin_handlers.setup_priority_handlers()
+
+        # Setup MoltBot handlers — must run before the admin catch-all text handler
         self.moltbot_handlers.setup_handlers()
 
         # Setup game handlers first
