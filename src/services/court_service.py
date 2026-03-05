@@ -144,7 +144,7 @@ class CourtService:
             with httpx.Client() as client:
                 r = client.post(
                     f"{Settings.LOCAL_LLM_URL}/v1/chat/completions",
-                    json={"model": "qwen2.5:14b", "messages": messages, "stream": False},
+                    json={"model": Settings.LOCAL_LLM_MODEL, "messages": messages, "stream": False},
                     timeout=90,
                 )
                 r.raise_for_status()
@@ -217,18 +217,30 @@ class CourtService:
         history_text = "\n".join(f"[{m['role']}] {m['content']}" for m in history[-20:])
 
         role_ru = {"prosecutor": "Прокурор", "lawyer": "Адвокат", "witness": "Свидетель защиты"}[role]
+
+        if role == "prosecutor":
+            direction = (
+                "Дай реакцию (1-2 предложения), затем ПРЯМО обратись к стороне защиты — "
+                "потребуй опровержения, объяснения или конкретного контраргумента."
+            )
+        else:
+            direction = (
+                "Дай реакцию (1-2 предложения). Сравни аргумент с позицией обвинения — "
+                "есть ли противоречие? Подтверди принятие к сведению или задай уточняющий вопрос."
+            )
+
         prompt = f"""Протокол заседания (последние сообщения):
 {history_text}
 
 Сейчас {role_ru} сыграл карту: «{card}»
 
-Дай краткую реакцию судьи (1-3 предложения). Если аргумент слабый или противоречит предыдущему — укажи на это или задай уточняющий вопрос. Если сильный — признай, но сдержанно."""
+{direction}"""
 
         reaction = self._call_judge_llm(prompt)
         self.log_message(game_id, "judge", reaction, round_num)
         return reaction
 
-    def generate_verdict(self, game_id: int) -> list[str]:
+    def generate_verdict(self, game_id: int, final_statements: dict = None) -> list[str]:
         """Сгенерировать драматичный многосообщный приговор. Возвращает список из 4 строк."""
         game = self.get_active_game_by_id(game_id)
         if not game:
@@ -240,13 +252,23 @@ class CourtService:
         defense_plays = [p["card"] for p in played if p["role"] in ("lawyer", "witness")]
         protocol = "\n".join(f"[{m['role']}] {m['content']}" for m in messages)
 
+        final_section = ""
+        if final_statements:
+            lines = []
+            for role, text in final_statements.items():
+                role_ru = {"prosecutor": "Прокурор", "lawyer": "Адвокат", "witness": "Свидетель"}.get(role, role)
+                if text:
+                    lines.append(f"{role_ru}: «{text}»")
+            if lines:
+                final_section = "\n\nФинальные слова сторон:\n" + "\n".join(lines)
+
         prompt = f"""Заседание завершено. Подсудимый: {game['defendant']}. Преступление: {game['crime']}.
 
 Протокол заседания:
 {protocol}
 
 Аргументы обвинения: {'; '.join(prosecution_plays)}
-Аргументы защиты: {'; '.join(defense_plays)}
+Аргументы защиты: {'; '.join(defense_plays)}{final_section}
 
 Вынеси приговор в 4 отдельных блоках, разделённых строкой "---":
 
