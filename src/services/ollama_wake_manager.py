@@ -181,7 +181,7 @@ class OllamaWakeManager:
     def _heartbeat_loop(self):
         while True:
             try:
-                time.sleep(30)
+                time.sleep(120)
                 self._heartbeat_tick()
             except Exception as e:
                 logger.error(f"OllamaWakeManager: heartbeat loop error: {e}")
