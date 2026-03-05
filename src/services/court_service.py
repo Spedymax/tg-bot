@@ -62,6 +62,9 @@ class CourtService:
     def record_played_card(self, game_id: int, role: str, card: str, round_num: int):
         """Добавить сыгранную карту в массив и уменьшить счётчик оставшихся."""
         game = self.get_active_game_by_id(game_id)
+        if not game:
+            logger.warning(f"Game {game_id} not found in record_played_card")
+            return
         played = game.get("played_cards", [])
         if not isinstance(played, list):
             played = []
