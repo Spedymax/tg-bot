@@ -42,6 +42,10 @@ class CourtHandlers:
         # Состояния ожидания по чату: chat_id → {'state': str, 'game_id': int, ...}
         self._wait: dict[int, dict] = {}
         self._bot_username: str | None = None
+        # Финальное слово: user_id → {game_id, role, chat_id}
+        self._pending_final_word: dict[int, dict] = {}
+        # Сбор финальных слов по игре: game_id → {statements: {role: text}, needed: set, chat_id}
+        self._final_word_state: dict[int, dict] = {}
 
     def setup_handlers(self):
 
@@ -72,6 +76,34 @@ class CourtHandlers:
             self.court_service.set_status(game['id'], 'aborted')
             self._wait.pop(chat_id, None)
             self.bot.send_message(chat_id, "⚖️ Заседание досрочно прекращено.")
+
+        @self.bot.message_handler(func=lambda m: m.chat.type == 'private' and m.from_user.id in self._pending_final_word)
+        def handle_final_word(message):
+            user_id = message.from_user.id
+            pending = self._pending_final_word.pop(user_id, None)
+            if not pending:
+                return
+            game_id = pending['game_id']
+            role = pending['role']
+            chat_id = pending['chat_id']
+            statement = message.text.strip()[:500]
+
+            self.court_service.log_message(game_id, f'final_{role}', statement)
+            self.bot.reply_to(message, "✅ Ваше финальное слово принято судом.")
+
+            state = self._final_word_state.get(game_id)
+            if not state:
+                return
+            state['statements'][role] = statement
+            state['needed'].discard(role)
+
+            if not state['needed']:
+                self._final_word_state.pop(game_id, None)
+                threading.Thread(
+                    target=self._deliver_verdict,
+                    args=(game_id, chat_id, state['statements']),
+                    daemon=True
+                ).start()
 
         @self.bot.message_handler(func=lambda m: m.chat.type != 'private' and m.chat.id in self._wait)
         def handle_wait_state(message):
@@ -327,8 +359,8 @@ class CourtHandlers:
                 if has_prosecution and has_defense:
                     next_round = round_num + 1
                     if next_round > 4:
-                        self.bot.send_message(chat_id, "⚖️ <b>Все раунды завершены. Суд удаляется на совещание...</b>", parse_mode='HTML')
-                        self._deliver_verdict(game_id, chat_id)
+                        self.bot.send_message(chat_id, "⚖️ <b>Все раунды завершены.</b>\n\nСуд предоставляет каждой из сторон <b>последнее слово</b>. Напишите ваше финальное заявление боту в личку.", parse_mode='HTML')
+                        self._request_final_words(game_id, chat_id)
                     else:
                         self.court_service.advance_round(game_id, next_round)
                         self.bot.send_message(
@@ -343,10 +375,50 @@ class CourtHandlers:
             except Exception:
                 pass
 
-    def _deliver_verdict(self, game_id: int, chat_id: int):
+    def _request_final_words(self, game_id: int, chat_id: int):
+        """Запросить финальное слово у каждого игрока в личку."""
+        game = self.court_service.get_active_game_by_id(game_id)
+        if not game:
+            return
+
+        role_user_map = {
+            'prosecutor': game['prosecutor_id'],
+            'lawyer': game['lawyer_id'],
+            'witness': game['witness_id'],
+        }
+
+        self._final_word_state[game_id] = {
+            'statements': {},
+            'needed': set(role_user_map.keys()),
+            'chat_id': chat_id,
+        }
+
+        for role, user_id in role_user_map.items():
+            role_ru = ROLE_NAMES[role]
+            self._pending_final_word[user_id] = {'game_id': game_id, 'role': role, 'chat_id': chat_id}
+            try:
+                self.bot.send_message(
+                    user_id,
+                    f"⚖️ <b>Финальное слово</b>\n\nСуд предоставляет вам, {role_ru}, последнее слово.\n"
+                    f"Напишите ваше финальное заявление (до 500 символов):",
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"_request_final_words: не удалось отправить {user_id}: {e}")
+                self._pending_final_word.pop(user_id, None)
+                self._final_word_state[game_id]['statements'][role] = ''
+                self._final_word_state[game_id]['needed'].discard(role)
+
+        # Если все DM упали — сразу к приговору
+        state = self._final_word_state.get(game_id)
+        if state and not state['needed']:
+            self._final_word_state.pop(game_id, None)
+            threading.Thread(target=self._deliver_verdict, args=(game_id, chat_id, {}), daemon=True).start()
+
+    def _deliver_verdict(self, game_id: int, chat_id: int, final_statements: dict = None):
         """Доставить драматичный многосообщный приговор."""
         try:
-            parts = self.court_service.generate_verdict(game_id)
+            parts = self.court_service.generate_verdict(game_id, final_statements or {})
             self.court_service.save_verdict(game_id, "\n---\n".join(parts))
 
             prefixes = [
