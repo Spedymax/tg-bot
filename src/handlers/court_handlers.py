@@ -51,6 +51,8 @@ class CourtHandlers:
         self._test_games: set[int] = set()
         # Private DM wait states: user_id → state dict
         self._private_wait: dict[int, dict] = {}
+        # Pending speech input: chat_id → {game_id, user_id, role, card, round_num, prompt_msg_id}
+        self._pending_speech: dict[int, dict] = {}
         # AI role IDs (fake, never sent DMs)
         self.AI_LAWYER_ID = 0
         self.AI_WITNESS_ID = -1
@@ -138,6 +140,11 @@ class CourtHandlers:
 
             self.court_service.log_message(game_id, f'final_{role}', statement)
             self.bot.reply_to(message, "✅ Ваше финальное слово принято судом.")
+            role_ru = ROLE_NAMES.get(role, role)
+            try:
+                self.bot.send_message(chat_id, f"✅ {role_ru} предоставил финальное слово.")
+            except Exception:
+                pass
 
             state = self._final_word_state.get(game_id)
             if not state:
@@ -152,6 +159,25 @@ class CourtHandlers:
                     args=(game_id, chat_id, state['statements']),
                     daemon=True
                 ).start()
+
+        @self.bot.message_handler(func=lambda m: (
+            m.chat.type != 'private'
+            and m.chat.id in self._pending_speech
+            and m.reply_to_message is not None
+            and m.reply_to_message.from_user.id == self._get_bot_id()
+            and m.from_user.id == self._pending_speech[m.chat.id]['user_id']
+        ))
+        def handle_speech_input(message):
+            chat_id = message.chat.id
+            pending = self._pending_speech.pop(chat_id, None)
+            if not pending:
+                return
+            speech = message.text.strip()[:500]
+            threading.Thread(
+                target=self._after_speech_received,
+                args=(pending['game_id'], chat_id, pending['role'], pending['card'], pending['round_num'], speech),
+                daemon=True
+            ).start()
 
         @self.bot.message_handler(func=lambda m: m.chat.type != 'private' and m.chat.id in self._wait)
         def handle_wait_state(message):
@@ -468,15 +494,38 @@ class CourtHandlers:
             self.bot.send_message(chat_id, f"🃏 <b>{role_ru}</b> играет карту:\n\n«{card}»", parse_mode='HTML')
 
             self.court_service.record_played_card(game_id, role, card, round_num)
-            self.court_service.log_message(game_id, role, card, round_num)
 
-            # Речь игрока
-            speech = self.court_service.player_argue(game_id, role, card, round_num)
-            if speech:
-                speech_icon = "⚔️" if role == "prosecutor" else ("🛡️" if role == "lawyer" else "👁️")
-                self.bot.send_message(chat_id, f"{speech_icon} <i>{speech}</i>", parse_mode='HTML')
+            # Ask player to type their speech
+            speech_prompt = self.bot.send_message(
+                chat_id,
+                f"💬 <b>{role_ru}</b>, опиши свой аргумент — ответь реплаем на это сообщение:",
+                parse_mode='HTML'
+            )
+            self._pending_speech[chat_id] = {
+                'game_id': game_id,
+                'user_id': self.court_service.get_active_game_by_id(game_id)[f'{role}_id'],
+                'role': role,
+                'card': card,
+                'round_num': round_num,
+                'prompt_msg_id': speech_prompt.message_id,
+            }
+        except Exception as e:
+            logger.error(f"_process_played_card: ошибка для game {game_id}: {e}")
+            try:
+                self.bot.send_message(chat_id, "⚠️ Ошибка при обработке карты. Попробуйте сыграть карту ещё раз.")
+            except Exception:
+                pass
 
-            # Реакция судьи
+    def _after_speech_received(self, game_id: int, chat_id: int, role: str, card: str, round_num: int, speech: str):
+        """Обработать речь игрока: залогировать, показать, запустить реакцию судьи, продвинуть состояние."""
+        try:
+            self.court_service.log_message(game_id, role, speech, round_num)
+            role_icon = "⚔️" if role == "prosecutor" else ("🛡️" if role == "lawyer" else "👁️")
+            self.bot.send_message(chat_id, f"{role_icon} <i>{speech}</i>", parse_mode='HTML')
+
+            # Статус: судья думает
+            self.bot.send_chat_action(chat_id, 'typing')
+
             reaction = self.court_service.judge_react(game_id, role, card, round_num)
             if reaction:
                 self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
@@ -487,7 +536,6 @@ class CourtHandlers:
 
             if role == 'prosecutor':
                 if game_id in self._test_games:
-                    # Test mode: AI auto-plays defense
                     threading.Thread(
                         target=self._ai_play_defense_test,
                         args=(game_id, chat_id, card, round_num),
@@ -496,7 +544,8 @@ class CourtHandlers:
                 else:
                     self.bot.send_message(
                         chat_id,
-                        f"🛡️ <b>Защита может ответить.</b> Адвокат или Свидетель — сыграйте карту в личных сообщениях.\n"
+                        f"🛡️ <b>Защита, ваш ход!</b>\n"
+                        f"Адвокат или Свидетель — сыграйте карту в личке с ботом.\n"
                         f"(Адвокат осталось: {game['lawyer_cards_left']}, Свидетель: {game['witness_cards_left']})",
                         parse_mode='HTML'
                     )
@@ -514,15 +563,11 @@ class CourtHandlers:
                         self.court_service.advance_round(game_id, next_round)
                         self.bot.send_message(
                             chat_id,
-                            f"⚖️ <b>Раунд {next_round} из 4</b>\nСлово предоставляется ⚔️ Прокурору.",
+                            f"⚖️ <b>Раунд {next_round} из 4</b>\n⚔️ Прокурор, ваш ход. Сыграйте карту в личке.",
                             parse_mode='HTML'
                         )
         except Exception as e:
-            logger.error(f"_process_played_card: ошибка для game {game_id}: {e}")
-            try:
-                self.bot.send_message(chat_id, "⚠️ Ошибка при обработке карты. Попробуйте сыграть карту ещё раз.")
-            except Exception:
-                pass
+            logger.error(f"_after_speech_received: ошибка для game {game_id}: {e}")
 
     def _request_final_words(self, game_id: int, chat_id: int):
         """Запросить финальное слово у каждого игрока в личку."""
@@ -552,6 +597,7 @@ class CourtHandlers:
                     f"Напишите ваше финальное заявление (до 500 символов):",
                     parse_mode='HTML'
                 )
+                self.bot.send_message(chat_id, f"⏳ Ожидаем финальное слово от {role_ru}...", parse_mode='HTML')
             except Exception as e:
                 logger.error(f"_request_final_words: не удалось отправить {user_id}: {e}")
                 self._pending_final_word.pop(user_id, None)
@@ -567,6 +613,7 @@ class CourtHandlers:
     def _deliver_verdict(self, game_id: int, chat_id: int, final_statements: dict = None):
         """Доставить драматичный многосообщный приговор."""
         try:
+            self.bot.send_message(chat_id, "⚖️ Судья удаляется на совещание... 🤔", parse_mode='HTML')
             parts = self.court_service.generate_verdict(game_id, final_statements or {})
             self.court_service.save_verdict(game_id, "\n---\n".join(parts))
 
