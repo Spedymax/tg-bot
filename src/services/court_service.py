@@ -134,24 +134,85 @@ class CourtService:
         "- Не выходишь из роли ни при каких обстоятельствах."
     )
 
-    def _call_judge_llm(self, prompt: str, use_judge_persona: bool = True) -> str:
-        """Вызов Ollama/Qwen напрямую. use_judge_persona=False для генерации карт."""
+    PROSECUTOR_SYSTEM_PROMPT = (
+        "Ты — прокурор на судебном заседании. Твоя задача — обвинять.\n"
+        "Характер: уверенный, слегка пафосный, иногда преувеличиваешь значимость улик. "
+        "Говоришь от первого лица, только на русском. Не выходишь из роли."
+    )
+    LAWYER_SYSTEM_PROMPT = (
+        "Ты — адвокат защиты на судебном заседании. Твоя задача — защищать подсудимого.\n"
+        "Характер: дипломатичный, находчивый, всегда найдёшь объяснение даже абсурдной улике. "
+        "Говоришь от первого лица, только на русском. Не выходишь из роли."
+    )
+    WITNESS_SYSTEM_PROMPT = (
+        "Ты — свидетель защиты на судебном заседании.\n"
+        "Характер: немного нервничаешь, путаешься в деталях, но в целом поддерживаешь защиту. "
+        "Говоришь от первого лица, только на русском. Не выходишь из роли."
+    )
+
+    def _call_llm(self, system_prompt: str | None, user_prompt: str) -> str:
+        """Универсальный вызов LLM с произвольным системным промптом."""
         messages = []
-        if use_judge_persona:
-            messages.append({"role": "system", "content": self.JUDGE_SYSTEM_PROMPT})
-        messages.append({"role": "user", "content": prompt})
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
         try:
             with httpx.Client() as client:
                 r = client.post(
                     f"{Settings.LOCAL_LLM_URL}/v1/chat/completions",
                     json={"model": Settings.LOCAL_LLM_MODEL, "messages": messages, "stream": False},
-                    timeout=90,
+                    timeout=180,
                 )
                 r.raise_for_status()
                 return r.json()["choices"][0]["message"]["content"].strip()
         except Exception as e:
             logger.error(f"CourtService: Ollama error: {e}")
             return ""
+
+    def _call_judge_llm(self, prompt: str, use_judge_persona: bool = True) -> str:
+        """Вызов LLM с персоной судьи или без."""
+        system = self.JUDGE_SYSTEM_PROMPT if use_judge_persona else None
+        return self._call_llm(system, prompt)
+
+    def player_argue(self, game_id: int, role: str, card: str, round_num: int) -> str:
+        """Генерирует речь игрока при розыгрыше карты (2-3 предложения от роли)."""
+        game = self.get_active_game_by_id(game_id)
+        if not game:
+            return ""
+        history = self.get_session_messages(game_id)
+        history_text = "\n".join(f"[{m['role']}] {m['content']}" for m in history[-8:])
+        defendant = game["defendant"]
+        crime = game["crime"]
+
+        system_prompts = {
+            "prosecutor": self.PROSECUTOR_SYSTEM_PROMPT,
+            "lawyer": self.LAWYER_SYSTEM_PROMPT,
+            "witness": self.WITNESS_SYSTEM_PROMPT,
+        }
+        user_prompts = {
+            "prosecutor": (
+                f"Контекст заседания:\n{history_text}\n\n"
+                f"Ты представляешь улику: «{card}»\n"
+                f"Объясни в 2-3 предложениях как эта улика доказывает вину «{defendant}» "
+                f"в «{crime}». Будь убедителен и слегка театрален."
+            ),
+            "lawyer": (
+                f"Контекст заседания:\n{history_text}\n\n"
+                f"Ты представляешь аргумент защиты: «{card}»\n"
+                f"Объясни в 2-3 предложениях как это доказывает невиновность «{defendant}» "
+                f"в «{crime}». Будь находчив, даже если связь кажется натянутой."
+            ),
+            "witness": (
+                f"Контекст заседания:\n{history_text}\n\n"
+                f"Ты даёшь показания: «{card}»\n"
+                f"Расскажи в 2-3 предложениях что именно ты видел или знаешь, "
+                f"и почему это говорит в пользу «{defendant}». Можешь немного путаться в деталях."
+            ),
+        }
+        speech = self._call_llm(system_prompts[role], user_prompts[role])
+        if speech:
+            self.log_message(game_id, role, speech, round_num)
+        return speech
 
     def generate_cards(self, defendant: str, crime: str) -> tuple[list, list, list]:
         """Попросить ИИ сгенерировать 16 карт. Возвращает (prosecutor[8], lawyer[4], witness[4])."""

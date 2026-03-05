@@ -335,6 +335,12 @@ class CourtHandlers:
             self.court_service.record_played_card(game_id, role, card, round_num)
             self.court_service.log_message(game_id, role, card, round_num)
 
+            # Речь игрока
+            speech = self.court_service.player_argue(game_id, role, card, round_num)
+            if speech:
+                speech_icon = "⚔️" if role == "prosecutor" else ("🛡️" if role == "lawyer" else "👁️")
+                self.bot.send_message(chat_id, f"{speech_icon} <i>{speech}</i>", parse_mode='HTML')
+
             # Реакция судьи
             reaction = self.court_service.judge_react(game_id, role, card, round_num)
             if reaction:
