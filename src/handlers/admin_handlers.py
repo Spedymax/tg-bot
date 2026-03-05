@@ -288,18 +288,17 @@ class AdminHandlers:
 
                 del self.admin_actions[message.from_user.id]
 
-            # --- Step 2: get item name + quantity ---
-            elif step == "waiting_item":
-                parts = text.split()
-                item_name = parts[0]
+            # --- Step 2: get quantity for item actions ---
+            elif step == "waiting_quantity":
                 try:
-                    quantity = int(parts[1]) if len(parts) > 1 else 1
+                    quantity = int(text)
                     if quantity < 1:
                         raise ValueError
                 except ValueError:
-                    self.bot.reply_to(message, "❌ Формат: название [количество]\n\n/cancel — отмена")
+                    self.bot.reply_to(message, "❌ Введите целое число больше 0.\n\n/cancel — отмена")
                     return
 
+                item_name = user_action.get("item_name", "")
                 player = self.player_service.get_player(user_action["player_id"])
                 if not player:
                     self.bot.reply_to(message, "❌ Игрок не найден.")
@@ -324,7 +323,7 @@ class AdminHandlers:
                     for _ in range(quantity):
                         player.statuetki.append(item_name)
                     ok = self.player_service.save_player(player)
-                    self.bot.reply_to(message, f"✅ Добавлено {quantity}x статуэтку '{item_name}' игроку {player.player_name}" if ok else "❌ Ошибка при сохранении.")
+                    self.bot.reply_to(message, f"✅ Добавлено {quantity}x '{item_name}' игроку {player.player_name}" if ok else "❌ Ошибка при сохранении.")
 
                 del self.admin_actions[message.from_user.id]
 
@@ -774,32 +773,84 @@ class AdminHandlers:
                 )
 
             elif action == "addItem":
+                try:
+                    with open('/home/spedymax/tg-bot/assets/data/shop.json', 'r', encoding='utf-8') as f:
+                        shop_data = json.load(f)
+                    item_names = shop_data.get("names", {})
+                except Exception:
+                    item_names = {}
+                markup = types.InlineKeyboardMarkup()
+                for item_key, item_label in item_names.items():
+                    markup.add(types.InlineKeyboardButton(item_label, callback_data=f"admin_item::{item_key}"))
+                markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="admin_back"))
                 self.admin_actions[call.from_user.id] = {
-                    "action": action, "player_id": player_id, "step": "waiting_item"
+                    "action": action, "player_id": player_id, "step": "waiting_item_selection"
                 }
                 self.bot.edit_message_text(
-                    f"✅ {player.player_name}\n\nВведите название предмета и количество (например: prezervativ 3):\n\n/cancel — отмена",
-                    call.message.chat.id, call.message.message_id
+                    f"✅ {player.player_name}\n\nВыберите предмет:",
+                    call.message.chat.id, call.message.message_id, reply_markup=markup
                 )
 
             elif action == "removeItem":
-                items_str = "\n".join(f"  • {i}" for i in player.items) if player.items else "  нет предметов"
+                unique_items = list(dict.fromkeys(player.items))
+                if not unique_items:
+                    self.bot.answer_callback_query(call.id, "У игрока нет предметов.")
+                    return
+                try:
+                    with open('/home/spedymax/tg-bot/assets/data/shop.json', 'r', encoding='utf-8') as f:
+                        shop_data = json.load(f)
+                    item_names = shop_data.get("names", {})
+                except Exception:
+                    item_names = {}
+                markup = types.InlineKeyboardMarkup()
+                for item_key in unique_items:
+                    label = item_names.get(item_key, item_key)
+                    markup.add(types.InlineKeyboardButton(label, callback_data=f"admin_item::{item_key}"))
+                markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="admin_back"))
                 self.admin_actions[call.from_user.id] = {
-                    "action": action, "player_id": player_id, "step": "waiting_item"
+                    "action": action, "player_id": player_id, "step": "waiting_item_selection"
                 }
                 self.bot.edit_message_text(
-                    f"✅ {player.player_name}\n\nПредметы:\n{items_str}\n\nВведите название предмета и количество (например: prezervativ 2):\n\n/cancel — отмена",
-                    call.message.chat.id, call.message.message_id
+                    f"✅ {player.player_name}\n\nВыберите предмет для удаления:",
+                    call.message.chat.id, call.message.message_id, reply_markup=markup
                 )
 
             elif action == "addStatue":
+                try:
+                    with open('/home/spedymax/tg-bot/assets/data/statuetki.json', 'r', encoding='utf-8') as f:
+                        stat_data = json.load(f)
+                    statue_names = list(stat_data.get("prices", {}).keys())
+                except Exception:
+                    statue_names = []
+                markup = types.InlineKeyboardMarkup()
+                for name in statue_names:
+                    markup.add(types.InlineKeyboardButton(name, callback_data=f"admin_item::{name}"))
+                markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="admin_back"))
                 self.admin_actions[call.from_user.id] = {
-                    "action": action, "player_id": player_id, "step": "waiting_item"
+                    "action": action, "player_id": player_id, "step": "waiting_item_selection"
                 }
                 self.bot.edit_message_text(
-                    f"✅ {player.player_name}\n\nВведите название статуэтки и количество (например: gold 1):\n\n/cancel — отмена",
-                    call.message.chat.id, call.message.message_id
+                    f"✅ {player.player_name}\n\nВыберите статуэтку:",
+                    call.message.chat.id, call.message.message_id, reply_markup=markup
                 )
+
+        @self.bot.callback_query_handler(func=lambda call: call.data.startswith("admin_item::"))
+        def handle_item_selection(call):
+            """Handle item selection from inline keyboard"""
+            if call.from_user.id not in Settings.ADMIN_IDS:
+                self.bot.answer_callback_query(call.id, "Нет доступа.")
+                return
+            user_action = self.admin_actions.get(call.from_user.id)
+            if not user_action or user_action.get("step") != "waiting_item_selection":
+                self.bot.answer_callback_query(call.id, "Нет активного действия.")
+                return
+            item_name = call.data[len("admin_item::"):]
+            user_action["item_name"] = item_name
+            user_action["step"] = "waiting_quantity"
+            self.bot.edit_message_text(
+                f"✅ Выбрано: {item_name}\n\nВведите количество (число):\n\n/cancel — отмена",
+                call.message.chat.id, call.message.message_id
+            )
 
         @self.bot.message_handler(commands=['giveChar'])
         def add_characteristic_command(message):
