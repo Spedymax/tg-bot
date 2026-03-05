@@ -349,7 +349,11 @@ class AdminHandlers:
             else:
                 self.bot.reply_to(message, "У вас нет доступа к админ-панели.")
         
-        @self.bot.callback_query_handler(func=lambda call: call.data.startswith("admin_"))
+        @self.bot.callback_query_handler(func=lambda call: (
+            call.data.startswith("admin_")
+            and not call.data.startswith("admin_selectPlayer_")
+            and not call.data.startswith("admin_item::")
+        ))
         def handle_admin_categories(call):
             """Handle admin category selection"""
             if call.from_user.id in Settings.ADMIN_IDS:
