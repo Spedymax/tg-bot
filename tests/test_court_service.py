@@ -20,3 +20,39 @@ def test_get_game_by_chat_returns_none_when_no_game():
     svc.db.execute_query.return_value = []
     result = svc.get_active_game(chat_id=-100123)
     assert result is None
+
+def test_generate_cards_returns_three_lists():
+    svc = make_service()
+    svc._call_judge_llm = MagicMock(return_value="""
+ПРОКУРОР:
+1. Найдены крошки чипсов на месте преступления
+2. Подозреваемый отказался от полиграфа
+3. Его видели у холодильника в 3 ночи
+4. На руках обнаружены следы сметаны
+5. Показания соседской кошки противоречат алиби
+6. Потерян чек из магазина
+7. Камера зафиксировала подозрительную походку
+8. Отпечатки лап на упаковке
+АДВОКАТ:
+1. Клиент страдает лунатизмом
+2. Чипсы уже были открыты
+3. У него аллергия на этот сорт
+4. Свидетели не могут точно установить время
+СВИДЕТЕЛЬ:
+1. Видел его в другом месте
+2. Холодильник сломан уже неделю
+3. Другой кот тоже имел мотив
+4. Запах не соответствует марке чипсов
+""")
+    prosecutor, lawyer, witness = svc.generate_cards(defendant="Кот", crime="украл чипсы")
+    assert len(prosecutor) == 8
+    assert len(lawyer) == 4
+    assert len(witness) == 4
+
+def test_generate_cards_handles_parse_error():
+    svc = make_service()
+    svc._call_judge_llm = MagicMock(return_value="сломанный ответ")
+    prosecutor, lawyer, witness = svc.generate_cards(defendant="Кот", crime="украл чипсы")
+    assert isinstance(prosecutor, list)
+    assert isinstance(lawyer, list)
+    assert isinstance(witness, list)
