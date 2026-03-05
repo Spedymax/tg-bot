@@ -43,8 +43,12 @@ class CourtService:
 
     def assign_role(self, game_id: int, role: str, user_id: int):
         """Установить prosecutor_id / lawyer_id / witness_id."""
-        col = {"prosecutor": "prosecutor_id", "lawyer": "lawyer_id", "witness": "witness_id"}[role]
-        self.db.execute_query(f"UPDATE court_games SET {col} = %s WHERE id = %s", (user_id, game_id))
+        queries = {
+            "prosecutor": "UPDATE court_games SET prosecutor_id = %s WHERE id = %s",
+            "lawyer": "UPDATE court_games SET lawyer_id = %s WHERE id = %s",
+            "witness": "UPDATE court_games SET witness_id = %s WHERE id = %s",
+        }
+        self.db.execute_query(queries[role], (user_id, game_id))
 
     def set_status(self, game_id: int, status: str):
         self.db.execute_query("UPDATE court_games SET status = %s WHERE id = %s", (status, game_id))
@@ -58,7 +62,9 @@ class CourtService:
     def record_played_card(self, game_id: int, role: str, card: str, round_num: int):
         """Добавить сыгранную карту в массив и уменьшить счётчик оставшихся."""
         game = self.get_active_game_by_id(game_id)
-        played = list(game["played_cards"])
+        played = game.get("played_cards", [])
+        if not isinstance(played, list):
+            played = []
         played.append({"round": round_num, "role": role, "card": card})
         col_left = {"prosecutor": "prosecutor_cards_left", "lawyer": "lawyer_cards_left", "witness": "witness_cards_left"}[role]
         self.db.execute_query(
