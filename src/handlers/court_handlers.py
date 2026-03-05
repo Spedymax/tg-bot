@@ -399,8 +399,13 @@ class CourtHandlers:
                 return
 
             self.bot.answer_callback_query(call.id, "Карта сыграна!")
-            # Убираем кнопки в личке после розыгрыша
-            self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+            # Убираем только сыгранную карту, остальные остаются
+            new_markup = types.InlineKeyboardMarkup()
+            for row in call.message.reply_markup.inline_keyboard:
+                for btn in row:
+                    if btn.callback_data != call.data:
+                        new_markup.row(types.InlineKeyboardButton(btn.text, callback_data=btn.callback_data))
+            self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=new_markup)
 
             threading.Thread(
                 target=self._process_played_card,
