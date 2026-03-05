@@ -286,6 +286,22 @@ class CourtService:
             logger.error(f"CourtService: ошибка парсинга карт: {e}\nRaw: {raw}")
             return [], [], []
 
+    def ai_defense_card(self, game_id: int, prosecutor_card: str, round_num: int) -> str:
+        """Генерирует ответный аргумент AI-защитника на карту прокурора."""
+        game = self.get_active_game_by_id(game_id)
+        if not game:
+            return ""
+        history = self.get_session_messages(game_id)
+        history_text = "\n".join(f"[{m['role']}] {m['content']}" for m in history[-8:])
+        prompt = (
+            f"Контекст заседания:\n{history_text}\n\n"
+            f"Прокурор предъявил: «{prosecutor_card}»\n\n"
+            f"Придумай конкретный контраргумент защиты (1 предложение — как улика или показание). "
+            f"Это должен быть ТОЛЬКО сам аргумент, без вводных слов."
+        )
+        card = self._call_llm(self.LAWYER_SYSTEM_PROMPT, prompt)
+        return card or "Защита не имеет возражений."
+
     def judge_react(self, game_id: int, role: str, card: str, round_num: int) -> str:
         """Короткая реакция судьи после розыгрыша карты."""
         history = self.get_session_messages(game_id)

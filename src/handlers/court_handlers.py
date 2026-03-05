@@ -47,6 +47,13 @@ class CourtHandlers:
         self._pending_final_word: dict[int, dict] = {}
         # Сбор финальных слов по игре: game_id → {statements: {role: text}, needed: set, chat_id}
         self._final_word_state: dict[int, dict] = {}
+        # Test mode: game_ids where user is prosecutor and AI plays defense
+        self._test_games: set[int] = set()
+        # Private DM wait states: user_id → state dict
+        self._private_wait: dict[int, dict] = {}
+        # AI role IDs (fake, never sent DMs)
+        self.AI_LAWYER_ID = 0
+        self.AI_WITNESS_ID = -1
 
     def setup_handlers(self):
 
@@ -77,6 +84,46 @@ class CourtHandlers:
             self.court_service.set_status(game['id'], 'aborted')
             self._wait.pop(chat_id, None)
             self.bot.send_message(chat_id, "⚖️ Заседание досрочно прекращено.")
+
+        @self.bot.message_handler(commands=['court_test'])
+        def cmd_court_test(message):
+            if message.chat.type != 'private':
+                self.bot.reply_to(message, "Тест-режим работает только в личке с ботом.")
+                return
+            user_id = message.from_user.id
+            self._private_wait[user_id] = {'state': 'waiting_defendant', 'initiator': user_id}
+            self.bot.send_message(user_id, "⚖️ <b>Тест-режим суда</b>\n\nТы — Прокурор. AI играет за защиту.\n\nКого обвиняем?", parse_mode='HTML')
+
+        @self.bot.message_handler(func=lambda m: m.chat.type == 'private' and m.from_user.id in self._private_wait)
+        def handle_private_wait(message):
+            user_id = message.from_user.id
+            state_data = self._private_wait.get(user_id)
+            if not state_data:
+                return
+            state = state_data['state']
+
+            if state == 'waiting_defendant':
+                defendant = message.text.strip()
+                if not defendant or len(defendant) > 200:
+                    self.bot.send_message(user_id, "Введите имя подсудимого (до 200 символов).")
+                    return
+                state_data['defendant'] = defendant
+                state_data['state'] = 'waiting_crime'
+                self.bot.send_message(user_id, f"📋 Подсудимый: <b>{defendant}</b>\n\nОпишите преступление:", parse_mode='HTML')
+
+            elif state == 'waiting_crime':
+                crime = message.text.strip()
+                if not crime or len(crime) > 500:
+                    self.bot.send_message(user_id, "Опишите преступление (до 500 символов).")
+                    return
+                defendant = state_data['defendant']
+                self._private_wait.pop(user_id, None)
+                self.bot.send_message(user_id, "⚖️ Генерирую карты дела...")
+                threading.Thread(
+                    target=self._start_game_test,
+                    args=(user_id, defendant, crime),
+                    daemon=True
+                ).start()
 
         @self.bot.message_handler(func=lambda m: m.chat.type == 'private' and m.from_user.id in self._pending_final_word)
         def handle_final_word(message):
@@ -144,6 +191,85 @@ class CourtHandlers:
                 state_data.pop('prompt_msg_id', None)
                 self._wait[chat_id] = state_data
                 self._send_role_keyboard(chat_id, game_id)
+
+    def _start_game_test(self, user_id: int, defendant: str, crime: str):
+        """Запустить тест-игру: пользователь — прокурор, AI — защита."""
+        try:
+            game_id = self.court_service.create_game(user_id, defendant, crime)
+            self.court_service.assign_role(game_id, 'prosecutor', user_id)
+            self.court_service.assign_role(game_id, 'lawyer', self.AI_LAWYER_ID)
+            self.court_service.assign_role(game_id, 'witness', self.AI_WITNESS_ID)
+
+            prosecutor_cards, lawyer_cards, witness_cards = self.court_service.generate_cards(defendant, crime)
+            if not prosecutor_cards:
+                self.bot.send_message(user_id, "❌ Ошибка генерации карт. Попробуй /court_test ещё раз.")
+                return
+
+            self.court_service.save_cards(game_id, prosecutor_cards, lawyer_cards, witness_cards)
+            self.court_service.set_status(game_id, 'in_progress')
+            self.court_service.advance_round(game_id, 1)
+            self.court_service.log_message(game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
+            self._test_games.add(game_id)
+
+            self._send_cards_dm(user_id, game_id, 'prosecutor', prosecutor_cards)
+            self.bot.send_message(
+                user_id,
+                f"⚖️ <b>Раунд 1 из 4</b>\n\nТвой ход, Прокурор. Сыграй карту:",
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"_start_game_test: ошибка: {e}")
+            try:
+                self.bot.send_message(user_id, "❌ Ошибка запуска тест-игры. Попробуй /court_test ещё раз.")
+            except Exception:
+                pass
+
+    def _ai_play_defense_test(self, game_id: int, chat_id: int, prosecutor_card: str, round_num: int):
+        """AI автоматически разыгрывает карту защиты в тест-режиме."""
+        try:
+            card = self.court_service.ai_defense_card(game_id, prosecutor_card, round_num)
+            role_ru = "🛡️ Адвокат (AI)"
+
+            self.bot.send_message(chat_id, f"🃏 <b>{role_ru}</b> играет карту:\n\n«{card}»", parse_mode='HTML')
+            self.court_service.record_played_card(game_id, 'lawyer', card, round_num)
+            self.court_service.log_message(game_id, 'lawyer', card, round_num)
+
+            speech = self.court_service.player_argue(game_id, 'lawyer', card, round_num)
+            if speech:
+                self.bot.send_message(chat_id, f"🛡️ <i>{speech}</i>", parse_mode='HTML')
+
+            reaction = self.court_service.judge_react(game_id, 'lawyer', card, round_num)
+            if reaction:
+                self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
+
+            game = self.court_service.get_active_game_by_id(game_id)
+            if not game:
+                return
+
+            next_round = round_num + 1
+            if next_round > 4:
+                self.bot.send_message(chat_id, "⚖️ <b>Все раунды завершены.</b>\n\nНапиши своё финальное слово:", parse_mode='HTML')
+                self._pending_final_word[chat_id] = {'game_id': game_id, 'role': 'prosecutor', 'chat_id': chat_id}
+                # AI финальные слова генерируем сразу
+                self._final_word_state[game_id] = {
+                    'statements': {},
+                    'needed': {'prosecutor', 'lawyer', 'witness'},
+                    'chat_id': chat_id,
+                }
+                # AI защита пишет финальные слова сразу
+                for ai_role in ('lawyer', 'witness'):
+                    ai_card = self.court_service.ai_defense_card(game_id, "финальное слово", 0)
+                    self._final_word_state[game_id]['statements'][ai_role] = ai_card
+                    self._final_word_state[game_id]['needed'].discard(ai_role)
+            else:
+                self.court_service.advance_round(game_id, next_round)
+                self.bot.send_message(
+                    chat_id,
+                    f"⚖️ <b>Раунд {next_round} из 4</b>\n\nТвой ход, Прокурор. Сыграй карту:",
+                    parse_mode='HTML'
+                )
+        except Exception as e:
+            logger.error(f"_ai_play_defense_test: ошибка: {e}")
 
     def _send_role_keyboard(self, chat_id: int, game_id: int):
         markup = types.InlineKeyboardMarkup()
@@ -360,12 +486,20 @@ class CourtHandlers:
                 return
 
             if role == 'prosecutor':
-                self.bot.send_message(
-                    chat_id,
-                    f"🛡️ <b>Защита может ответить.</b> Адвокат или Свидетель — сыграйте карту в личных сообщениях.\n"
-                    f"(Адвокат осталось: {game['lawyer_cards_left']}, Свидетель: {game['witness_cards_left']})",
-                    parse_mode='HTML'
-                )
+                if game_id in self._test_games:
+                    # Test mode: AI auto-plays defense
+                    threading.Thread(
+                        target=self._ai_play_defense_test,
+                        args=(game_id, chat_id, card, round_num),
+                        daemon=True
+                    ).start()
+                else:
+                    self.bot.send_message(
+                        chat_id,
+                        f"🛡️ <b>Защита может ответить.</b> Адвокат или Свидетель — сыграйте карту в личных сообщениях.\n"
+                        f"(Адвокат осталось: {game['lawyer_cards_left']}, Свидетель: {game['witness_cards_left']})",
+                        parse_mode='HTML'
+                    )
             else:
                 played_this_round = [p for p in game['played_cards'] if p['round'] == round_num]
                 has_prosecution = any(p['role'] == 'prosecutor' for p in played_this_round)
