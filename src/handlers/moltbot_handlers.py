@@ -281,7 +281,7 @@ class MoltbotHandlers:
                             "user": user_key,
                             "messages": [{"role": "user", "content": content}],
                         },
-                        timeout=60,
+                        timeout=120,
                     )
                     r.raise_for_status()
                     text = r.json()["choices"][0]["message"]["content"]
@@ -922,7 +922,7 @@ class MoltbotHandlers:
             if message.chat.type in ('group', 'supergroup'):
                 history = self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
-            threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
+            # threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
             try:
                 reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 if reply and reply.strip():
@@ -1013,7 +1013,7 @@ class MoltbotHandlers:
             if message.chat.type in ('group', 'supergroup'):
                 history = self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
-            threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
+            # threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
             try:
                 reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 if reply and reply.strip():
@@ -1055,11 +1055,11 @@ class MoltbotHandlers:
                 args=(message,),
                 daemon=True,
             ).start()
-            threading.Thread(
-                target=self._maybe_react,
-                args=(message,),
-                daemon=True,
-            ).start()
+            # threading.Thread(
+            #     target=self._maybe_react,
+            #     args=(message,),
+            #     daemon=True,
+            # ).start()
 
         @self.bot.message_handler(func=lambda m: (
             m.chat.type == 'private'
@@ -1068,11 +1068,12 @@ class MoltbotHandlers:
             and not m.from_user.is_bot
         ))
         def handle_dm_reaction(message):
-            threading.Thread(
-                target=self._maybe_react,
-                args=(message,),
-                daemon=True,
-            ).start()
+            pass
+            # threading.Thread(
+            #     target=self._maybe_react,
+            #     args=(message,),
+            #     daemon=True,
+            # ).start()
 
         @self.bot.message_handler(
             content_types=['photo'],

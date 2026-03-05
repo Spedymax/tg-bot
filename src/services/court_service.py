@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 import httpx
 
@@ -164,7 +165,10 @@ class CourtService:
                     timeout=180,
                 )
                 r.raise_for_status()
-                return r.json()["choices"][0]["message"]["content"].strip()
+                text = r.json()["choices"][0]["message"]["content"].strip()
+                # Strip <think>...</think> blocks (qwen thinking models)
+                text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+                return text
         except Exception as e:
             logger.error(f"CourtService: Ollama error: {e}")
             return ""
@@ -249,11 +253,17 @@ class CourtService:
 3. [карта]
 4. [карта]"""
 
-        raw = self._call_judge_llm(prompt, use_judge_persona=False)
-        if not raw:
-            logger.error("CourtService: пустой ответ от LLM при генерации карт")
-            return [], [], []
-        return self._parse_cards(raw)
+        for attempt in range(3):
+            raw = self._call_judge_llm(prompt, use_judge_persona=False)
+            if not raw:
+                logger.warning(f"CourtService: пустой ответ от LLM при генерации карт (попытка {attempt + 1}/3)")
+                continue
+            p, l, w = self._parse_cards(raw)
+            if p and l and w:
+                return p, l, w
+            logger.warning(f"CourtService: неполный парсинг карт (попытка {attempt + 1}/3), raw: {raw[:200]}")
+        logger.error("CourtService: не удалось сгенерировать карты за 3 попытки")
+        return [], [], []
 
     def _parse_cards(self, raw: str) -> tuple[list, list, list]:
         """Парсинг структурированного ответа с картами в три списка."""
