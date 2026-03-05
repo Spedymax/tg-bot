@@ -197,6 +197,137 @@ class AdminHandlers:
             print(f"Wake-on-LAN error: {e}")
             return False
         
+    def setup_priority_handlers(self):
+        """Register high-priority handlers that must fire before moltbot text handlers."""
+
+        @self.bot.message_handler(commands=['cancel'])
+        def cancel_admin_action(message):
+            """Cancel current pending admin action"""
+            if message.from_user.id in self.admin_actions:
+                del self.admin_actions[message.from_user.id]
+                self.bot.reply_to(message, "❌ Действие отменено.")
+
+        @self.bot.message_handler(func=lambda message: message.from_user.id in self.admin_actions)
+        def handle_admin_text_input(message):
+            """Handle text input for admin actions"""
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                return
+
+            user_action = self.admin_actions.get(message.from_user.id)
+            if not user_action:
+                return
+
+            text = message.text.strip()
+            action = user_action["action"]
+            step = user_action.get("step", "")
+
+            # --- Broadcast (single-step) ---
+            if action == "broadcast":
+                success_count = 0
+                fail_count = 0
+                all_players = self.player_service.get_all_players()
+                for player_id, player in all_players.items():
+                    try:
+                        if player.chat_id:
+                            for chat in player.chat_id:
+                                self.bot.send_message(chat, f"📢 Объявление:\n\n{text}")
+                                success_count += 1
+                    except Exception as e:
+                        fail_count += 1
+                        logger.error(f"Failed to send broadcast to {player_id}: {e}")
+                self.bot.reply_to(
+                    message,
+                    f"📢 Рассылка завершена\n✅ Успешно: {success_count}\n❌ Неудачно: {fail_count}"
+                )
+                del self.admin_actions[message.from_user.id]
+                return
+
+            # --- Step 1: get numeric amount ---
+            if step == "waiting_amount":
+                try:
+                    amount = float(text.lstrip("+"))
+                except ValueError:
+                    self.bot.reply_to(message, "❌ Введите число.\n\n/cancel — отмена")
+                    return
+
+                player = self.player_service.get_player(user_action["player_id"])
+                if not player:
+                    self.bot.reply_to(message, "❌ Игрок не найден.")
+                    del self.admin_actions[message.from_user.id]
+                    return
+
+                if action == "increasePisunchik":
+                    player.pisunchik_size += int(amount)
+                    ok = self.player_service.save_player(player)
+                    self.bot.reply_to(message, f"✅ Писюнчик {player.player_name}: +{int(amount)} см → {player.pisunchik_size} см" if ok else "❌ Ошибка при сохранении.")
+
+                elif action == "decreasePisunchik":
+                    player.pisunchik_size -= int(amount)
+                    ok = self.player_service.save_player(player)
+                    self.bot.reply_to(message, f"✅ Писюнчик {player.player_name}: -{int(amount)} см → {player.pisunchik_size} см" if ok else "❌ Ошибка при сохранении.")
+
+                elif action == "increaseBtc":
+                    player.add_coins(amount)
+                    ok = self.player_service.save_player(player)
+                    self.bot.reply_to(message, f"✅ +{amount:.4f} BTC → {player.player_name} имеет {player.coins:.4f} BTC" if ok else "❌ Ошибка при сохранении.")
+
+                elif action == "decreaseBtc":
+                    player.coins = max(0.0, player.coins - amount)
+                    ok = self.player_service.save_player(player)
+                    self.bot.reply_to(message, f"✅ -{amount:.4f} BTC → {player.player_name} имеет {player.coins:.4f} BTC" if ok else "❌ Ошибка при сохранении.")
+
+                elif action == "quizPoints":
+                    delta = int(amount)
+                    quiz_chat = user_action.get("quiz_chat_id", message.chat.id)
+                    current = player.get_quiz_score(quiz_chat)
+                    new_score = max(0, current + delta)
+                    player.update_quiz_score(quiz_chat, new_score)
+                    ok = self.player_service.save_player(player)
+                    sign = "+" if delta >= 0 else ""
+                    self.bot.reply_to(message, f"✅ Квиз {player.player_name}: {current} → {new_score} ({sign}{delta})" if ok else "❌ Ошибка при сохранении.")
+
+                del self.admin_actions[message.from_user.id]
+
+            # --- Step 2: get item name + quantity ---
+            elif step == "waiting_item":
+                parts = text.split()
+                item_name = parts[0]
+                try:
+                    quantity = int(parts[1]) if len(parts) > 1 else 1
+                    if quantity < 1:
+                        raise ValueError
+                except ValueError:
+                    self.bot.reply_to(message, "❌ Формат: название [количество]\n\n/cancel — отмена")
+                    return
+
+                player = self.player_service.get_player(user_action["player_id"])
+                if not player:
+                    self.bot.reply_to(message, "❌ Игрок не найден.")
+                    del self.admin_actions[message.from_user.id]
+                    return
+
+                if action == "addItem":
+                    for _ in range(quantity):
+                        player.add_item(item_name)
+                    ok = self.player_service.save_player(player)
+                    self.bot.reply_to(message, f"✅ Добавлено {quantity}x {item_name} игроку {player.player_name}" if ok else "❌ Ошибка при сохранении.")
+
+                elif action == "removeItem":
+                    removed = sum(1 for _ in range(quantity) if player.remove_item(item_name))
+                    if removed == 0:
+                        self.bot.reply_to(message, f"❌ Предмет '{item_name}' не найден у {player.player_name}")
+                    else:
+                        ok = self.player_service.save_player(player)
+                        self.bot.reply_to(message, f"✅ Удалено {removed}x {item_name} у {player.player_name}" if ok else "❌ Ошибка при сохранении.")
+
+                elif action == "addStatue":
+                    for _ in range(quantity):
+                        player.statuetki.append(item_name)
+                    ok = self.player_service.save_player(player)
+                    self.bot.reply_to(message, f"✅ Добавлено {quantity}x статуэтку '{item_name}' игроку {player.player_name}" if ok else "❌ Ошибка при сохранении.")
+
+                del self.admin_actions[message.from_user.id]
+
     def setup_handlers(self):
         """Setup all admin command handlers"""
         
@@ -561,229 +692,115 @@ class AdminHandlers:
                         "removeItem": "Убрать предмет",
                         "addStatue": "Добавить статуэтку",
                     }
-                    self.admin_actions[call.from_user.id] = {
-                        "action": action,
-                        "step": "waiting_player_id",
-                        "admin_chat_id": call.message.chat.id,
-                    }
+                    all_players = self.player_service.get_all_players()
+                    markup = types.InlineKeyboardMarkup()
+                    for pid, p in all_players.items():
+                        markup.add(types.InlineKeyboardButton(
+                            p.player_name,
+                            callback_data=f"admin_selectPlayer_{action}_{pid}"
+                        ))
+                    markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="admin_back"))
                     self.bot.edit_message_text(
-                        f"🎯 {action_labels.get(action, action)}\n\nВведите ID игрока (число):\n\n/cancel — отмена",
+                        f"🎯 {action_labels.get(action, action)}\n\nВыберите игрока:",
                         call.message.chat.id,
-                        call.message.message_id
+                        call.message.message_id,
+                        reply_markup=markup
                     )
 
-        @self.bot.message_handler(commands=['cancel'])
-        def cancel_admin_action(message):
-            """Cancel current pending admin action"""
-            if message.from_user.id in self.admin_actions:
-                del self.admin_actions[message.from_user.id]
-                self.bot.reply_to(message, "❌ Действие отменено.")
-
-        @self.bot.message_handler(func=lambda message: message.from_user.id in self.admin_actions)
-        def handle_admin_text_input(message):
-            """Handle text input for admin actions"""
-            if message.from_user.id not in Settings.ADMIN_IDS:
+        @self.bot.callback_query_handler(func=lambda call: call.data.startswith("admin_selectPlayer_"))
+        def handle_player_selection(call):
+            """Handle player selection from inline keyboard for admin actions"""
+            if call.from_user.id not in Settings.ADMIN_IDS:
+                self.bot.answer_callback_query(call.id, "Нет доступа.")
+                return
+            # Format: admin_selectPlayer_{action}_{player_id}
+            remainder = call.data[len("admin_selectPlayer_"):]
+            action, player_id_str = remainder.rsplit("_", 1)
+            player_id = int(player_id_str)
+            player = self.player_service.get_player(player_id)
+            if not player:
+                self.bot.answer_callback_query(call.id, "Игрок не найден.")
                 return
 
-            user_action = self.admin_actions.get(message.from_user.id)
-            if not user_action:
-                return
-
-            text = message.text.strip()
-            action = user_action["action"]
-            step = user_action.get("step", "")
-
-            # --- Broadcast (single-step) ---
-            if action == "broadcast":
-                success_count = 0
-                fail_count = 0
-                all_players = self.player_service.get_all_players()
-                for player_id, player in all_players.items():
-                    try:
-                        if player.chat_id:
-                            for chat in player.chat_id:
-                                self.bot.send_message(chat, f"📢 Объявление:\n\n{text}")
-                                success_count += 1
-                    except Exception as e:
-                        fail_count += 1
-                        logger.error(f"Failed to send broadcast to {player_id}: {e}")
-                self.bot.reply_to(
-                    message,
-                    f"📢 Рассылка завершена\n✅ Успешно: {success_count}\n❌ Неудачно: {fail_count}"
+            if action == "playerStats":
+                items_str = ", ".join(player.items) if player.items else "нет"
+                stats = (
+                    f"📊 Статистика: {player.player_name}\n"
+                    f"🆔 ID: {player.player_id}\n"
+                    f"📏 Писюнчик: {player.pisunchik_size} см\n"
+                    f"💰 BTC: {player.coins:.4f}\n"
+                    f"🎁 Предметы: {items_str}\n"
+                    f"🏆 Статуэтки: {len(player.statuetki)}\n"
+                    f"🎰 Казино: {player.casino_usage_count} раз"
                 )
-                del self.admin_actions[message.from_user.id]
-                return
+                self.bot.edit_message_text(stats, call.message.chat.id, call.message.message_id)
 
-            # --- Step 1: get player ID ---
-            if step == "waiting_player_id":
-                try:
-                    player_id = int(text)
-                except ValueError:
-                    self.bot.reply_to(message, "❌ Введите числовой ID игрока.\n\n/cancel — отмена")
-                    return
+            elif action == "resetCooldown":
+                from datetime import datetime, timezone
+                player.last_used = datetime.min.replace(tzinfo=timezone.utc)
+                ok = self.player_service.save_player(player)
+                self.bot.edit_message_text(
+                    f"✅ Кулдаун {player.player_name} сброшен." if ok else "❌ Ошибка при сохранении.",
+                    call.message.chat.id, call.message.message_id
+                )
 
-                player = self.player_service.get_player(player_id)
-                if not player:
-                    self.bot.reply_to(message, f"❌ Игрок с ID {player_id} не найден.\n\n/cancel — отмена")
-                    return
+            elif action in ("increasePisunchik", "decreasePisunchik"):
+                self.admin_actions[call.from_user.id] = {
+                    "action": action, "player_id": player_id, "step": "waiting_amount"
+                }
+                self.bot.edit_message_text(
+                    f"✅ {player.player_name} (сейчас {player.pisunchik_size} см)\n\nВведите количество см:\n\n/cancel — отмена",
+                    call.message.chat.id, call.message.message_id
+                )
 
-                user_action["player_id"] = player_id
+            elif action in ("increaseBtc", "decreaseBtc"):
+                self.admin_actions[call.from_user.id] = {
+                    "action": action, "player_id": player_id, "step": "waiting_amount"
+                }
+                self.bot.edit_message_text(
+                    f"✅ {player.player_name} (сейчас {player.coins:.4f} BTC)\n\nВведите количество BTC:\n\n/cancel — отмена",
+                    call.message.chat.id, call.message.message_id
+                )
 
-                if action == "playerStats":
-                    items_str = ", ".join(player.items) if player.items else "нет"
-                    stats = (
-                        f"📊 Статистика: {player.player_name}\n"
-                        f"🆔 ID: {player.player_id}\n"
-                        f"📏 Писюнчик: {player.pisunchik_size} см\n"
-                        f"💰 BTC: {player.coins:.4f}\n"
-                        f"🎁 Предметы: {items_str}\n"
-                        f"🏆 Статуэтки: {len(player.statuetki)}\n"
-                        f"🧠 Очки квиза (этот чат): {player.get_quiz_score(message.chat.id)}\n"
-                        f"🎰 Казино: {player.casino_usage_count} раз"
-                    )
-                    self.bot.reply_to(message, stats)
-                    del self.admin_actions[message.from_user.id]
+            elif action == "quizPoints":
+                current_score = player.get_quiz_score(call.message.chat.id)
+                self.admin_actions[call.from_user.id] = {
+                    "action": action, "player_id": player_id, "step": "waiting_amount",
+                    "quiz_chat_id": call.message.chat.id
+                }
+                self.bot.edit_message_text(
+                    f"✅ {player.player_name} (сейчас {current_score} очков)\n\nВведите изменение (например: 5 или -3):\n\n/cancel — отмена",
+                    call.message.chat.id, call.message.message_id
+                )
 
-                elif action == "resetCooldown":
-                    from datetime import datetime, timezone
-                    player.last_used = datetime.min.replace(tzinfo=timezone.utc)
-                    if self.player_service.save_player(player):
-                        self.bot.reply_to(message, f"✅ Кулдаун игрока {player.player_name} сброшен.")
-                    else:
-                        self.bot.reply_to(message, "❌ Ошибка при сохранении.")
-                    del self.admin_actions[message.from_user.id]
+            elif action == "addItem":
+                self.admin_actions[call.from_user.id] = {
+                    "action": action, "player_id": player_id, "step": "waiting_item"
+                }
+                self.bot.edit_message_text(
+                    f"✅ {player.player_name}\n\nВведите название предмета и количество (например: prezervativ 3):\n\n/cancel — отмена",
+                    call.message.chat.id, call.message.message_id
+                )
 
-                elif action in ("increasePisunchik", "decreasePisunchik"):
-                    user_action["step"] = "waiting_amount"
-                    self.bot.reply_to(
-                        message,
-                        f"✅ Игрок: {player.player_name} (сейчас {player.pisunchik_size} см)\n\nВведите количество см:\n\n/cancel — отмена"
-                    )
+            elif action == "removeItem":
+                items_str = "\n".join(f"  • {i}" for i in player.items) if player.items else "  нет предметов"
+                self.admin_actions[call.from_user.id] = {
+                    "action": action, "player_id": player_id, "step": "waiting_item"
+                }
+                self.bot.edit_message_text(
+                    f"✅ {player.player_name}\n\nПредметы:\n{items_str}\n\nВведите название предмета и количество (например: prezervativ 2):\n\n/cancel — отмена",
+                    call.message.chat.id, call.message.message_id
+                )
 
-                elif action in ("increaseBtc", "decreaseBtc"):
-                    user_action["step"] = "waiting_amount"
-                    self.bot.reply_to(
-                        message,
-                        f"✅ Игрок: {player.player_name} (сейчас {player.coins:.4f} BTC)\n\nВведите количество BTC:\n\n/cancel — отмена"
-                    )
+            elif action == "addStatue":
+                self.admin_actions[call.from_user.id] = {
+                    "action": action, "player_id": player_id, "step": "waiting_item"
+                }
+                self.bot.edit_message_text(
+                    f"✅ {player.player_name}\n\nВведите название статуэтки и количество (например: gold 1):\n\n/cancel — отмена",
+                    call.message.chat.id, call.message.message_id
+                )
 
-                elif action == "quizPoints":
-                    current_score = player.get_quiz_score(message.chat.id)
-                    user_action["step"] = "waiting_amount"
-                    user_action["quiz_chat_id"] = message.chat.id
-                    self.bot.reply_to(
-                        message,
-                        f"✅ Игрок: {player.player_name} (сейчас {current_score} очков в этом чате)\n\nВведите изменение (например: 5 или -3):\n\n/cancel — отмена"
-                    )
-
-                elif action == "addItem":
-                    user_action["step"] = "waiting_item"
-                    self.bot.reply_to(
-                        message,
-                        f"✅ Игрок: {player.player_name}\n\nВведите название предмета и количество (например: prezervativ 3):\n\n/cancel — отмена"
-                    )
-
-                elif action == "removeItem":
-                    items_str = "\n".join(f"  • {i}" for i in player.items) if player.items else "  нет предметов"
-                    user_action["step"] = "waiting_item"
-                    self.bot.reply_to(
-                        message,
-                        f"✅ Игрок: {player.player_name}\n\nПредметы:\n{items_str}\n\nВведите название предмета и количество (например: prezervativ 2):\n\n/cancel — отмена"
-                    )
-
-                elif action == "addStatue":
-                    user_action["step"] = "waiting_item"
-                    self.bot.reply_to(
-                        message,
-                        f"✅ Игрок: {player.player_name}\n\nВведите название статуэтки и количество (например: gold 1):\n\n/cancel — отмена"
-                    )
-
-            # --- Step 2: get numeric amount ---
-            elif step == "waiting_amount":
-                try:
-                    amount = float(text.lstrip("+"))
-                except ValueError:
-                    self.bot.reply_to(message, "❌ Введите число.\n\n/cancel — отмена")
-                    return
-
-                player = self.player_service.get_player(user_action["player_id"])
-                if not player:
-                    self.bot.reply_to(message, "❌ Игрок не найден.")
-                    del self.admin_actions[message.from_user.id]
-                    return
-
-                if action == "increasePisunchik":
-                    player.pisunchik_size += int(amount)
-                    ok = self.player_service.save_player(player)
-                    self.bot.reply_to(message, f"✅ Писюнчик {player.player_name}: +{int(amount)} см → {player.pisunchik_size} см" if ok else "❌ Ошибка при сохранении.")
-
-                elif action == "decreasePisunchik":
-                    player.pisunchik_size -= int(amount)
-                    ok = self.player_service.save_player(player)
-                    self.bot.reply_to(message, f"✅ Писюнчик {player.player_name}: -{int(amount)} см → {player.pisunchik_size} см" if ok else "❌ Ошибка при сохранении.")
-
-                elif action == "increaseBtc":
-                    player.add_coins(amount)
-                    ok = self.player_service.save_player(player)
-                    self.bot.reply_to(message, f"✅ +{amount:.4f} BTC → {player.player_name} имеет {player.coins:.4f} BTC" if ok else "❌ Ошибка при сохранении.")
-
-                elif action == "decreaseBtc":
-                    player.coins = max(0.0, player.coins - amount)
-                    ok = self.player_service.save_player(player)
-                    self.bot.reply_to(message, f"✅ -{amount:.4f} BTC → {player.player_name} имеет {player.coins:.4f} BTC" if ok else "❌ Ошибка при сохранении.")
-
-                elif action == "quizPoints":
-                    delta = int(amount)
-                    quiz_chat = user_action.get("quiz_chat_id", message.chat.id)
-                    current = player.get_quiz_score(quiz_chat)
-                    new_score = max(0, current + delta)
-                    player.update_quiz_score(quiz_chat, new_score)
-                    ok = self.player_service.save_player(player)
-                    sign = "+" if delta >= 0 else ""
-                    self.bot.reply_to(message, f"✅ Квиз {player.player_name}: {current} → {new_score} ({sign}{delta})" if ok else "❌ Ошибка при сохранении.")
-
-                del self.admin_actions[message.from_user.id]
-
-            # --- Step 2: get item name + quantity ---
-            elif step == "waiting_item":
-                parts = text.split()
-                item_name = parts[0]
-                try:
-                    quantity = int(parts[1]) if len(parts) > 1 else 1
-                    if quantity < 1:
-                        raise ValueError
-                except ValueError:
-                    self.bot.reply_to(message, "❌ Формат: название [количество]\n\n/cancel — отмена")
-                    return
-
-                player = self.player_service.get_player(user_action["player_id"])
-                if not player:
-                    self.bot.reply_to(message, "❌ Игрок не найден.")
-                    del self.admin_actions[message.from_user.id]
-                    return
-
-                if action == "addItem":
-                    for _ in range(quantity):
-                        player.add_item(item_name)
-                    ok = self.player_service.save_player(player)
-                    self.bot.reply_to(message, f"✅ Добавлено {quantity}x {item_name} игроку {player.player_name}" if ok else "❌ Ошибка при сохранении.")
-
-                elif action == "removeItem":
-                    removed = sum(1 for _ in range(quantity) if player.remove_item(item_name))
-                    if removed == 0:
-                        self.bot.reply_to(message, f"❌ Предмет '{item_name}' не найден у {player.player_name}")
-                    else:
-                        ok = self.player_service.save_player(player)
-                        self.bot.reply_to(message, f"✅ Удалено {removed}x {item_name} у {player.player_name}" if ok else "❌ Ошибка при сохранении.")
-
-                elif action == "addStatue":
-                    for _ in range(quantity):
-                        player.statuetki.append(item_name)
-                    ok = self.player_service.save_player(player)
-                    self.bot.reply_to(message, f"✅ Добавлено {quantity}x статуэтку '{item_name}' игроку {player.player_name}" if ok else "❌ Ошибка при сохранении.")
-
-                del self.admin_actions[message.from_user.id]
-        
         @self.bot.message_handler(commands=['giveChar'])
         def add_characteristic_command(message):
             """Give random characteristic to player"""
