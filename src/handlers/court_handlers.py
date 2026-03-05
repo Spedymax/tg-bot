@@ -168,6 +168,10 @@ class CourtHandlers:
                 self.bot.answer_callback_query(call.id, "Игра не найдена.", show_alert=True)
                 return
 
+            if game['status'] != 'in_progress':
+                self.bot.answer_callback_query(call.id, "Игра уже завершена.", show_alert=True)
+                return
+
             # Проверяем что это карта этого игрока
             expected_role_id = game[f"{role}_id"]
             if user_id != expected_role_id:
@@ -313,7 +317,7 @@ class CourtHandlers:
             "🔍 <b>Выводы суда:</b>",
             "🔨 <b>ПРИГОВОР:</b>",
         ]
-        for prefix, part in zip(prefixes, parts):
+        for prefix, part in zip(prefixes, parts + [""] * 4):
             if part:
                 self.bot.send_message(chat_id, f"{prefix}\n\n{part}", parse_mode='HTML')
                 time.sleep(2)
