@@ -64,7 +64,7 @@ class CourtHandlers:
             self._wait.pop(chat_id, None)
 
             self.bot.send_message(chat_id, RULES_TEXT, parse_mode='HTML')
-            self.bot.send_message(chat_id, "👤 Кого обвиняем? Напишите имя или описание подсудимого (например: «Кот Леопольд», «Юра с 3-го этажа», «ChatGPT»):\n\n<i>Ответьте реплаем на любое сообщение в чате.</i>", parse_mode='HTML')
+            self.bot.send_message(chat_id, "👤 Кого обвиняем? Напишите имя или описание подсудимого (например: «Кот Леопольд», «Юра с 3-го этажа», «ChatGPT»):\n\n<i>Ответьте реплаем на это сообщение.</i>", parse_mode='HTML')
             self._wait[chat_id] = {'state': 'waiting_defendant', 'initiator': message.from_user.id}
 
         @self.bot.message_handler(commands=['court_stop', 'sud_stop'])
@@ -129,7 +129,7 @@ class CourtHandlers:
                     return
                 state_data['defendant'] = defendant
                 state_data['state'] = 'waiting_crime'
-                self.bot.send_message(chat_id, f"📋 Подсудимый: <b>{defendant}</b>\n\nТеперь опишите преступление:\n\n<i>Ответьте реплаем на любое сообщение в чате.</i>", parse_mode='HTML')
+                self.bot.send_message(chat_id, f"📋 Подсудимый: <b>{defendant}</b>\n\nТеперь опишите преступление:\n\n<i>Ответьте реплаем на это сообщение.</i>", parse_mode='HTML')
 
             elif state == 'waiting_crime':
                 crime = message.text.strip()
