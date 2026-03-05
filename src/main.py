@@ -144,6 +144,10 @@ class TelegramBot:
         # Setup admin priority handlers FIRST — must run before moltbot text handlers
         self.admin_handlers.setup_priority_handlers()
 
+        # Setup court handlers before moltbot — court state intercepts all messages when active
+        self.court_handlers.setup_handlers()
+        self.court_handlers.setup_callback_handlers()
+
         # Setup MoltBot handlers — must run before the admin catch-all text handler
         self.moltbot_handlers.setup_handlers()
 
@@ -171,10 +175,6 @@ class TelegramBot:
 
         # Setup pet handlers
         self.pet_handlers.setup_handlers()
-
-        # Setup court handlers
-        self.court_handlers.setup_handlers()
-        self.court_handlers.setup_callback_handlers()
 
         @self.bot.message_handler(commands=['start'])
         @telegram_error_handler("start_command")
