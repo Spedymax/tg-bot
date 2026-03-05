@@ -144,7 +144,7 @@ class GameHandlers:
                 else:
                     summary = "🎰 Казино: 0/6. Ничего не выиграл."
                 if got_food:
-                    summary += "\n🍖 +1 корм для питомца!"
+                    summary += f"\n🍖 {player.player_name} получил +1 корм для питомца!"
                 self.bot.send_message(message.chat.id, summary, disable_notification=True)
 
         
