@@ -73,11 +73,12 @@ class CourtService:
         if not isinstance(played, list):
             played = []
         played.append({"round": round_num, "role": role, "card": card})
-        col_left = {"prosecutor": "prosecutor_cards_left", "lawyer": "lawyer_cards_left", "witness": "witness_cards_left"}[role]
-        self.db.execute_query(
-            f"UPDATE court_games SET played_cards=%s, {col_left}={col_left}-1 WHERE id=%s",
-            (json.dumps(played), game_id),
-        )
+        queries_left = {
+            "prosecutor": "UPDATE court_games SET played_cards=%s, prosecutor_cards_left=prosecutor_cards_left-1 WHERE id=%s",
+            "lawyer": "UPDATE court_games SET played_cards=%s, lawyer_cards_left=lawyer_cards_left-1 WHERE id=%s",
+            "witness": "UPDATE court_games SET played_cards=%s, witness_cards_left=witness_cards_left-1 WHERE id=%s",
+        }
+        self.db.execute_query(queries_left[role], (json.dumps(played), game_id))
 
     def get_active_game_by_id(self, game_id: int) -> dict | None:
         rows = self.db.execute_query(

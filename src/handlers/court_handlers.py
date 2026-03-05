@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 from telebot import types
 from services.court_service import CourtService
 
@@ -40,6 +41,7 @@ class CourtHandlers:
         self.court_service = CourtService(db_manager)
         # Состояния ожидания по чату: chat_id → {'state': str, 'game_id': int, ...}
         self._wait: dict[int, dict] = {}
+        self._bot_username: str | None = None
 
     def setup_handlers(self):
 
@@ -53,6 +55,8 @@ class CourtHandlers:
             if existing:
                 self.bot.reply_to(message, "⚖️ Заседание уже идёт! Используй /court_stop чтобы завершить.")
                 return
+            # Чистим зависший _wait если вдруг остался без активной игры
+            self._wait.pop(chat_id, None)
 
             self.bot.send_message(chat_id, RULES_TEXT, parse_mode='HTML')
             self.bot.send_message(chat_id, "👤 Кого обвиняем? Напишите имя или описание подсудимого (например: «Кот Леопольд», «Юра с 3-го этажа», «ChatGPT»):")
@@ -182,6 +186,17 @@ class CourtHandlers:
             if game[cards_left_key] <= 0:
                 self.bot.answer_callback_query(call.id, "Ты уже сыграл все свои карты!", show_alert=True)
                 return
+
+            # Защита может сыграть только одну карту за раунд
+            if role in ('lawyer', 'witness'):
+                current_round = game['current_round']
+                defense_played = any(
+                    p['role'] in ('lawyer', 'witness') and p['round'] == current_round
+                    for p in game['played_cards']
+                )
+                if defense_played:
+                    self.bot.answer_callback_query(call.id, "Защита уже ответила в этом раунде!", show_alert=True)
+                    return
 
             cards_key = f"{role}_cards"
             try:
@@ -331,9 +346,8 @@ class CourtHandlers:
     def _deliver_verdict(self, game_id: int, chat_id: int):
         """Доставить драматичный многосообщный приговор."""
         try:
-            import time
             parts = self.court_service.generate_verdict(game_id)
-            self.court_service.set_status(game_id, 'finished')
+            self.court_service.save_verdict(game_id, "\n---\n".join(parts))
 
             prefixes = [
                 "⚖️ <b>Позиция обвинения:</b>",
@@ -345,8 +359,6 @@ class CourtHandlers:
                 if part:
                     self.bot.send_message(chat_id, f"{prefix}\n\n{part}", parse_mode='HTML')
                     time.sleep(2)
-
-            self.court_service.log_message(game_id, 'verdict', "\n---\n".join(parts))
         except Exception as e:
             logger.error(f"_deliver_verdict: ошибка для game {game_id}: {e}")
             self.court_service.set_status(game_id, 'finished')
@@ -356,7 +368,9 @@ class CourtHandlers:
                 pass
 
     def _get_bot_username(self) -> str:
-        try:
-            return self.bot.get_me().username
-        except Exception:
-            return "бот"
+        if not self._bot_username:
+            try:
+                self._bot_username = self.bot.get_me().username
+            except Exception:
+                return "бот"
+        return self._bot_username
