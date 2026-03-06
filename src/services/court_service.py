@@ -3,6 +3,7 @@ import logging
 import re
 
 import httpx
+import google.generativeai as genai
 
 from config.settings import Settings
 
@@ -218,6 +219,18 @@ class CourtService:
             self.log_message(game_id, role, speech, round_num)
         return speech
 
+    def _call_gemini(self, prompt: str) -> str:
+        """Вызов Gemini API для тяжёлых задач генерации."""
+        try:
+            genai.configure(api_key=Settings.GEMINI_API_KEY)
+            model = genai.GenerativeModel('gemini-2.5-flash-lite')
+            response = model.generate_content(prompt)
+            text = response.text.strip()
+            return text
+        except Exception as e:
+            logger.error(f"CourtService: Gemini error: {e}")
+            return ""
+
     def generate_cards(self, defendant: str, crime: str) -> tuple[list, list, list]:
         """Попросить ИИ сгенерировать 16 карт. Возвращает (prosecutor[8], lawyer[4], witness[4])."""
         prompt = f"""Ты — помощник судьи. Придумай 16 карт для судебной игры.
@@ -254,7 +267,7 @@ class CourtService:
 4. [карта]"""
 
         for attempt in range(3):
-            raw = self._call_judge_llm(prompt, use_judge_persona=False)
+            raw = self._call_gemini(prompt)
             if not raw:
                 logger.warning(f"CourtService: пустой ответ от LLM при генерации карт (попытка {attempt + 1}/3)")
                 continue
