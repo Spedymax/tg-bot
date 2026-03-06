@@ -439,7 +439,7 @@ class CourtHandlers:
             self.bot.answer_callback_query(call.id, "Карта сыграна!")
             try:
                 new_markup = types.InlineKeyboardMarkup()
-                for row in (call.message.reply_markup.inline_keyboard or []):
+                for row in (call.message.reply_markup.keyboard or []):
                     for btn in row:
                         if btn.callback_data != call.data:
                             new_markup.row(types.InlineKeyboardButton(btn.text, callback_data=btn.callback_data))
