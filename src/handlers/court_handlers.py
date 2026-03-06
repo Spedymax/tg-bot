@@ -53,6 +53,8 @@ class CourtHandlers:
         self._private_wait: dict[int, dict] = {}
         # Pending speech input: chat_id → {game_id, user_id, role, card, round_num, prompt_msg_id}
         self._pending_speech: dict[int, dict] = {}
+        # Fallback timers: game_id → threading.Timer
+        self._fallback_timers: dict[int, threading.Timer] = {}
         # AI role IDs (fake, never sent DMs)
         self.AI_LAWYER_ID = 0
         self.AI_WITNESS_ID = -1
@@ -84,6 +86,9 @@ class CourtHandlers:
                 self.bot.reply_to(message, "Активного заседания нет.")
                 return
             self.court_service.set_status(game['id'], 'aborted')
+            old_timer = self._fallback_timers.pop(game['id'], None)
+            if old_timer:
+                old_timer.cancel()
             self._wait.pop(chat_id, None)
             self.bot.send_message(chat_id, "⚖️ Заседание досрочно прекращено.")
 
@@ -667,8 +672,65 @@ class CourtHandlers:
             self._start_fallback_timer(game_id, chat_id, round_num)
 
     def _start_fallback_timer(self, game_id: int, chat_id: int, round_num: int):
-        """Stub — будет реализован в следующем шаге."""
-        pass
+        """Start 3-minute fallback: if no player reply, auto-advance the game."""
+        # Cancel any existing timer for this game
+        old = self._fallback_timers.pop(game_id, None)
+        if old:
+            old.cancel()
+
+        def on_timeout():
+            self._fallback_timers.pop(game_id, None)
+            game = self.court_service.get_active_game_by_id(game_id)
+            if not game or game['status'] != 'in_progress':
+                return
+            if game.get('current_phase') != 'judge':
+                return  # Player already replied, phase already advanced
+
+            logger.info(f"[COURT] fallback_timer: game={game_id} — сторона не ответила на вопрос суда")
+            self.court_service.log_message(game_id, 'system', 'Сторона не ответила на вопрос суда.', round_num)
+            try:
+                self.bot.send_message(
+                    chat_id,
+                    "⚖️ <i>Сторона не ответила на вопрос суда. Заседание продолжается.</i>",
+                    parse_mode='HTML'
+                )
+            except Exception:
+                pass
+
+            # Determine next step based on what's been played this round
+            played = game.get('played_cards', [])
+            has_defense = any(p['role'] in ('lawyer', 'witness') and p['round'] == round_num for p in played)
+
+            if not has_defense:
+                # Prosecution spoke but defense hasn't — give defense their turn
+                self.court_service.set_phase(game_id, 'defense')
+                try:
+                    self.bot.send_message(chat_id, "🛡️ <b>Защита, ваш ответ!</b>", parse_mode='HTML')
+                except Exception:
+                    pass
+            else:
+                # Defense also answered — advance to next round
+                if round_num >= 4:
+                    self.court_service.set_phase(game_id, 'final')
+                    self._request_final_words(game_id, chat_id)
+                else:
+                    next_round = round_num + 1
+                    self.court_service.advance_round(game_id, next_round)
+                    self.court_service.set_phase(game_id, 'prosecution')
+                    try:
+                        self.bot.send_message(
+                            chat_id,
+                            f"⚖️ <b>Раунд {next_round} из 4</b>\n⚔️ Прокурор, ваш ход.",
+                            parse_mode='HTML'
+                        )
+                    except Exception:
+                        pass
+
+        timer = threading.Timer(180, on_timeout)  # 3 minutes
+        timer.daemon = True
+        self._fallback_timers[game_id] = timer
+        timer.start()
+        logger.info(f"[COURT] fallback_timer started: game={game_id} round={round_num} (180s)")
 
     def _request_final_words(self, game_id: int, chat_id: int):
         """Запросить финальное слово у каждого игрока в личку."""
