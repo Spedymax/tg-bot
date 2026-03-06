@@ -1,8 +1,6 @@
 import json
 import logging
-import re
 
-import httpx
 import google.generativeai as genai
 
 from config.settings import Settings
@@ -153,29 +151,20 @@ class CourtService:
     )
 
     def _call_llm(self, system_prompt: str | None, user_prompt: str) -> str:
-        """Универсальный вызов LLM с произвольным системным промптом."""
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": user_prompt})
+        """Вызов Gemini с опциональным системным промптом."""
         try:
-            with httpx.Client() as client:
-                r = client.post(
-                    f"{Settings.LOCAL_LLM_URL}/v1/chat/completions",
-                    json={"model": Settings.LOCAL_LLM_MODEL, "messages": messages, "stream": False},
-                    timeout=180,
-                )
-                r.raise_for_status()
-                text = r.json()["choices"][0]["message"]["content"].strip()
-                # Strip <think>...</think> blocks (qwen thinking models)
-                text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-                return text
+            genai.configure(api_key=Settings.GEMINI_API_KEY)
+            model = genai.GenerativeModel(
+                'gemini-2.5-flash-lite',
+                system_instruction=system_prompt if system_prompt else None,
+            )
+            response = model.generate_content(user_prompt)
+            return response.text.strip()
         except Exception as e:
-            logger.error(f"CourtService: Ollama error: {e}")
+            logger.error(f"CourtService: Gemini error: {e}")
             return ""
 
     def _call_judge_llm(self, prompt: str, use_judge_persona: bool = True) -> str:
-        """Вызов LLM с персоной судьи или без."""
         system = self.JUDGE_SYSTEM_PROMPT if use_judge_persona else None
         return self._call_llm(system, prompt)
 
@@ -219,18 +208,6 @@ class CourtService:
             self.log_message(game_id, role, speech, round_num)
         return speech
 
-    def _call_gemini(self, prompt: str) -> str:
-        """Вызов Gemini API для тяжёлых задач генерации."""
-        try:
-            genai.configure(api_key=Settings.GEMINI_API_KEY)
-            model = genai.GenerativeModel('gemini-2.5-flash-lite')
-            response = model.generate_content(prompt)
-            text = response.text.strip()
-            return text
-        except Exception as e:
-            logger.error(f"CourtService: Gemini error: {e}")
-            return ""
-
     def generate_cards(self, defendant: str, crime: str) -> tuple[list, list, list]:
         """Попросить ИИ сгенерировать 16 карт. Возвращает (prosecutor[8], lawyer[4], witness[4])."""
         prompt = f"""Ты — помощник судьи. Придумай 16 карт для судебной игры.
@@ -267,7 +244,7 @@ class CourtService:
 4. [карта]"""
 
         for attempt in range(3):
-            raw = self._call_gemini(prompt)
+            raw = self._call_llm(None, prompt)
             if not raw:
                 logger.warning(f"CourtService: пустой ответ от LLM при генерации карт (попытка {attempt + 1}/3)")
                 continue
