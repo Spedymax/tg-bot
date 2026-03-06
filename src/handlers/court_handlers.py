@@ -163,8 +163,8 @@ class CourtHandlers:
         @self.bot.message_handler(func=lambda m: (
             m.chat.type != 'private'
             and m.chat.id in self._pending_speech
-            and m.text
-            and not m.text.startswith('/')
+            and m.reply_to_message is not None
+            and m.reply_to_message.from_user.id == self._get_bot_id()
             and m.from_user.id == self._pending_speech[m.chat.id]['user_id']
         ))
         def handle_speech_input(message):
