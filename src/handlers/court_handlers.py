@@ -610,58 +610,65 @@ class CourtHandlers:
             role_icon = "⚔️" if role == "prosecutor" else ("🛡️" if role == "lawyer" else "👁️")
             self.bot.send_message(chat_id, f"{role_icon} <i>{speech}</i>", parse_mode='HTML')
 
-            # Статус: судья думает
             self.bot.send_chat_action(chat_id, 'typing')
 
             logger.info(f"[COURT] _after_speech_received: calling judge_react")
-            reaction = self.court_service.judge_react(game_id, role, card, round_num)
-            logger.info(f"[COURT] _after_speech_received: judge reaction='{str(reaction)[:80]}'")
+            reaction, signal = self.court_service.judge_react(game_id, role, card, round_num)
+            logger.info(f"[COURT] _after_speech_received: judge reaction='{str(reaction)[:80]}' signal={signal}")
+
             if reaction:
-                self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
+                judge_msg = self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
+                self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
 
-            game = self.court_service.get_active_game_by_id(game_id)
-            if not game:
-                logger.error(f"[COURT] _after_speech_received: game {game_id} not found after judge react")
-                return
+            self._handle_judge_signal(game_id, chat_id, signal, round_num)
 
-            if role == 'prosecutor':
-                if game_id in self._test_games:
-                    logger.info(f"[COURT] _after_speech_received: test mode — launching AI defense")
-                    threading.Thread(
-                        target=self._ai_play_defense_test,
-                        args=(game_id, chat_id, card, round_num),
-                        daemon=True
-                    ).start()
-                else:
-                    self.bot.send_message(
-                        chat_id,
-                        f"🛡️ <b>Защита, ваш ход!</b>\n"
-                        f"Адвокат или Свидетель — сыграйте карту в личке с ботом.\n"
-                        f"(Адвокат осталось: {game['lawyer_cards_left']}, Свидетель: {game['witness_cards_left']})",
-                        parse_mode='HTML'
-                    )
-            else:
-                played_this_round = [p for p in game['played_cards'] if p['round'] == round_num]
-                has_prosecution = any(p['role'] == 'prosecutor' for p in played_this_round)
-                has_defense = any(p['role'] in ('lawyer', 'witness') for p in played_this_round)
-                logger.info(f"[COURT] _after_speech_received: round={round_num} has_prosecution={has_prosecution} has_defense={has_defense}")
-
-                if has_prosecution and has_defense:
-                    next_round = round_num + 1
-                    if next_round > 4:
-                        logger.info(f"[COURT] _after_speech_received: all rounds done, requesting final words")
-                        self.bot.send_message(chat_id, "⚖️ <b>Все раунды завершены.</b>\n\nСуд предоставляет каждой из сторон <b>последнее слово</b>. Напишите ваше финальное заявление боту в личку.", parse_mode='HTML')
-                        self._request_final_words(game_id, chat_id)
-                    else:
-                        logger.info(f"[COURT] _after_speech_received: advancing to round {next_round}")
-                        self.court_service.advance_round(game_id, next_round)
-                        self.bot.send_message(
-                            chat_id,
-                            f"⚖️ <b>Раунд {next_round} из 4</b>\n⚔️ Прокурор, ваш ход. Сыграйте карту в личке.",
-                            parse_mode='HTML'
-                        )
         except Exception as e:
             logger.error(f"[COURT] _after_speech_received: ошибка для game {game_id}: {e}", exc_info=True)
+
+    def _handle_judge_signal(self, game_id: int, chat_id: int, signal: str | None, round_num: int):
+        """Двигает игровой стейт по сигналу судьи."""
+        if signal == "ВОПРОС":
+            self.court_service.set_phase(game_id, 'judge')
+            self._start_fallback_timer(game_id, chat_id, round_num)
+
+        elif signal == "ЗАЩИТА_ВАШ_ХОД":
+            self.court_service.set_phase(game_id, 'defense')
+            game = self.court_service.get_active_game_by_id(game_id)
+            if game:
+                self.bot.send_message(
+                    chat_id,
+                    f"🛡️ <b>Защита, ваш ответ!</b>\n"
+                    f"(Адвокат осталось: {game['lawyer_cards_left']}, Свидетель: {game['witness_cards_left']})",
+                    parse_mode='HTML'
+                )
+
+        elif signal == "ПРОКУРОР_ВАШ_ХОД":
+            next_round = round_num + 1
+            self.court_service.advance_round(game_id, next_round)
+            self.court_service.set_phase(game_id, 'prosecution')
+            self.bot.send_message(
+                chat_id,
+                f"⚖️ <b>Раунд {next_round} из 4</b>\n⚔️ Прокурор, ваш ход. Сыграйте карту в личке.",
+                parse_mode='HTML'
+            )
+
+        elif signal == "ФИНАЛ":
+            self.court_service.set_phase(game_id, 'final')
+            self.bot.send_message(
+                chat_id,
+                "⚖️ <b>Все раунды завершены.</b>\n\nСуд предоставляет каждой из сторон <b>последнее слово</b>. Напишите ваше финальное заявление боту в личку.",
+                parse_mode='HTML'
+            )
+            self._request_final_words(game_id, chat_id)
+
+        else:
+            # LLM did not return a tag — log warning and start fallback timer
+            logger.warning(f"[COURT] _handle_judge_signal: no signal for game={game_id} round={round_num}, starting fallback")
+            self._start_fallback_timer(game_id, chat_id, round_num)
+
+    def _start_fallback_timer(self, game_id: int, chat_id: int, round_num: int):
+        """Stub — будет реализован в следующем шаге."""
+        pass
 
     def _request_final_words(self, game_id: int, chat_id: int):
         """Запросить финальное слово у каждого игрока в личку."""
