@@ -27,7 +27,8 @@ class CourtService:
         rows = self.db.execute_query(
             "SELECT id, chat_id, defendant, crime, prosecutor_id, lawyer_id, witness_id, "
             "prosecutor_cards, lawyer_cards, witness_cards, played_cards, current_round, "
-            "prosecutor_cards_left, lawyer_cards_left, witness_cards_left, status "
+            "prosecutor_cards_left, lawyer_cards_left, witness_cards_left, status, "
+            "current_phase, last_judge_msg_id "
             "FROM court_games WHERE chat_id = %s AND status NOT IN ('finished', 'aborted') "
             "ORDER BY created_at DESC LIMIT 1",
             (chat_id,),
@@ -43,6 +44,8 @@ class CourtService:
             "current_round": r[11], "prosecutor_cards_left": r[12],
             "lawyer_cards_left": r[13], "witness_cards_left": r[14],
             "status": r[15],
+            "current_phase": r[16] or "prosecution",
+            "last_judge_msg_id": r[17],
         }
 
     def assign_role(self, game_id: int, role: str, user_id: int):
@@ -84,7 +87,8 @@ class CourtService:
         rows = self.db.execute_query(
             "SELECT id, chat_id, defendant, crime, prosecutor_id, lawyer_id, witness_id, "
             "prosecutor_cards, lawyer_cards, witness_cards, played_cards, current_round, "
-            "prosecutor_cards_left, lawyer_cards_left, witness_cards_left, status "
+            "prosecutor_cards_left, lawyer_cards_left, witness_cards_left, status, "
+            "current_phase, last_judge_msg_id "
             "FROM court_games WHERE id = %s", (game_id,),
         )
         if not rows:
@@ -98,10 +102,26 @@ class CourtService:
             "current_round": r[11], "prosecutor_cards_left": r[12],
             "lawyer_cards_left": r[13], "witness_cards_left": r[14],
             "status": r[15],
+            "current_phase": r[16] or "prosecution",
+            "last_judge_msg_id": r[17],
         }
 
     def advance_round(self, game_id: int, new_round: int):
         self.db.execute_query("UPDATE court_games SET current_round=%s WHERE id=%s", (new_round, game_id))
+
+    def set_phase(self, game_id: int, phase: str):
+        """Установить текущую фазу игры."""
+        self.db.execute_query(
+            "UPDATE court_games SET current_phase = %s WHERE id = %s",
+            (phase, game_id)
+        )
+
+    def set_last_judge_msg(self, game_id: int, msg_id: int):
+        """Запомнить message_id последнего сообщения судьи."""
+        self.db.execute_query(
+            "UPDATE court_games SET last_judge_msg_id = %s WHERE id = %s",
+            (msg_id, game_id)
+        )
 
     def save_verdict(self, game_id: int, verdict: str):
         self.db.execute_query(
