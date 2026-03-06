@@ -85,3 +85,11 @@ def test_parse_judge_signal_final():
     clean, signal = svc.parse_judge_signal(text)
     assert signal == "ФИНАЛ"
     assert "[ФИНАЛ]" not in clean
+
+def test_set_phase_calls_db():
+    svc = make_service()
+    svc.set_phase(1, "defense")
+    svc.db.execute_query.assert_called_with(
+        "UPDATE court_games SET current_phase = %s WHERE id = %s",
+        ("defense", 1)
+    )
