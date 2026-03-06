@@ -137,6 +137,7 @@ class CourtHandlers:
             role = pending['role']
             chat_id = pending['chat_id']
             statement = message.text.strip()[:500]
+            logger.info(f"[COURT] handle_final_word: game={game_id} role={role} user={user_id} statement='{statement[:60]}'")
 
             self.court_service.log_message(game_id, f'final_{role}', statement)
             self.bot.reply_to(message, "✅ Ваше финальное слово принято судом.")
@@ -173,6 +174,7 @@ class CourtHandlers:
             if not pending:
                 return
             speech = message.text.strip()[:500]
+            logger.info(f"[COURT] speech_input: game={pending['game_id']} chat={chat_id} role={pending['role']} user={message.from_user.id} speech='{speech[:60]}'")
             threading.Thread(
                 target=self._after_speech_received,
                 args=(pending['game_id'], chat_id, pending['role'], pending['card'], pending['round_num'], speech),
@@ -252,8 +254,12 @@ class CourtHandlers:
 
     def _ai_play_defense_test(self, game_id: int, chat_id: int, prosecutor_card: str, round_num: int):
         """AI автоматически разыгрывает карту защиты в тест-режиме."""
+        logger.info(f"[COURT] _ai_play_defense_test: game={game_id} chat={chat_id} round={round_num}")
         try:
+            logger.info(f"[COURT] _ai_play_defense_test: generating AI defense card")
             card = self.court_service.ai_defense_card(game_id, prosecutor_card, round_num)
+            logger.info(f"[COURT] _ai_play_defense_test: AI card='{card[:60]}'")
+
             role_ru = "🛡️ Адвокат (AI)"
 
             self.bot.send_message(chat_id, f"🃏 <b>{role_ru}</b> играет карту:\n\n«{card}»", parse_mode='HTML')
@@ -274,9 +280,9 @@ class CourtHandlers:
 
             next_round = round_num + 1
             if next_round > 4:
-                self.bot.send_message(chat_id, "⚖️ <b>Все раунды завершены.</b>\n\nНапиши своё финальное слово:", parse_mode='HTML')
-                self._pending_final_word[chat_id] = {'game_id': game_id, 'role': 'prosecutor', 'chat_id': chat_id}
-                # AI финальные слова генерируем сразу
+                logger.info(f"[COURT] _ai_play_defense_test: all rounds done, requesting final words")
+                prosecutor_user_id = game['prosecutor_id']
+                self.bot.send_message(chat_id, "⚖️ <b>Все раунды завершены.</b>\n\nНапиши своё финальное слово боту в личку:", parse_mode='HTML')
                 self._final_word_state[game_id] = {
                     'statements': {},
                     'needed': {'prosecutor', 'lawyer', 'witness'},
@@ -287,6 +293,15 @@ class CourtHandlers:
                     ai_card = self.court_service.ai_defense_card(game_id, "финальное слово", 0)
                     self._final_word_state[game_id]['statements'][ai_role] = ai_card
                     self._final_word_state[game_id]['needed'].discard(ai_role)
+                # Прокурор пишет финальное слово в личку
+                self._pending_final_word[prosecutor_user_id] = {'game_id': game_id, 'role': 'prosecutor', 'chat_id': chat_id}
+                try:
+                    self.bot.send_message(prosecutor_user_id, "⚖️ <b>Финальное слово</b>\n\nНапишите ваше финальное заявление (до 500 символов):", parse_mode='HTML')
+                except Exception as e:
+                    logger.error(f"[COURT] _ai_play_defense_test: не удалось отправить DM прокурору {prosecutor_user_id}: {e}")
+                    self._pending_final_word.pop(prosecutor_user_id, None)
+                    self._final_word_state[game_id]['statements']['prosecutor'] = ''
+                    self._final_word_state[game_id]['needed'].discard('prosecutor')
             else:
                 self.court_service.advance_round(game_id, next_round)
                 self.bot.send_message(
@@ -302,6 +317,7 @@ class CourtHandlers:
         markup.row(types.InlineKeyboardButton("⚔️ Прокурор", callback_data=f"court_role:prosecutor:{game_id}"))
         markup.row(types.InlineKeyboardButton("🛡️ Адвокат", callback_data=f"court_role:lawyer:{game_id}"))
         markup.row(types.InlineKeyboardButton("👁️ Свидетель защиты", callback_data=f"court_role:witness:{game_id}"))
+        markup.row(types.InlineKeyboardButton("🤖 Соло-тест (я Прокурор, AI защита)", callback_data=f"court_solo:{game_id}"))
         self.bot.send_message(
             chat_id,
             "⚖️ Выберите роль для участия в заседании:",
@@ -353,6 +369,27 @@ class CourtHandlers:
                 self._wait.pop(chat_id, None)
                 threading.Thread(target=self._start_game, args=(chat_id, game_id, roles_taken), daemon=True).start()
 
+        @self.bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("court_solo:"))
+        def handle_solo_test(call):
+            game_id = int(call.data.split(":")[1])
+            chat_id = call.message.chat.id
+            user_id = call.from_user.id
+            user_name = call.from_user.first_name or call.from_user.username or str(user_id)
+            logger.info(f"[COURT] solo_test: game={game_id} chat={chat_id} user={user_id} ({user_name})")
+
+            self._wait.pop(chat_id, None)
+            self.bot.delete_message(chat_id, call.message.message_id)
+            self.bot.answer_callback_query(call.id, "Ты — Прокурор, AI играет защиту!")
+            self.bot.send_message(chat_id, f"🤖 <b>Соло-тест:</b> {user_name} — Прокурор, AI — Адвокат и Свидетель.", parse_mode='HTML')
+
+            self.court_service.assign_role(game_id, 'prosecutor', user_id)
+            self.court_service.assign_role(game_id, 'lawyer', self.AI_LAWYER_ID)
+            self.court_service.assign_role(game_id, 'witness', self.AI_WITNESS_ID)
+            self._test_games.add(game_id)
+
+            roles_taken = {'prosecutor': user_id, 'lawyer': self.AI_LAWYER_ID, 'witness': self.AI_WITNESS_ID}
+            threading.Thread(target=self._start_game, args=(chat_id, game_id, roles_taken), daemon=True).start()
+
         @self.bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("court_play:"))
         def handle_play_card(call):
             # Формат: court_play:{game_id}:{role}:{card_index}
@@ -398,6 +435,7 @@ class CourtHandlers:
                 self.bot.answer_callback_query(call.id, "Карта не найдена (устаревшая кнопка).", show_alert=True)
                 return
 
+            logger.info(f"[COURT] handle_play_card: game={game_id} role={role} card_index={card_index} user={user_id} card='{card_text[:60]}'")
             self.bot.answer_callback_query(call.id, "Карта сыграна!")
             try:
                 new_markup = types.InlineKeyboardMarkup()
@@ -419,8 +457,9 @@ class CourtHandlers:
         """Сгенерировать карты, отправить в личку, начать раунд 1."""
         required = {'prosecutor', 'lawyer', 'witness'}
         if not required.issubset(roles_taken.keys()):
-            logger.error(f"_start_game: неверный roles_taken: {roles_taken}")
+            logger.error(f"[COURT] _start_game: неверный roles_taken: {roles_taken}")
             return
+        logger.info(f"[COURT] _start_game: game={game_id} chat={chat_id} roles={roles_taken}")
         try:
             game = self.court_service.get_active_game_by_id(game_id)
             defendant = game['defendant']
@@ -428,7 +467,9 @@ class CourtHandlers:
 
             self.bot.send_message(chat_id, "⚖️ <b>Состав суда сформирован. Генерирую материалы дела...</b>", parse_mode='HTML')
 
+            logger.info(f"[COURT] _start_game: generating cards for '{defendant}' / '{crime}'")
             prosecutor_cards, lawyer_cards, witness_cards = self.court_service.generate_cards(defendant, crime)
+            logger.info(f"[COURT] _start_game: cards generated — prosecutor={len(prosecutor_cards)} lawyer={len(lawyer_cards)} witness={len(witness_cards)}")
 
             if not prosecutor_cards:
                 self.bot.send_message(chat_id, "❌ Ошибка генерации карт. Попробуйте /court ещё раз.")
@@ -439,11 +480,14 @@ class CourtHandlers:
             self.court_service.set_status(game_id, 'in_progress')
             self.court_service.advance_round(game_id, 1)
             self.court_service.log_message(game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
+            logger.info(f"[COURT] _start_game: game status=in_progress round=1")
 
-            # Отправляем карты в личку
+            # Отправляем карты в личку (AI-роли пропускаем)
             self._send_cards_dm(roles_taken['prosecutor'], game_id, 'prosecutor', prosecutor_cards)
-            self._send_cards_dm(roles_taken['lawyer'], game_id, 'lawyer', lawyer_cards, partner_cards=witness_cards, partner_role='witness')
-            self._send_cards_dm(roles_taken['witness'], game_id, 'witness', witness_cards, partner_cards=lawyer_cards, partner_role='lawyer')
+            if roles_taken['lawyer'] not in (self.AI_LAWYER_ID, self.AI_WITNESS_ID):
+                self._send_cards_dm(roles_taken['lawyer'], game_id, 'lawyer', lawyer_cards, partner_cards=witness_cards, partner_role='witness')
+            if roles_taken['witness'] not in (self.AI_LAWYER_ID, self.AI_WITNESS_ID):
+                self._send_cards_dm(roles_taken['witness'], game_id, 'witness', witness_cards, partner_cards=lawyer_cards, partner_role='lawyer')
 
             self.bot.send_message(
                 chat_id,
@@ -496,11 +540,21 @@ class CourtHandlers:
 
     def _process_played_card(self, game_id: int, chat_id: int, role: str, card: str, round_num: int):
         """Объявляем сыгранную карту, судья реагирует, двигаем состояние."""
+        logger.info(f"[COURT] _process_played_card: game={game_id} chat={chat_id} role={role} round={round_num} card='{card[:60]}'")
         try:
             role_ru = ROLE_NAMES[role]
             self.bot.send_message(chat_id, f"🃏 <b>{role_ru}</b> играет карту:\n\n«{card}»", parse_mode='HTML')
+            logger.info(f"[COURT] _process_played_card: card announced in group")
 
             self.court_service.record_played_card(game_id, role, card, round_num)
+            logger.info(f"[COURT] _process_played_card: card recorded in DB")
+
+            game = self.court_service.get_active_game_by_id(game_id)
+            if not game:
+                logger.error(f"[COURT] _process_played_card: game {game_id} not found after record")
+                return
+            player_user_id = game[f'{role}_id']
+            logger.info(f"[COURT] _process_played_card: player user_id={player_user_id}")
 
             # Ask player to type their speech
             speech_prompt = self.bot.send_message(
@@ -508,16 +562,18 @@ class CourtHandlers:
                 f"💬 <b>{role_ru}</b>, опиши свой аргумент — ответь реплаем на это сообщение:",
                 parse_mode='HTML'
             )
+            logger.info(f"[COURT] _process_played_card: speech prompt sent msg_id={speech_prompt.message_id}")
             self._pending_speech[chat_id] = {
                 'game_id': game_id,
-                'user_id': self.court_service.get_active_game_by_id(game_id)[f'{role}_id'],
+                'user_id': player_user_id,
                 'role': role,
                 'card': card,
                 'round_num': round_num,
                 'prompt_msg_id': speech_prompt.message_id,
             }
+            logger.info(f"[COURT] _process_played_card: pending_speech set for chat={chat_id} user={player_user_id}")
         except Exception as e:
-            logger.error(f"_process_played_card: ошибка для game {game_id}: {e}")
+            logger.error(f"[COURT] _process_played_card: ошибка для game {game_id}: {e}", exc_info=True)
             try:
                 self.bot.send_message(chat_id, "⚠️ Ошибка при обработке карты. Попробуйте сыграть карту ещё раз.")
             except Exception:
@@ -525,6 +581,7 @@ class CourtHandlers:
 
     def _after_speech_received(self, game_id: int, chat_id: int, role: str, card: str, round_num: int, speech: str):
         """Обработать речь игрока: залогировать, показать, запустить реакцию судьи, продвинуть состояние."""
+        logger.info(f"[COURT] _after_speech_received: game={game_id} chat={chat_id} role={role} round={round_num} speech='{speech[:60]}'")
         try:
             self.court_service.log_message(game_id, role, speech, round_num)
             role_icon = "⚔️" if role == "prosecutor" else ("🛡️" if role == "lawyer" else "👁️")
@@ -533,16 +590,20 @@ class CourtHandlers:
             # Статус: судья думает
             self.bot.send_chat_action(chat_id, 'typing')
 
+            logger.info(f"[COURT] _after_speech_received: calling judge_react")
             reaction = self.court_service.judge_react(game_id, role, card, round_num)
+            logger.info(f"[COURT] _after_speech_received: judge reaction='{str(reaction)[:80]}'")
             if reaction:
                 self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
 
             game = self.court_service.get_active_game_by_id(game_id)
             if not game:
+                logger.error(f"[COURT] _after_speech_received: game {game_id} not found after judge react")
                 return
 
             if role == 'prosecutor':
                 if game_id in self._test_games:
+                    logger.info(f"[COURT] _after_speech_received: test mode — launching AI defense")
                     threading.Thread(
                         target=self._ai_play_defense_test,
                         args=(game_id, chat_id, card, round_num),
@@ -560,13 +621,16 @@ class CourtHandlers:
                 played_this_round = [p for p in game['played_cards'] if p['round'] == round_num]
                 has_prosecution = any(p['role'] == 'prosecutor' for p in played_this_round)
                 has_defense = any(p['role'] in ('lawyer', 'witness') for p in played_this_round)
+                logger.info(f"[COURT] _after_speech_received: round={round_num} has_prosecution={has_prosecution} has_defense={has_defense}")
 
                 if has_prosecution and has_defense:
                     next_round = round_num + 1
                     if next_round > 4:
+                        logger.info(f"[COURT] _after_speech_received: all rounds done, requesting final words")
                         self.bot.send_message(chat_id, "⚖️ <b>Все раунды завершены.</b>\n\nСуд предоставляет каждой из сторон <b>последнее слово</b>. Напишите ваше финальное заявление боту в личку.", parse_mode='HTML')
                         self._request_final_words(game_id, chat_id)
                     else:
+                        logger.info(f"[COURT] _after_speech_received: advancing to round {next_round}")
                         self.court_service.advance_round(game_id, next_round)
                         self.bot.send_message(
                             chat_id,
@@ -574,12 +638,14 @@ class CourtHandlers:
                             parse_mode='HTML'
                         )
         except Exception as e:
-            logger.error(f"_after_speech_received: ошибка для game {game_id}: {e}")
+            logger.error(f"[COURT] _after_speech_received: ошибка для game {game_id}: {e}", exc_info=True)
 
     def _request_final_words(self, game_id: int, chat_id: int):
         """Запросить финальное слово у каждого игрока в личку."""
+        logger.info(f"[COURT] _request_final_words: game={game_id} chat={chat_id}")
         game = self.court_service.get_active_game_by_id(game_id)
         if not game:
+            logger.error(f"[COURT] _request_final_words: game {game_id} not found")
             return
 
         role_user_map = {
@@ -619,9 +685,12 @@ class CourtHandlers:
 
     def _deliver_verdict(self, game_id: int, chat_id: int, final_statements: dict = None):
         """Доставить драматичный многосообщный приговор."""
+        logger.info(f"[COURT] _deliver_verdict: game={game_id} chat={chat_id} statements={list((final_statements or {}).keys())}")
         try:
             self.bot.send_message(chat_id, "⚖️ Судья удаляется на совещание... 🤔", parse_mode='HTML')
+            logger.info(f"[COURT] _deliver_verdict: generating verdict via LLM")
             parts = self.court_service.generate_verdict(game_id, final_statements or {})
+            logger.info(f"[COURT] _deliver_verdict: verdict generated, {len(parts)} parts")
             self.court_service.save_verdict(game_id, "\n---\n".join(parts))
 
             prefixes = [
