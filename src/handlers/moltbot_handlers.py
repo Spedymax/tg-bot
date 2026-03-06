@@ -289,7 +289,7 @@ class MoltbotHandlers:
                         return ""
                     # Strip action error lines injected by OpenClaw
                     lines = text.split('\n')
-                    lines = [l for l in lines if not ('⚠' in l and ('failed' in l.lower() or 'action' in l.lower() or 'target' in l.lower()))]
+                    lines = [l for l in lines if not ('⚠' in l and ('failed' in l.lower() or 'action' in l.lower() or 'target' in l.lower() or 'rate limit' in l.lower() or 'try again' in l.lower()))]
                     text = '\n'.join(lines).strip()
                     if "no response" in text.lower() and "openclaw" in text.lower():
                         logger.warning("MoltBot: OpenClaw returned no-response string, treating as refusal")
