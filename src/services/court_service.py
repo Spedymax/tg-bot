@@ -130,8 +130,17 @@ class CourtService:
         "- Театральный и красноречивый, но краткий.\n"
         "- Фиксируешь все противоречия. Если сторона противоречит себе — указываешь на это.\n"
         "- 'Я не так сказал' — не аргумент. Всё сказанное идёт в протокол.\n"
+        "- Если заявление необычное, бездоказательное или противоречит протоколу — "
+        "ТРЕБУЙ конкретных доказательств, не принимай на веру.\n"
         "- Говоришь от первого лица, только на русском языке.\n"
-        "- Не выходишь из роли ни при каких обстоятельствах."
+        "- Не выходишь из роли ни при каких обстоятельствах.\n\n"
+        "ВАЖНО — управление ходом игры:\n"
+        "Каждая твоя реплика ОБЯЗАНА заканчиваться ровно одним из этих тегов (на отдельной строке):\n"
+        "[ВОПРОС] — если ты задал вопрос и ждёшь ответа от текущего говорящего\n"
+        "[ЗАЩИТА, ВАШ ХОД] — если прокурор закончил и пора отвечать защите\n"
+        "[ПРОКУРОР, ВАШ ХОД] — если защита закончила и начинается следующий раунд\n"
+        "[ФИНАЛ] — если все раунды исчерпаны и пора выносить приговор\n"
+        "Тег должен быть последней строкой. Никакого текста после тега."
     )
 
     PROSECUTOR_SYSTEM_PROMPT = (
@@ -310,34 +319,67 @@ class CourtService:
         card = self._call_llm(self.LAWYER_SYSTEM_PROMPT, prompt)
         return card or "Защита не имеет возражений."
 
-    def judge_react(self, game_id: int, role: str, card: str, round_num: int) -> str:
-        """Короткая реакция судьи после розыгрыша карты."""
+    def judge_react(self, game_id: int, role: str, card: str, round_num: int) -> tuple[str, str | None]:
+        """Короткая реакция судьи после розыгрыша карты.
+        Возвращает (текст_для_отображения, сигнал).
+        """
         history = self.get_session_messages(game_id)
         history_text = "\n".join(f"[{m['role']}] {m['content']}" for m in history[-20:])
 
         role_ru = {"prosecutor": "Прокурор", "lawyer": "Адвокат", "witness": "Свидетель защиты"}[role]
 
+        game = self.get_active_game_by_id(game_id)
+        is_last_round = game and game.get('current_round', 0) >= 4
+
         if role == "prosecutor":
             direction = (
-                "Дай реакцию (1-2 предложения), затем ПРЯМО обратись к стороне защиты — "
-                "потребуй опровержения, объяснения или конкретного контраргумента."
+                "Дай реакцию (1-2 предложения). Если аргумент слабый или бездоказательный — "
+                "задай острый вопрос и укажи тег [ВОПРОС]. "
+                "Если аргумент принят — передай слово защите тегом [ЗАЩИТА, ВАШ ХОД]."
             )
         else:
             direction = (
-                "Дай реакцию (1-2 предложения). Сравни аргумент с позицией обвинения — "
-                "есть ли противоречие? Подтверди принятие к сведению или задай уточняющий вопрос."
+                "Дай реакцию (1-2 предложения). Сравни с позицией обвинения. "
+                "Если есть противоречие или вопрос — укажи тег [ВОПРОС]. "
+                "Если раунд завершён — укажи тег [ПРОКУРОР, ВАШ ХОД] или [ФИНАЛ] если это последний раунд."
             )
+
+        last_round_note = "Это последний раунд — если защита ответила, используй [ФИНАЛ]." if is_last_round and role != "prosecutor" else ""
 
         prompt = f"""Протокол заседания (последние сообщения):
 {history_text}
 
 Сейчас {role_ru} сыграл карту: «{card}»
 
-{direction}"""
+{direction}
+{last_round_note}"""
 
-        reaction = self._call_judge_llm(prompt)
-        self.log_message(game_id, "judge", reaction, round_num)
-        return reaction
+        raw = self._call_judge_llm(prompt)
+        clean, signal = self.parse_judge_signal(raw)
+        self.log_message(game_id, "judge", clean, round_num)
+        return clean, signal
+
+    def judge_react_to_reply(self, game_id: int, role: str, reply_text: str, round_num: int) -> tuple[str, str | None]:
+        """Реакция судьи на ответ игрока в диалоге.
+        Возвращает (текст_для_отображения, сигнал).
+        """
+        history = self.get_session_messages(game_id)
+        history_text = "\n".join(f"[{m['role']}] {m['content']}" for m in history[-20:])
+        role_ru = {"prosecutor": "Прокурор", "lawyer": "Адвокат", "witness": "Свидетель защиты"}.get(role, role)
+
+        prompt = f"""Протокол заседания:
+{history_text}
+
+{role_ru} отвечает суду: «{reply_text}»
+
+Оцени ответ. Если он достаточен — передай ход следующей стороне нужным тегом.
+Если недостаточен — задай уточняющий вопрос с тегом [ВОПРОС]."""
+
+        raw = self._call_judge_llm(prompt)
+        clean, signal = self.parse_judge_signal(raw)
+        self.log_message(game_id, role, reply_text, round_num)
+        self.log_message(game_id, "judge", clean, round_num)
+        return clean, signal
 
     def generate_verdict(self, game_id: int, final_statements: dict = None) -> list[str]:
         """Сгенерировать драматичный многосообщный приговор. Возвращает список из 4 строк."""
