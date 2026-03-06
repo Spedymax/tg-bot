@@ -272,6 +272,7 @@ class MoltbotHandlers:
         last_exc = None
         for attempt in range(3):
             try:
+                logger.info(f"MoltBot: OpenClaw request model={model} user={user_key} attempt={attempt + 1} prompt_len={len(content)}")
                 with httpx.Client() as client:
                     r = client.post(
                         Settings.JARVIS_URL,
@@ -283,13 +284,19 @@ class MoltbotHandlers:
                         },
                         timeout=120,
                     )
+                    logger.info(f"MoltBot: OpenClaw response status={r.status_code} model={model}")
                     r.raise_for_status()
-                    text = r.json()["choices"][0]["message"]["content"]
+                    raw = r.json()
+                    text = raw["choices"][0]["message"]["content"]
+                    logger.info(f"MoltBot: OpenClaw raw response text={repr(text[:200])}")
                     if not text:
                         return ""
                     # Strip action error lines injected by OpenClaw
                     lines = text.split('\n')
-                    lines = [l for l in lines if not ('⚠' in l and ('failed' in l.lower() or 'action' in l.lower() or 'target' in l.lower() or 'rate limit' in l.lower() or 'try again' in l.lower()))]
+                    stripped = [l for l in lines if ('⚠' in l and ('failed' in l.lower() or 'action' in l.lower() or 'target' in l.lower() or 'rate limit' in l.lower() or 'try again' in l.lower()))]
+                    if stripped:
+                        logger.warning(f"MoltBot: OpenClaw stripped error lines: {stripped}")
+                    lines = [l for l in lines if l not in stripped]
                     text = '\n'.join(lines).strip()
                     if "no response" in text.lower() and "openclaw" in text.lower():
                         logger.warning("MoltBot: OpenClaw returned no-response string, treating as refusal")
