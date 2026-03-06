@@ -57,8 +57,8 @@ sshpass -p '123123' ssh localssh@192.168.1.3   # password-based fallback
 
 ### Ollama (Local LLM)
 - **Host:** Windows PC `192.168.1.3:11434`
-- **Models:** `qwen2.5:14b`, `qwen2.5:32b`, `qwen3-coder:30b`
-- **Bot uses:** `qwen2.5:14b` for reactions/classifier/summary/danetka
+- **Models:** `qwen3.5:9b`, `qwen2.5:32b`, `qwen3-coder:30b`
+- **Bot uses:** `qwen3.5:9b` for reactions/classifier/summary/danetka
 - **Autostart:** Scheduled task `OllamaServe` runs on `Spedy` login
 - **Env var:** `OLLAMA_HOST=0.0.0.0` set system-wide via `setx /M`
 - **Note:** Ping blocked by Windows Firewall (ICMP), but TCP 11434 works fine
@@ -66,7 +66,7 @@ sshpass -p '123123' ssh localssh@192.168.1.3   # password-based fallback
 ### OpenClaw (Claude gateway)
 - **URL:** `http://127.0.0.1:18789` (local to server)
 - **Token:** `JARVIS_TOKEN` env var
-- **Models:** `openclaw:main` (Claude), `ollama/qwen2.5:14b` (Qwen via gateway)
+- **Models:** `openclaw:main` (Claude), `ollama/qwen3.5:9b` (Qwen via gateway)
 
 ### Bot Services on Server
 ```bash
