@@ -287,6 +287,7 @@ class CourtHandlers:
             self.court_service.save_cards(game_id, prosecutor_cards, lawyer_cards, witness_cards)
             self.court_service.set_status(game_id, 'in_progress')
             self.court_service.advance_round(game_id, 1)
+            self.court_service.set_phase(game_id, 'prosecution')
             self.court_service.log_message(game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
             self._test_games.add(game_id)
 
@@ -311,57 +312,28 @@ class CourtHandlers:
             card = self.court_service.ai_defense_card(game_id, prosecutor_card, round_num)
             logger.info(f"[COURT] _ai_play_defense_test: AI card='{card[:60]}'")
 
-            role_ru = "🛡️ Адвокат (AI)"
-
-            self.bot.send_message(chat_id, f"🃏 <b>{role_ru}</b> играет карту:\n\n«{card}»", parse_mode='HTML')
+            self.bot.send_message(chat_id, f"🃏 <b>🛡️ Адвокат (AI)</b> играет карту:\n\n«{card}»", parse_mode='HTML')
             self.court_service.record_played_card(game_id, 'lawyer', card, round_num)
             self.court_service.log_message(game_id, 'lawyer', card, round_num)
+            self.court_service.set_phase(game_id, 'defense_speech')
 
             speech = self.court_service.player_argue(game_id, 'lawyer', card, round_num)
             if speech:
                 self.bot.send_message(chat_id, f"🛡️ <i>{speech}</i>", parse_mode='HTML')
 
-            reaction = self.court_service.judge_react(game_id, 'lawyer', card, round_num)
+            reaction, signal = self.court_service.judge_react(game_id, 'lawyer', card, round_num)
             if reaction:
-                self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
+                judge_msg = self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
+                self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
 
-            game = self.court_service.get_active_game_by_id(game_id)
-            if not game:
-                return
+            # In test mode, AI doesn't answer follow-up questions — auto-advance
+            if signal in ("ВОПРОС", None):
+                signal = "ПРОКУРОР_ВАШ_ХОД" if round_num < 4 else "ФИНАЛ"
 
-            next_round = round_num + 1
-            if next_round > 4:
-                logger.info(f"[COURT] _ai_play_defense_test: all rounds done, requesting final words")
-                prosecutor_user_id = game['prosecutor_id']
-                self.bot.send_message(chat_id, "⚖️ <b>Все раунды завершены.</b>\n\nНапиши своё финальное слово боту в личку:", parse_mode='HTML')
-                self._final_word_state[game_id] = {
-                    'statements': {},
-                    'needed': {'prosecutor', 'lawyer', 'witness'},
-                    'chat_id': chat_id,
-                }
-                # AI защита пишет финальные слова сразу
-                for ai_role in ('lawyer', 'witness'):
-                    ai_card = self.court_service.ai_defense_card(game_id, "финальное слово", 0)
-                    self._final_word_state[game_id]['statements'][ai_role] = ai_card
-                    self._final_word_state[game_id]['needed'].discard(ai_role)
-                # Прокурор пишет финальное слово в личку
-                self._pending_final_word[prosecutor_user_id] = {'game_id': game_id, 'role': 'prosecutor', 'chat_id': chat_id}
-                try:
-                    self.bot.send_message(prosecutor_user_id, "⚖️ <b>Финальное слово</b>\n\nНапишите ваше финальное заявление (до 500 символов):", parse_mode='HTML')
-                except Exception as e:
-                    logger.error(f"[COURT] _ai_play_defense_test: не удалось отправить DM прокурору {prosecutor_user_id}: {e}")
-                    self._pending_final_word.pop(prosecutor_user_id, None)
-                    self._final_word_state[game_id]['statements']['prosecutor'] = ''
-                    self._final_word_state[game_id]['needed'].discard('prosecutor')
-            else:
-                self.court_service.advance_round(game_id, next_round)
-                self.bot.send_message(
-                    chat_id,
-                    f"⚖️ <b>Раунд {next_round} из 4</b>\n\nТвой ход, Прокурор. Сыграй карту:",
-                    parse_mode='HTML'
-                )
+            self._handle_judge_signal(game_id, chat_id, signal, round_num)
+
         except Exception as e:
-            logger.error(f"_ai_play_defense_test: ошибка: {e}")
+            logger.error(f"_ai_play_defense_test: ошибка: {e}", exc_info=True)
 
     def _send_role_keyboard(self, chat_id: int, game_id: int):
         markup = types.InlineKeyboardMarkup()
@@ -684,14 +656,22 @@ class CourtHandlers:
 
         elif signal == "ЗАЩИТА_ВАШ_ХОД":
             self.court_service.set_phase(game_id, 'defense')
-            game = self.court_service.get_active_game_by_id(game_id)
-            if game:
-                self.bot.send_message(
-                    chat_id,
-                    f"🛡️ <b>Защита, ваш ответ!</b>\n"
-                    f"(Адвокат осталось: {game['lawyer_cards_left']}, Свидетель: {game['witness_cards_left']})",
-                    parse_mode='HTML'
-                )
+            if game_id in self._test_games:
+                # Auto-play AI defense in test mode
+                threading.Thread(
+                    target=self._ai_play_defense_test,
+                    args=(game_id, chat_id, "", round_num),
+                    daemon=True
+                ).start()
+            else:
+                game = self.court_service.get_active_game_by_id(game_id)
+                if game:
+                    self.bot.send_message(
+                        chat_id,
+                        f"🛡️ <b>Защита, ваш ответ!</b>\n"
+                        f"(Адвокат осталось: {game['lawyer_cards_left']}, Свидетель: {game['witness_cards_left']})",
+                        parse_mode='HTML'
+                    )
 
         elif signal == "ПРОКУРОР_ВАШ_ХОД":
             next_round = round_num + 1
