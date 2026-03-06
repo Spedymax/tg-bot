@@ -406,6 +406,23 @@ class CourtHandlers:
                 self.bot.answer_callback_query(call.id, "Игра уже завершена.", show_alert=True)
                 return
 
+            # Check it's the player's turn
+            current_phase = game.get('current_phase', 'prosecution')
+            if role == 'prosecutor' and current_phase != 'prosecution':
+                self.bot.answer_callback_query(
+                    call.id,
+                    "⚖️ Не ваша очередь — суд ещё не передал вам слово!",
+                    show_alert=True
+                )
+                return
+            if role in ('lawyer', 'witness') and current_phase != 'defense':
+                self.bot.answer_callback_query(
+                    call.id,
+                    "⚖️ Не ваша очередь — суд ещё не передал вам слово!",
+                    show_alert=True
+                )
+                return
+
             # Проверяем что это карта этого игрока
             expected_role_id = game[f"{role}_id"]
             if user_id != expected_role_id:
@@ -446,6 +463,12 @@ class CourtHandlers:
                 self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=new_markup)
             except Exception as e:
                 logger.warning(f"handle_play_card: не удалось обновить разметку: {e}")
+
+            # Advance phase to speech-waiting (blocks other cards while speech is pending)
+            if role == 'prosecutor':
+                self.court_service.set_phase(game_id, 'prosecution_speech')
+            elif role in ('lawyer', 'witness'):
+                self.court_service.set_phase(game_id, 'defense_speech')
 
             threading.Thread(
                 target=self._process_played_card,
