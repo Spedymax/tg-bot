@@ -186,6 +186,52 @@ class CourtHandlers:
                 daemon=True
             ).start()
 
+        @self.bot.message_handler(func=lambda m: (
+            m.chat.type != 'private'
+            and m.reply_to_message is not None
+            and m.reply_to_message.from_user.id == self._get_bot_id()
+            and m.chat.id not in self._pending_speech  # Don't conflict with speech handler
+        ))
+        def handle_judge_reply(message):
+            chat_id = message.chat.id
+            game = self.court_service.get_active_game(chat_id)
+            if not game or game['status'] != 'in_progress':
+                return
+
+            # Only trigger if replying to the last judge message
+            if message.reply_to_message.message_id != game.get('last_judge_msg_id'):
+                return
+
+            user_id = message.from_user.id
+            # Identify the player's role
+            role = None
+            if user_id == game['prosecutor_id']:
+                role = 'prosecutor'
+            elif user_id == game['lawyer_id']:
+                role = 'lawyer'
+            elif user_id == game['witness_id']:
+                role = 'witness'
+
+            if not role:
+                return
+
+            reply_text = (message.text or "").strip()[:500]
+            if not reply_text:
+                return
+
+            logger.info(f"[COURT] handle_judge_reply: game={game['id']} role={role} user={user_id} text='{reply_text[:60]}'")
+
+            # Cancel fallback timer — player is responding
+            old_timer = self._fallback_timers.pop(game['id'], None)
+            if old_timer:
+                old_timer.cancel()
+
+            threading.Thread(
+                target=self._process_judge_reply,
+                args=(game['id'], chat_id, role, reply_text, game['current_round']),
+                daemon=True
+            ).start()
+
         @self.bot.message_handler(func=lambda m: m.chat.type != 'private' and m.chat.id in self._wait)
         def handle_wait_state(message):
             # Игнорируем команды
@@ -731,6 +777,22 @@ class CourtHandlers:
         self._fallback_timers[game_id] = timer
         timer.start()
         logger.info(f"[COURT] fallback_timer started: game={game_id} round={round_num} (180s)")
+
+    def _process_judge_reply(self, game_id: int, chat_id: int, role: str, reply_text: str, round_num: int):
+        """Process a player's reply to a judge question."""
+        try:
+            self.bot.send_chat_action(chat_id, 'typing')
+            reaction, signal = self.court_service.judge_react_to_reply(game_id, role, reply_text, round_num)
+            logger.info(f"[COURT] _process_judge_reply: game={game_id} role={role} signal={signal} reaction='{str(reaction)[:60]}'")
+
+            if reaction:
+                judge_msg = self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
+                self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
+
+            self._handle_judge_signal(game_id, chat_id, signal, round_num)
+
+        except Exception as e:
+            logger.error(f"[COURT] _process_judge_reply: ошибка: {e}", exc_info=True)
 
     def _request_final_words(self, game_id: int, chat_id: int):
         """Запросить финальное слово у каждого игрока в личку."""
