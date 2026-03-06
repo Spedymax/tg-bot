@@ -276,6 +276,24 @@ class CourtService:
             logger.error(f"CourtService: ошибка парсинга карт: {e}\nRaw: {raw}")
             return [], [], []
 
+    # Mapping of LLM signal tags → internal signal constants
+    _SIGNAL_MAP = {
+        "[ВОПРОС]": "ВОПРОС",
+        "[ЗАЩИТА, ВАШ ХОД]": "ЗАЩИТА_ВАШ_ХОД",
+        "[ПРОКУРОР, ВАШ ХОД]": "ПРОКУРОР_ВАШ_ХОД",
+        "[ФИНАЛ]": "ФИНАЛ",
+    }
+
+    def parse_judge_signal(self, text: str) -> tuple[str, str | None]:
+        """Extract signal tag from end of judge response.
+        Returns (clean_text, signal_or_None).
+        """
+        for tag, signal in self._SIGNAL_MAP.items():
+            if tag in text:
+                clean = text.replace(tag, "").rstrip()
+                return clean, signal
+        return text, None
+
     def ai_defense_card(self, game_id: int, prosecutor_card: str, round_num: int) -> str:
         """Генерирует ответный аргумент AI-защитника на карту прокурора."""
         game = self.get_active_game_by_id(game_id)
