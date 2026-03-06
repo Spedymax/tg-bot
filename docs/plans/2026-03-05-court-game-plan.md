@@ -1,23 +1,23 @@
-# Court Game Implementation Plan
+# План реализации игры "Суд"
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Для Claude:** ОБЯЗАТЕЛЬНЫЙ SUB-SKILL: используй superpowers:executing-plans для реализации плана по шагам.
 
-**Goal:** Implement a 3-player Telegram courtroom party game where an AI judge (Qwen via Ollama) runs the trial, players receive hidden evidence cards via DM, and a dramatic multi-message verdict is delivered after 4 rounds.
+**Цель:** Реализовать игру "Суд" для 3 игроков в Telegram. ИИ-судья (Qwen 2.5:14b через Ollama) ведёт заседание, игроки получают скрытые карты с уликами через личку, после 4 раундов выносится драматичный приговор в нескольких сообщениях.
 
-**Architecture:** Two new files (`court_service.py` for game logic + AI prompts, `court_handlers.py` for Telegram interactions) backed by two PostgreSQL tables (`court_games`, `court_messages`). Follows the existing `game_service.py + game_handlers.py` pattern. Game state lives in DB; ephemeral wait-states (e.g. "waiting for crime text") live in an in-memory dict on the handler.
+**Архитектура:** Два новых файла (`court_service.py` — логика и промпты, `court_handlers.py` — Telegram-взаимодействие) + две таблицы PostgreSQL (`court_games`, `court_messages`). Следует паттерну `game_service.py + game_handlers.py`. Состояние игры хранится в БД; эфемерные wait-состояния (ожидание текста преступления) — в dict на хендлере.
 
-**Tech Stack:** pyTelegramBotAPI (telebot), psycopg2, httpx, Ollama на `Settings.LOCAL_LLM_URL` (модель: `qwen2.5:14b`). OpenClaw НЕ используется — у него есть персонаж лиса, который конфликтует с ролью судьи. Вместо этого вызываем Qwen напрямую с system prompt, устанавливающим характер судьи.
+**Стек:** pyTelegramBotAPI (telebot), psycopg2, httpx, Ollama на `Settings.LOCAL_LLM_URL` (модель: `qwen2.5:14b`). OpenClaw НЕ используется — у него есть персонаж лиса, который конфликтует с ролью судьи. Вместо этого вызываем Qwen напрямую с system prompt, устанавливающим характер судьи.
 
 ---
 
-## Reference: Key existing patterns
+## Справка: ключевые паттерны проекта
 
-**DB query:**
+**Запрос к БД:**
 ```python
 self.db.execute_query("SELECT ...", (param,))
 ```
 
-**Ollama call** (Qwen напрямую, без OpenClaw):
+**Вызов Ollama** (Qwen напрямую, без OpenClaw):
 ```python
 import httpx
 r = httpx.Client().post(
@@ -35,24 +35,24 @@ r = httpx.Client().post(
 text = r.json()["choices"][0]["message"]["content"]
 ```
 
-**Handler registration** (from `main.py:55`):
+**Регистрация хендлера** (из `main.py:55`):
 ```python
 self.court_handlers = CourtHandlers(self.bot, self.db_manager)
-# then in setup_handlers():
+# затем в setup_handlers():
 self.court_handlers.setup_handlers()
 ```
 
 ---
 
-## Task 1: Create DB tables
+## Задача 1: Создать таблицы в БД
 
-**Files:**
-- Create: `src/database/court_schema.sql`
-- Run on server via SSH
+**Файлы:**
+- Создать: `src/database/court_schema.sql`
+- Применить на сервере через SSH
 
-**Step 1: Write the SQL**
+**Шаг 1: Написать SQL**
 
-Create `src/database/court_schema.sql`:
+Создать `src/database/court_schema.sql`:
 ```sql
 CREATE TABLE IF NOT EXISTS court_games (
     id SERIAL PRIMARY KEY,
@@ -85,25 +85,25 @@ CREATE TABLE IF NOT EXISTS court_messages (
 );
 ```
 
-**Step 2: Apply schema on the server**
+**Шаг 2: Применить схему на сервере**
 
 ```bash
 ssh -i ~/.ssh/mac-max spedymax@192.168.1.35 \
   "psql -U postgres -d server-tg-pisunchik < /home/spedymax/tg-bot/src/database/court_schema.sql"
 ```
 
-Expected output: `CREATE TABLE` twice, no errors.
+Ожидаемый вывод: `CREATE TABLE` дважды, без ошибок.
 
-**Step 3: Verify tables exist**
+**Шаг 3: Проверить что таблицы созданы**
 
 ```bash
 ssh -i ~/.ssh/mac-max spedymax@192.168.1.35 \
   "psql -U postgres -d server-tg-pisunchik -c '\dt court*'"
 ```
 
-Expected: `court_games` and `court_messages` listed.
+Ожидаемый результат: `court_games` и `court_messages` в списке.
 
-**Step 4: Commit**
+**Шаг 4: Коммит**
 
 ```bash
 git add src/database/court_schema.sql
@@ -112,14 +112,14 @@ git commit -m "feat: add court game DB schema"
 
 ---
 
-## Task 2: court_service.py — skeleton + DB helpers
+## Задача 2: court_service.py — скелет + DB-хелперы
 
-**Files:**
-- Create: `src/services/court_service.py`
+**Файлы:**
+- Создать: `src/services/court_service.py`
 
-**Step 1: Write failing test**
+**Шаг 1: Написать падающий тест**
 
-Create `tests/test_court_service.py`:
+Создать `tests/test_court_service.py`:
 ```python
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -145,7 +145,7 @@ def test_get_game_by_chat_returns_none_when_no_game():
     assert result is None
 ```
 
-**Step 2: Run to verify it fails**
+**Шаг 2: Запустить и убедиться что падает**
 
 ```bash
 cd /home/spedymax/tg-bot
@@ -153,11 +153,11 @@ source /home/spedymax/venv/bin/activate
 python -m pytest tests/test_court_service.py -v
 ```
 
-Expected: `ImportError` or `ModuleNotFoundError` — file doesn't exist yet.
+Ожидаемый результат: `ImportError` или `ModuleNotFoundError` — файл ещё не существует.
 
-**Step 3: Write minimal implementation**
+**Шаг 3: Написать минимальную реализацию**
 
-Create `src/services/court_service.py`:
+Создать `src/services/court_service.py`:
 ```python
 import json
 import logging
@@ -171,10 +171,10 @@ class CourtService:
     def __init__(self, db):
         self.db = db
 
-    # ── DB helpers ─────────────────────────────────────────────────────────
+    # ── DB-хелперы ─────────────────────────────────────────────────────────
 
     def create_game(self, chat_id: int, defendant: str, crime: str) -> int:
-        """Create a new court game row, return its id."""
+        """Создать строку игры в БД, вернуть её id."""
         rows = self.db.execute_query(
             "INSERT INTO court_games (chat_id, defendant, crime) VALUES (%s, %s, %s) RETURNING id",
             (chat_id, defendant, crime),
@@ -182,7 +182,7 @@ class CourtService:
         return rows[0][0] if rows else None
 
     def get_active_game(self, chat_id: int) -> dict | None:
-        """Return the active game dict for a chat, or None."""
+        """Вернуть активную игру для чата или None."""
         rows = self.db.execute_query(
             "SELECT id, chat_id, defendant, crime, prosecutor_id, lawyer_id, witness_id, "
             "prosecutor_cards, lawyer_cards, witness_cards, played_cards, current_round, "
@@ -205,7 +205,7 @@ class CourtService:
         }
 
     def assign_role(self, game_id: int, role: str, user_id: int):
-        """Set prosecutor_id / lawyer_id / witness_id."""
+        """Установить prosecutor_id / lawyer_id / witness_id."""
         col = {"prosecutor": "prosecutor_id", "lawyer": "lawyer_id", "witness": "witness_id"}[role]
         self.db.execute_query(f"UPDATE court_games SET {col} = %s WHERE id = %s", (user_id, game_id))
 
@@ -219,7 +219,7 @@ class CourtService:
         )
 
     def record_played_card(self, game_id: int, role: str, card: str, round_num: int):
-        """Append played card to played_cards array and decrement cards_left."""
+        """Добавить сыгранную карту в массив и уменьшить счётчик оставшихся."""
         game = self.get_active_game_by_id(game_id)
         played = list(game["played_cards"])
         played.append({"round": round_num, "role": role, "card": card})
@@ -271,15 +271,15 @@ class CourtService:
         return [{"role": r[0], "content": r[1], "round": r[2]} for r in (rows or [])]
 ```
 
-**Step 4: Run tests**
+**Шаг 4: Запустить тесты**
 
 ```bash
 python -m pytest tests/test_court_service.py -v
 ```
 
-Expected: both tests PASS.
+Ожидаемый результат: оба теста PASS.
 
-**Step 5: Commit**
+**Шаг 5: Коммит**
 
 ```bash
 git add src/services/court_service.py tests/test_court_service.py
@@ -288,66 +288,66 @@ git commit -m "feat: add CourtService with DB helpers"
 
 ---
 
-## Task 3: AI prompts in court_service.py
+## Задача 3: AI-промпты в court_service.py
 
-**Files:**
-- Modify: `src/services/court_service.py` (add 4 AI methods)
+**Файлы:**
+- Изменить: `src/services/court_service.py` (добавить 4 AI-метода)
 
-**Step 1: Write failing tests**
+**Шаг 1: Написать падающие тесты**
 
-Add to `tests/test_court_service.py`:
+Добавить в `tests/test_court_service.py`:
 ```python
 def test_generate_cards_returns_three_lists():
     svc = make_service()
-    # Patch _call_judge_llm
+    # Мокаем _call_judge_llm
     svc._call_judge_llm = MagicMock(return_value="""
 ПРОКУРОР:
-1. Знайдено крихти чіпсів на місці злочину
-2. Підозрюваний відмовився від поліграфу
-3. Бачили його біля холодильника о 3 ночі
-4. На руках виявлено сліди сметани
-5. Показання сусідської кішки суперечать алібі
-6. Загублений чек з магазину
-7. Камера зафіксувала підозрілу ходу
-8. Відбитки лап на упаковці
+1. Найдены крошки чипсов на месте преступления
+2. Подозреваемый отказался от полиграфа
+3. Его видели у холодильника в 3 ночи
+4. На руках обнаружены следы сметаны
+5. Показания соседской кошки противоречат алиби
+6. Потерян чек из магазина
+7. Камера зафиксировала подозрительную походку
+8. Отпечатки лап на упаковке
 АДВОКАТ:
-1. Клієнт страждає на сомнамбулізм
-2. Чіпси вже були відкриті
-3. У нього алергія на той сорт
-4. Свідки не можуть точно визначити час
-СВІДОК:
-1. Бачив його в іншому місці
-2. Холодильник зламаний вже тиждень
-3. Інший кіт теж мав мотив
-4. Запах не відповідає марці чіпсів
+1. Клиент страдает лунатизмом
+2. Чипсы уже были открыты
+3. У него аллергия на этот сорт
+4. Свидетели не могут точно установить время
+СВИДЕТЕЛЬ:
+1. Видел его в другом месте
+2. Холодильник сломан уже неделю
+3. Другой кот тоже имел мотив
+4. Запах не соответствует марке чипсов
 """)
-    prosecutor, lawyer, witness = svc.generate_cards(defendant="Кіт", crime="украв чіпси")
+    prosecutor, lawyer, witness = svc.generate_cards(defendant="Кот", crime="украл чипсы")
     assert len(prosecutor) == 8
     assert len(lawyer) == 4
     assert len(witness) == 4
 
 def test_generate_cards_handles_parse_error():
     svc = make_service()
-    svc._call_judge_llm = MagicMock(return_value="broken response")
-    prosecutor, lawyer, witness = svc.generate_cards(defendant="Кіт", crime="украв чіпси")
-    # Should return empty lists on parse error, not raise
+    svc._call_judge_llm = MagicMock(return_value="сломанный ответ")
+    prosecutor, lawyer, witness = svc.generate_cards(defendant="Кот", crime="украл чипсы")
+    # При ошибке парсинга должны вернуться пустые списки, не исключение
     assert isinstance(prosecutor, list)
 ```
 
-**Step 2: Run to see failures**
+**Шаг 2: Запустить чтобы убедиться что падает**
 
 ```bash
 python -m pytest tests/test_court_service.py::test_generate_cards_returns_three_lists -v
 ```
 
-Expected: `AttributeError` — method doesn't exist.
+Ожидаемый результат: `AttributeError` — метод ещё не существует.
 
-**Step 3: Add AI methods to court_service.py**
+**Шаг 3: Добавить AI-методы в court_service.py**
 
-Add at the bottom of the `CourtService` class in `src/services/court_service.py`:
+Добавить в конец класса `CourtService` в `src/services/court_service.py`:
 
 ```python
-    # ── AI calls ───────────────────────────────────────────────────────────
+    # ── AI-вызовы ──────────────────────────────────────────────────────────
 
     JUDGE_SYSTEM_PROMPT = (
         "Ты — строгий судья на судебном заседании. Тебя зовут Судья Железный.\n\n"
@@ -356,7 +356,7 @@ Add at the bottom of the `CourtService` class in `src/services/court_service.py`
         "- Театральный и красноречивый, но краткий.\n"
         "- Фиксируешь все противоречия. Если сторона противоречит себе — указываешь на это.\n"
         "- 'Я не так сказал' — не аргумент. Всё сказанное идёт в протокол.\n"
-        "- Говоришь от первого лица, только на украинском языке.\n"
+        "- Говоришь от первого лица, только на русском языке.\n"
         "- Не выходишь из роли ни при каких обстоятельствах."
     )
 
@@ -380,15 +380,15 @@ Add at the bottom of the `CourtService` class in `src/services/court_service.py`
             return ""
 
     def generate_cards(self, defendant: str, crime: str) -> tuple[list, list, list]:
-        """Ask AI to generate 16 cards. Returns (prosecutor[8], lawyer[4], witness[4])."""
-        prompt = f"""Ти — помічник судді. Тебе просять придумати докази/аргументи для судового засідання.
+        """Попросить ИИ сгенерировать 16 карт. Возвращает (prosecutor[8], lawyer[4], witness[4])."""
+        prompt = f"""Ты — помощник судьи. Тебя просят придумать доказательства/аргументы для судебного заседания.
 
-Підсудний: {defendant}
-Злочин: {crime}
+Подсудимый: {defendant}
+Преступление: {crime}
 
-Придумай 16 карт у такому форматі. Карти мають бути смішними й абсурдними, але реалістичними — такими, з яких можна скласти зв'язну історію. Уникай магії, машин часу та повної нісенітниці. Краще — побутовий гумор.
+Придумай 16 карт в следующем формате. Карты должны быть смешными и абсурдными, но реалистичными — такими, из которых можно составить связную историю. Избегай магии, машин времени и полной бессмыслицы. Лучше — бытовой юмор.
 
-Відповідай ТІЛЬКИ у такому форматі, без зайвого тексту:
+Отвечай ТОЛЬКО в таком формате, без лишнего текста:
 
 ПРОКУРОР:
 1. [карта]
@@ -404,7 +404,7 @@ Add at the bottom of the `CourtService` class in `src/services/court_service.py`
 2. [карта]
 3. [карта]
 4. [карта]
-СВІДОК:
+СВИДЕТЕЛЬ:
 1. [карта]
 2. [карта]
 3. [карта]
@@ -414,9 +414,9 @@ Add at the bottom of the `CourtService` class in `src/services/court_service.py`
         return self._parse_cards(raw)
 
     def _parse_cards(self, raw: str) -> tuple[list, list, list]:
-        """Parse the structured card response into three lists."""
+        """Парсинг структурированного ответа с картами в три списка."""
         try:
-            sections = {"ПРОКУРОР": [], "АДВОКАТ": [], "СВІДОК": []}
+            sections = {"ПРОКУРОР": [], "АДВОКАТ": [], "СВИДЕТЕЛЬ": []}
             current = None
             for line in raw.splitlines():
                 line = line.strip()
@@ -427,32 +427,30 @@ Add at the bottom of the `CourtService` class in `src/services/court_service.py`
                 else:
                     if current and line and line[0].isdigit() and ". " in line:
                         sections[current].append(line.split(". ", 1)[1])
-            return sections["ПРОКУРОР"][:8], sections["АДВОКАТ"][:4], sections["СВІДОК"][:4]
+            return sections["ПРОКУРОР"][:8], sections["АДВОКАТ"][:4], sections["СВИДЕТЕЛЬ"][:4]
         except Exception as e:
-            logger.error(f"CourtService: card parse error: {e}\nRaw: {raw}")
+            logger.error(f"CourtService: ошибка парсинга карт: {e}\nRaw: {raw}")
             return [], [], []
 
     def judge_react(self, game_id: int, role: str, card: str, round_num: int) -> str:
-        """Short judge reaction after a card is played. Also asks follow-up if weak."""
+        """Короткая реакция судьи после розыгрыша карты. Задаёт вопрос если аргумент слабый."""
         history = self.get_session_messages(game_id)
         history_text = "\n".join(f"[{m['role']}] {m['content']}" for m in history[-20:])
 
-        role_ua = {"prosecutor": "Прокурор", "lawyer": "Адвокат", "witness": "Свідок захисту"}[role]
-        prompt = f"""Ти — суворий, але театральний суддя на судовому засіданні. Ти не даєш себе маніпулювати і фіксуєш всі суперечності.
-
-Протокол засідання (останні повідомлення):
+        role_ru = {"prosecutor": "Прокурор", "lawyer": "Адвокат", "witness": "Свидетель защиты"}[role]
+        prompt = f"""Протокол заседания (последние сообщения):
 {history_text}
 
-Зараз {role_ua} зіграв карту: «{card}»
+Сейчас {role_ru} сыграл карту: «{card}»
 
-Дай коротку реакцію судді (1-3 речення). Якщо аргумент слабкий або суперечить попередньому — вкажи на це або постав уточнювальне запитання. Якщо сильний — визнай, але стримано. Говори від першої особи як суддя. Відповідай тільки українською."""
+Дай краткую реакцию судьи (1-3 предложения). Если аргумент слабый или противоречит предыдущему — укажи на это или задай уточняющий вопрос. Если сильный — признай, но сдержанно."""
 
         reaction = self._call_judge_llm(prompt)
         self.log_message(game_id, "judge", reaction, round_num)
         return reaction
 
     def generate_verdict(self, game_id: int) -> list[str]:
-        """Generate the dramatic multi-message verdict. Returns list of 4 message strings."""
+        """Сгенерировать драматичный многосообщный приговор. Возвращает список из 4 строк."""
         game = self.get_active_game_by_id(game_id)
         messages = self.get_session_messages(game_id)
 
@@ -461,25 +459,25 @@ Add at the bottom of the `CourtService` class in `src/services/court_service.py`
         defense_plays = [p["card"] for p in played if p["role"] in ("lawyer", "witness")]
         protocol = "\n".join(f"[{m['role']}] {m['content']}" for m in messages)
 
-        prompt = f"""Ти — суворий суддя. Засідання завершено. Підсудний: {game['defendant']}. Злочин: {game['crime']}.
+        prompt = f"""Заседание завершено. Подсудимый: {game['defendant']}. Преступление: {game['crime']}.
 
-Протокол засідання:
+Протокол заседания:
 {protocol}
 
-Аргументи обвинувачення: {'; '.join(prosecution_plays)}
-Аргументи захисту: {'; '.join(defense_plays)}
+Аргументы обвинения: {'; '.join(prosecution_plays)}
+Аргументы защиты: {'; '.join(defense_plays)}
 
-Винеси вирок у 4 окремих блоках, розділених рядком "---":
+Вынеси приговор в 4 отдельных блоках, разделённых строкой "---":
 
-Блок 1: Резюме позиції обвинувачення (2-3 речення, посилаючись на конкретні аргументи)
+Блок 1: Резюме позиции обвинения (2-3 предложения, со ссылкой на конкретные аргументы)
 ---
-Блок 2: Резюме позиції захисту (2-3 речення)
+Блок 2: Резюме позиции защиты (2-3 предложения)
 ---
-Блок 3: Ключові суперечності та спостереження суду (2-3 речення, що вирішили справу)
+Блок 3: Ключевые противоречия и наблюдения суда (2-3 предложения, которые решили дело)
 ---
-Блок 4: ВИРОК — "ВИНЕН" або "НЕ ВИНЕН" + покарання або виправдання (драматично, 2-4 речення)
+Блок 4: ПРИГОВОР — "ВИНОВЕН" или "НЕ ВИНОВЕН" + наказание или оправдание (драматично, 2-4 предложения)
 
-Говори від першої особи як суддя. Тільки українська. Будь суворим — один слабкий аргумент не перекреслює сильний."""
+Будь строгим — один слабый аргумент не перечёркивает сильный."""
 
         raw = self._call_judge_llm(prompt)
         parts = [p.strip() for p in raw.split("---") if p.strip()]
@@ -488,15 +486,15 @@ Add at the bottom of the `CourtService` class in `src/services/court_service.py`
         return parts[:4]
 ```
 
-**Step 4: Run tests**
+**Шаг 4: Запустить тесты**
 
 ```bash
 python -m pytest tests/test_court_service.py -v
 ```
 
-Expected: all 4 tests PASS.
+Ожидаемый результат: все 4 теста PASS.
 
-**Step 5: Commit**
+**Шаг 5: Коммит**
 
 ```bash
 git add src/services/court_service.py tests/test_court_service.py
@@ -505,14 +503,14 @@ git commit -m "feat: add AI card generation, judge reactions, and verdict to Cou
 
 ---
 
-## Task 4: court_handlers.py — /суд command and game setup
+## Задача 4: court_handlers.py — команда /court и настройка игры
 
-**Files:**
-- Create: `src/handlers/court_handlers.py`
+**Файлы:**
+- Создать: `src/handlers/court_handlers.py`
 
-**Step 1: Write the handler file**
+**Шаг 1: Написать хендлер**
 
-Create `src/handlers/court_handlers.py`:
+Создать `src/handlers/court_handlers.py`:
 
 ```python
 import logging
@@ -525,29 +523,29 @@ logger = logging.getLogger(__name__)
 ROLE_NAMES = {
     "prosecutor": "⚔️ Прокурор",
     "lawyer": "🛡️ Адвокат",
-    "witness": "👁️ Свідетель захисту",
+    "witness": "👁️ Свидетель защиты",
 }
 
-RULES_TEXT = """⚖️ <b>СУДОВЕ ЗАСІДАННЯ ВІДКРИВАЄТЬСЯ</b>
+RULES_TEXT = """⚖️ <b>СУДЕБНОЕ ЗАСЕДАНИЕ ОТКРЫВАЕТСЯ</b>
 
-Суд ознайомлює сторони з правилами процесу:
+Суд знакомит стороны с правилами процесса:
 
-<b>Ролі:</b>
-• ⚔️ <b>Прокурор</b> — отримує 8 карт, грає 4. Обвинувачує підсудного.
-• 🛡️ <b>Адвокат</b> — отримує 4 карти, грає 2. Захищає підсудного. Бачить карти Свідка.
-• 👁️ <b>Свідетель захисту</b> — отримує 4 карти, грає 2. Підтримує захист. Бачить карти Адвоката.
+<b>Роли:</b>
+• ⚔️ <b>Прокурор</b> — получает 8 карт, играет 4. Обвиняет подсудимого.
+• 🛡️ <b>Адвокат</b> — получает 4 карты, играет 2. Защищает подсудимого. Видит карты Свидетеля.
+• 👁️ <b>Свидетель защиты</b> — получает 4 карты, играет 2. Поддерживает защиту. Видит карты Адвоката.
 
-<b>Хід гри:</b>
-1. Кожен отримує карти в особисті повідомлення від бота
-2. 4 раунди: Прокурор грає карту → захист відповідає
-3. Після 4 раундів суддя виносить вирок
+<b>Ход игры:</b>
+1. Каждый получает карты в личные сообщения от бота
+2. 4 раунда: Прокурор играет карту → защита отвечает
+3. После 4 раундов судья выносит приговор
 
-<b>Важливо:</b>
-— Захист координує стратегію між собою (бачать руки одне одного)
-— Суддя фіксує всі суперечності. "Я не так сказав" — не аргумент.
-— Підсудним може бути будь-хто: реальна людина, персонаж, кіт Леопольд.
+<b>Важно:</b>
+— Защита координирует стратегию между собой (видят руки друг друга)
+— Судья фиксирует все противоречия. "Я не так сказал" — не аргумент.
+— Подсудимым может быть кто угодно: реальный человек, персонаж, кот Леопольд.
 
-Щоб грати — кожен учасник має написати боту в особисті повідомлення хоча б раз."""
+Чтобы играть — каждый участник должен написать боту в личку хотя бы раз."""
 
 
 class CourtHandlers:
@@ -555,36 +553,36 @@ class CourtHandlers:
         self.bot = bot
         self.db = db_manager
         self.court_service = CourtService(db_manager)
-        # In-memory wait states per chat: chat_id → {'state': str, 'game_id': int, ...}
+        # Состояния ожидания по чату: chat_id → {'state': str, 'game_id': int, ...}
         self._wait: dict[int, dict] = {}
 
     def setup_handlers(self):
 
-        @self.bot.message_handler(commands=['суд', 'sud', 'court'])
+        @self.bot.message_handler(commands=['court', 'sud'])
         def cmd_court(message):
             if message.chat.type == 'private':
-                self.bot.reply_to(message, "Ця команда працює тільки в груповому чаті.")
+                self.bot.reply_to(message, "Эта команда работает только в групповом чате.")
                 return
             chat_id = message.chat.id
             existing = self.court_service.get_active_game(chat_id)
             if existing:
-                self.bot.reply_to(message, "⚖️ Засідання вже йде! Використай /суд_стоп щоб завершити.")
+                self.bot.reply_to(message, "⚖️ Заседание уже идёт! Используй /court_stop чтобы завершить.")
                 return
 
             self.bot.send_message(chat_id, RULES_TEXT, parse_mode='HTML')
-            self.bot.send_message(chat_id, "👤 Кого обвинувачуємо? Напишіть ім'я або опис підсудного (наприклад: «Кіт Леопольд», «Юра з 3-го поверху»):")
+            self.bot.send_message(chat_id, "👤 Кого обвиняем? Напишите имя или описание подсудимого (например: «Кот Леопольд», «Юра с 3-го этажа», «ChatGPT»):")
             self._wait[chat_id] = {'state': 'waiting_defendant', 'initiator': message.from_user.id}
 
-        @self.bot.message_handler(commands=['суд_стоп', 'sud_stop', 'court_stop'])
+        @self.bot.message_handler(commands=['court_stop', 'sud_stop'])
         def cmd_court_stop(message):
             chat_id = message.chat.id
             game = self.court_service.get_active_game(chat_id)
             if not game:
-                self.bot.reply_to(message, "Активного засідання немає.")
+                self.bot.reply_to(message, "Активного заседания нет.")
                 return
             self.court_service.set_status(game['id'], 'aborted')
             self._wait.pop(chat_id, None)
-            self.bot.send_message(chat_id, "⚖️ Засідання достроково припинено.")
+            self.bot.send_message(chat_id, "⚖️ Заседание досрочно прекращено.")
 
         @self.bot.message_handler(func=lambda m: m.chat.type != 'private' and m.chat.id in self._wait)
         def handle_wait_state(message):
@@ -598,16 +596,16 @@ class CourtHandlers:
             if state == 'waiting_defendant':
                 defendant = message.text.strip()
                 if not defendant or len(defendant) > 200:
-                    self.bot.reply_to(message, "Введіть ім'я підсудного (до 200 символів).")
+                    self.bot.reply_to(message, "Введите имя подсудимого (до 200 символов).")
                     return
                 state_data['defendant'] = defendant
                 state_data['state'] = 'waiting_crime'
-                self.bot.send_message(chat_id, f"📋 Підсудний: <b>{defendant}</b>\n\nТепер опишіть злочин:", parse_mode='HTML')
+                self.bot.send_message(chat_id, f"📋 Подсудимый: <b>{defendant}</b>\n\nТеперь опишите преступление:", parse_mode='HTML')
 
             elif state == 'waiting_crime':
                 crime = message.text.strip()
                 if not crime or len(crime) > 500:
-                    self.bot.reply_to(message, "Опишіть злочин (до 500 символів).")
+                    self.bot.reply_to(message, "Опишите преступление (до 500 символов).")
                     return
                 defendant = state_data['defendant']
                 game_id = self.court_service.create_game(chat_id, defendant, crime)
@@ -621,10 +619,10 @@ class CourtHandlers:
         markup = types.InlineKeyboardMarkup()
         markup.row(types.InlineKeyboardButton("⚔️ Прокурор", callback_data=f"court_role:prosecutor:{game_id}"))
         markup.row(types.InlineKeyboardButton("🛡️ Адвокат", callback_data=f"court_role:lawyer:{game_id}"))
-        markup.row(types.InlineKeyboardButton("👁️ Свідетель захисту", callback_data=f"court_role:witness:{game_id}"))
+        markup.row(types.InlineKeyboardButton("👁️ Свидетель защиты", callback_data=f"court_role:witness:{game_id}"))
         self.bot.send_message(
             chat_id,
-            "⚖️ Оберіть роль для участі в засіданні:",
+            "⚖️ Выберите роль для участия в заседании:",
             reply_markup=markup,
         )
 
@@ -641,20 +639,20 @@ class CourtHandlers:
             state_data = self._wait.get(chat_id, {})
             roles_taken = state_data.get('roles_taken', {})
 
-            # Check if role already taken
+            # Проверяем не занята ли роль
             if role in roles_taken:
-                self.bot.answer_callback_query(call.id, "Ця роль вже зайнята!", show_alert=True)
+                self.bot.answer_callback_query(call.id, "Эта роль уже занята!", show_alert=True)
                 return
-            # Check if user already has a role
+            # Проверяем что у юзера ещё нет роли
             if user_id in roles_taken.values():
-                self.bot.answer_callback_query(call.id, "Ти вже обрав роль!", show_alert=True)
+                self.bot.answer_callback_query(call.id, "Ты уже выбрал роль!", show_alert=True)
                 return
 
             roles_taken[role] = user_id
             state_data['roles_taken'] = roles_taken
             self.court_service.assign_role(game_id, role, user_id)
 
-            # Edit the keyboard to remove taken button
+            # Убираем занятую кнопку из клавиатуры
             remaining_roles = [r for r in ("prosecutor", "lawyer", "witness") if r not in roles_taken]
             if remaining_roles:
                 markup = types.InlineKeyboardMarkup()
@@ -664,43 +662,43 @@ class CourtHandlers:
             else:
                 self.bot.delete_message(chat_id, call.message.message_id)
 
-            role_ua = ROLE_NAMES[role]
-            self.bot.send_message(chat_id, f"✅ <b>{user_name}</b> бере роль {role_ua}", parse_mode='HTML')
-            self.bot.answer_callback_query(call.id, f"Ти {role_ua}!")
+            role_ru = ROLE_NAMES[role]
+            self.bot.send_message(chat_id, f"✅ <b>{user_name}</b> берёт роль {role_ru}", parse_mode='HTML')
+            self.bot.answer_callback_query(call.id, f"Ты {role_ru}!")
 
-            # All roles filled → start game
+            # Все роли заняты → начинаем игру
             if len(roles_taken) == 3:
                 self._wait.pop(chat_id, None)
                 threading.Thread(target=self._start_game, args=(chat_id, game_id, roles_taken), daemon=True).start()
 
         @self.bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("court_play:"))
         def handle_play_card(call):
-            # Format: court_play:{game_id}:{role}:{card_index}
+            # Формат: court_play:{game_id}:{role}:{card_index}
             parts = call.data.split(":", 3)
             game_id, role, card_index = int(parts[1]), parts[2], int(parts[3])
             user_id = call.from_user.id
 
             game = self.court_service.get_active_game_by_id(game_id)
             if not game:
-                self.bot.answer_callback_query(call.id, "Гра не знайдена.", show_alert=True)
+                self.bot.answer_callback_query(call.id, "Игра не найдена.", show_alert=True)
                 return
 
-            # Validate it's this player's turn
+            # Проверяем что это карта этого игрока
             expected_role_id = game[f"{role}_id"]
             if user_id != expected_role_id:
-                self.bot.answer_callback_query(call.id, "Зараз не твій хід!", show_alert=True)
+                self.bot.answer_callback_query(call.id, "Сейчас не твой ход!", show_alert=True)
                 return
 
             cards_left_key = f"{role}_cards_left"
             if game[cards_left_key] <= 0:
-                self.bot.answer_callback_query(call.id, "Ти вже зіграв усі свої карти!", show_alert=True)
+                self.bot.answer_callback_query(call.id, "Ты уже сыграл все свои карты!", show_alert=True)
                 return
 
             cards_key = f"{role}_cards"
             card_text = game[cards_key][card_index]
 
-            self.bot.answer_callback_query(call.id, "Карту зіграно!")
-            # Remove the played card button from DM
+            self.bot.answer_callback_query(call.id, "Карта сыграна!")
+            # Убираем кнопку сыгранной карты в личке
             self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
 
             threading.Thread(
@@ -710,49 +708,49 @@ class CourtHandlers:
             ).start()
 
     def _start_game(self, chat_id: int, game_id: int, roles_taken: dict):
-        """Generate cards, send to DMs, start round 1."""
+        """Сгенерировать карты, отправить в личку, начать раунд 1."""
         game = self.court_service.get_active_game_by_id(game_id)
         defendant = game['defendant']
         crime = game['crime']
 
-        self.bot.send_message(chat_id, "⚖️ <b>Склад суду сформовано. Генерую матеріали справи...</b>", parse_mode='HTML')
+        self.bot.send_message(chat_id, "⚖️ <b>Состав суда сформирован. Генерирую материалы дела...</b>", parse_mode='HTML')
 
         prosecutor_cards, lawyer_cards, witness_cards = self.court_service.generate_cards(defendant, crime)
 
         if not prosecutor_cards:
-            self.bot.send_message(chat_id, "❌ Помилка генерації карт. Спробуйте /суд ще раз.")
+            self.bot.send_message(chat_id, "❌ Ошибка генерации карт. Попробуйте /court ещё раз.")
             self.court_service.set_status(game_id, 'aborted')
             return
 
         self.court_service.save_cards(game_id, prosecutor_cards, lawyer_cards, witness_cards)
         self.court_service.set_status(game_id, 'in_progress')
         self.court_service.advance_round(game_id, 1)
-        self.court_service.log_message(game_id, 'system', f'Справа: {defendant} обвинувачується у «{crime}»')
+        self.court_service.log_message(game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
 
-        # Send cards via DM
+        # Отправляем карты в личку
         self._send_cards_dm(roles_taken['prosecutor'], game_id, 'prosecutor', prosecutor_cards)
         self._send_cards_dm(roles_taken['lawyer'], game_id, 'lawyer', lawyer_cards, partner_cards=witness_cards, partner_role='witness')
         self._send_cards_dm(roles_taken['witness'], game_id, 'witness', witness_cards, partner_cards=lawyer_cards, partner_role='lawyer')
 
         self.bot.send_message(
             chat_id,
-            f"📬 <b>Карти надіслані в особисті повідомлення.</b>\n\n"
-            f"⚖️ <b>Раунд 1 з 4</b>\n"
-            f"Слово надається ⚔️ Прокурору. Зіграйте карту у своєму особистому чаті з ботом.",
+            f"📬 <b>Карты отправлены в личные сообщения.</b>\n\n"
+            f"⚖️ <b>Раунд 1 из 4</b>\n"
+            f"Слово предоставляется ⚔️ Прокурору. Сыграйте карту в личном чате с ботом.",
             parse_mode='HTML'
         )
 
     def _send_cards_dm(self, user_id: int, game_id: int, role: str, cards: list,
                        partner_cards: list = None, partner_role: str = None):
-        """Send player their hand as DM with inline buttons."""
-        role_ua = ROLE_NAMES[role]
-        text = f"⚖️ <b>Твоя роль: {role_ua}</b>\n\n<b>Твої карти ({len(cards)} шт, граєш {2 if role != 'prosecutor' else 4}):</b>\n"
+        """Отправить игроку его руку в личку с inline-кнопками."""
+        role_ru = ROLE_NAMES[role]
+        text = f"⚖️ <b>Твоя роль: {role_ru}</b>\n\n<b>Твои карты ({len(cards)} шт, играешь {2 if role != 'prosecutor' else 4}):</b>\n"
         for i, card in enumerate(cards, 1):
             text += f"{i}. {card}\n"
 
         if partner_cards and partner_role:
-            partner_ua = ROLE_NAMES[partner_role]
-            text += f"\n<b>Карти {partner_ua} (для координації):</b>\n"
+            partner_ru = ROLE_NAMES[partner_role]
+            text += f"\n<b>Карты {partner_ru} (для координации):</b>\n"
             for i, card in enumerate(partner_cards, 1):
                 text += f"{i}. {card}\n"
 
@@ -766,41 +764,39 @@ class CourtHandlers:
         try:
             self.bot.send_message(user_id, text, parse_mode='HTML', reply_markup=markup)
         except Exception as e:
-            logger.error(f"CourtHandlers: failed to send DM to {user_id}: {e}")
-            # Notify in group that player needs to start bot in private
+            logger.error(f"CourtHandlers: не удалось отправить личку {user_id}: {e}")
             game = self.court_service.get_active_game_by_id(game_id)
             self.bot.send_message(
                 game['chat_id'],
-                f"⚠️ Не вдалося надіслати карти гравцю. "
-                f"Будь ласка, напишіть боту в особисті (@{self._get_bot_username()}) і повторіть /суд."
+                f"⚠️ Не удалось отправить карты игроку. "
+                f"Пожалуйста, напишите боту в личку (@{self._get_bot_username()}) и повторите /court."
             )
 
     def _process_played_card(self, game_id: int, chat_id: int, role: str, card: str, round_num: int):
-        """Called after a card is played: announce, log, judge reacts, advance state."""
-        role_ua = ROLE_NAMES[role]
-        self.bot.send_message(chat_id, f"🃏 <b>{role_ua}</b> грає карту:\n\n«{card}»", parse_mode='HTML')
+        """Вызывается после розыгрыша карты: объявляем, логируем, судья реагирует, двигаем состояние."""
+        role_ru = ROLE_NAMES[role]
+        self.bot.send_message(chat_id, f"🃏 <b>{role_ru}</b> играет карту:\n\n«{card}»", parse_mode='HTML')
 
         self.court_service.record_played_card(game_id, role, card, round_num)
         self.court_service.log_message(game_id, role, card, round_num)
 
-        # Judge reacts
+        # Реакция судьи
         reaction = self.court_service.judge_react(game_id, role, card, round_num)
         if reaction:
             self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
 
         game = self.court_service.get_active_game_by_id(game_id)
 
-        # Determine next action
+        # Определяем следующее действие
         if role == 'prosecutor':
-            # Prompt defense to respond
             self.bot.send_message(
                 chat_id,
-                f"🛡️ <b>Захист може відповісти.</b> Адвокат або Свідетель — зіграйте карту в особистих повідомленнях.\n"
-                f"(Адвокат залишилось: {game['lawyer_cards_left']}, Свідетель: {game['witness_cards_left']})",
+                f"🛡️ <b>Защита может ответить.</b> Адвокат или Свидетель — сыграйте карту в личных сообщениях.\n"
+                f"(Адвокат осталось: {game['lawyer_cards_left']}, Свидетель: {game['witness_cards_left']})",
                 parse_mode='HTML'
             )
         else:
-            # Defense played — if both prosecutor's card and at least one defense card played this round, advance
+            # Защита сыграла — если в этом раунде есть и карта обвинения и карта защиты → переходим
             played_this_round = [p for p in game['played_cards'] if p['round'] == round_num]
             has_prosecution = any(p['role'] == 'prosecutor' for p in played_this_round)
             has_defense = any(p['role'] in ('lawyer', 'witness') for p in played_this_round)
@@ -808,28 +804,28 @@ class CourtHandlers:
             if has_prosecution and has_defense:
                 next_round = round_num + 1
                 if next_round > 4:
-                    # Game over — generate verdict
-                    self.bot.send_message(chat_id, "⚖️ <b>Всі раунди завершено. Суд видаляється на нараду...</b>", parse_mode='HTML')
+                    # Конец игры — генерируем приговор
+                    self.bot.send_message(chat_id, "⚖️ <b>Все раунды завершены. Суд удаляется на совещание...</b>", parse_mode='HTML')
                     self._deliver_verdict(game_id, chat_id)
                 else:
                     self.court_service.advance_round(game_id, next_round)
                     self.bot.send_message(
                         chat_id,
-                        f"⚖️ <b>Раунд {next_round} з 4</b>\nСлово надається ⚔️ Прокурору.",
+                        f"⚖️ <b>Раунд {next_round} из 4</b>\nСлово предоставляется ⚔️ Прокурору.",
                         parse_mode='HTML'
                     )
 
     def _deliver_verdict(self, game_id: int, chat_id: int):
-        """Deliver dramatic multi-message verdict."""
+        """Доставить драматичный многосообщный приговор."""
         import time
         parts = self.court_service.generate_verdict(game_id)
         self.court_service.set_status(game_id, 'finished')
 
         prefixes = [
-            "⚖️ <b>Позиція обвинувачення:</b>",
-            "🛡️ <b>Позиція захисту:</b>",
-            "🔍 <b>Висновки суду:</b>",
-            "🔨 <b>ВИРОК:</b>",
+            "⚖️ <b>Позиция обвинения:</b>",
+            "🛡️ <b>Позиция защиты:</b>",
+            "🔍 <b>Выводы суда:</b>",
+            "🔨 <b>ПРИГОВОР:</b>",
         ]
         for prefix, part in zip(prefixes, parts):
             if part:
@@ -845,7 +841,7 @@ class CourtHandlers:
             return "бот"
 ```
 
-**Step 2: Commit**
+**Шаг 2: Коммит**
 
 ```bash
 git add src/handlers/court_handlers.py
@@ -854,67 +850,67 @@ git commit -m "feat: add CourtHandlers with full game flow"
 
 ---
 
-## Task 5: Wire up in main.py
+## Задача 5: Подключить в main.py
 
-**Files:**
-- Modify: `src/main.py`
+**Файлы:**
+- Изменить: `src/main.py`
 
-**Step 1: Add import and initialization**
+**Шаг 1: Добавить импорт и инициализацию**
 
-In `src/main.py`, after the existing handler imports (around line 31):
+В `src/main.py`, после существующих импортов хендлеров (около строки 31):
 
 ```python
 from handlers.court_handlers import CourtHandlers
 ```
 
-In `TelegramBot.__init__`, after the `pet_handlers` initialization (around line 73):
+В `TelegramBot.__init__`, после инициализации `pet_handlers` (около строки 73):
 
 ```python
 self.court_handlers = CourtHandlers(self.bot, self.db_manager)
 ```
 
-**Step 2: Register handlers**
+**Шаг 2: Зарегистрировать хендлеры**
 
-Find `setup_handlers()` method in `main.py` and add:
+Найти метод `setup_handlers()` в `main.py` и добавить:
 
 ```python
 self.court_handlers.setup_handlers()
 self.court_handlers.setup_callback_handlers()
 ```
 
-**Step 3: Deploy to server**
+**Шаг 3: Деплой на сервер**
 
 ```bash
-# Push to git
+# Пушим в git
 git add src/main.py
 git commit -m "feat: register CourtHandlers in main bot"
 git push
 
-# Pull and restart on server
+# Тянем и перезапускаем на сервере
 ssh -i ~/.ssh/mac-max spedymax@192.168.1.35 \
   "cd /home/spedymax/tg-bot && git pull && echo '123' | sudo -S systemctl restart bot-manager.service"
 
-# Apply DB schema
+# Применяем схему БД
 ssh -i ~/.ssh/mac-max spedymax@192.168.1.35 \
   "psql -U postgres -d server-tg-pisunchik < /home/spedymax/tg-bot/src/database/court_schema.sql"
 ```
 
-**Step 4: Smoke test**
+**Шаг 4: Smoke test**
 
-1. Start a private chat with the bot (to enable DMs)
-2. In the group, run `/суд`
-3. Bot should reply with rules + ask for defendant
-4. Type a defendant name
-5. Type a crime
-6. See role selection keyboard
-7. All 3 players pick roles
-8. Each player should receive DM with cards
+1. Написать боту в личку (чтобы разрешить DM)
+2. В группе выполнить `/court`
+3. Бот должен ответить правилами и спросить подсудимого
+4. Ввести имя подсудимого
+5. Ввести преступление
+6. Появится клавиатура выбора ролей
+7. Все 3 игрока выбирают роли
+8. Каждый должен получить личку с картами
 
 ---
 
-## Known constraints
+## Известные ограничения
 
-- Each player must have started a private chat with the bot before playing (Telegram limitation)
-- Ollama/Qwen card generation takes ~30s — the "Генерую матеріали справи..." message covers this wait
-- Round advancement is simple: prosecutor plays → any defense plays → round ends. If defense has 0 cards left, round auto-advances after prosecutor plays.
-- The `court_play` callback validates user_id against the role, so other players can't play each other's cards
+- Каждый игрок должен написать боту в личку перед игрой (ограничение Telegram)
+- Генерация карт через Ollama/Qwen занимает ~30 сек — сообщение "Генерирую материалы дела..." покрывает это ожидание
+- Раунд заканчивается когда прокурор сыграл И хотя бы один из защитников ответил. Если у защиты кончились карты — раунд идёт дальше автоматически после хода прокурора
+- Callback `court_play` проверяет user_id по роли — чужие карты нельзя сыграть
