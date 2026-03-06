@@ -56,3 +56,32 @@ def test_generate_cards_handles_parse_error():
     assert isinstance(prosecutor, list)
     assert isinstance(lawyer, list)
     assert isinstance(witness, list)
+
+def test_parse_judge_signal_extracts_defense_tag():
+    svc = make_service()
+    text = "Суд принял к сведению. Весьма любопытно.\n[ЗАЩИТА, ВАШ ХОД]"
+    clean, signal = svc.parse_judge_signal(text)
+    assert signal == "ЗАЩИТА_ВАШ_ХОД"
+    assert "[ЗАЩИТА, ВАШ ХОД]" not in clean
+    assert "Суд принял" in clean
+
+def test_parse_judge_signal_question():
+    svc = make_service()
+    text = "Чем докажете это заявление?\n[ВОПРОС]"
+    clean, signal = svc.parse_judge_signal(text)
+    assert signal == "ВОПРОС"
+    assert "[ВОПРОС]" not in clean
+
+def test_parse_judge_signal_no_tag():
+    svc = make_service()
+    text = "Суд принял к сведению."
+    clean, signal = svc.parse_judge_signal(text)
+    assert signal is None
+    assert clean == text
+
+def test_parse_judge_signal_final():
+    svc = make_service()
+    text = "Все аргументы заслушаны.\n[ФИНАЛ]"
+    clean, signal = svc.parse_judge_signal(text)
+    assert signal == "ФИНАЛ"
+    assert "[ФИНАЛ]" not in clean
