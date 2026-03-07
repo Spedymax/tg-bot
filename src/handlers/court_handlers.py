@@ -773,6 +773,12 @@ class CourtHandlers:
     def _process_judge_reply(self, game_id: int, chat_id: int, role: str, reply_text: str, round_num: int):
         """Process a player's reply to a judge question."""
         try:
+            # Guard: if fallback already fired and moved the phase on, discard this reply
+            game = self.court_service.get_active_game_by_id(game_id)
+            if not game or game.get('current_phase') != 'judge':
+                logger.info(f"[COURT] _process_judge_reply: phase already advanced, discarding reply game={game_id}")
+                return
+
             self.bot.send_chat_action(chat_id, 'typing')
             reaction, signal = self.court_service.judge_react_to_reply(game_id, role, reply_text, round_num)
             logger.info(f"[COURT] _process_judge_reply: game={game_id} role={role} signal={signal} reaction='{str(reaction)[:60]}'")
