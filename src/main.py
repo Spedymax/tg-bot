@@ -3,14 +3,16 @@
 Telegram Bot — aiogram v3 async entry point
 """
 import asyncio
+import json
 import logging
+import os
 from logging.handlers import RotatingFileHandler
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, ErrorEvent
 from redis.asyncio import Redis
 
 from config.settings import Settings
@@ -70,6 +72,15 @@ async def main():
     court_h = CourtHandlers(bot, db_manager)
     court_h.set_storage(storage)
 
+    # ── Load shop data (JSON assets) ──────────────────────────────────────────
+    _assets = os.path.join(os.path.dirname(__file__), '..', 'assets', 'data')
+
+    def _load_json(name):
+        with open(os.path.join(_assets, name), encoding='utf-8') as f:
+            return json.load(f)
+
+    shop_h.load_shop_data(_load_json('shop.json'), _load_json('statuetki.json'))
+
     # ── Cross-handler wiring ──────────────────────────────────────────────────
     quiz_scheduler = QuizScheduler(bot, db_manager, trivia_h.trivia_service)
     admin_h.set_quiz_scheduler(quiz_scheduler)
@@ -91,8 +102,8 @@ async def main():
 
     # ── Global error handler ──────────────────────────────────────────────────
     @dp.error()
-    async def on_error(event, exception: Exception):
-        logger.error(f"Unhandled exception in update: {exception}", exc_info=True)
+    async def on_error(event: ErrorEvent):
+        logger.error(f"Unhandled exception in update: {event.exception}", exc_info=True)
 
     # ── Background services ───────────────────────────────────────────────────
     quiz_scheduler.start(bot)
