@@ -88,6 +88,7 @@ class CourtHandlers:
                 self.bot.reply_to(message, "Активного заседания нет.")
                 return
             self.court_service.set_status(game['id'], 'aborted')
+            self._game_locks.pop(game['id'], None)
             old_timer = self._fallback_timers.pop(game['id'], None)
             if old_timer:
                 old_timer.cancel()
@@ -716,7 +717,7 @@ class CourtHandlers:
             self._start_fallback_timer(game_id, chat_id, round_num)
 
     def _start_fallback_timer(self, game_id: int, chat_id: int, round_num: int):
-        """Start 3-minute fallback: if no player reply, auto-advance the game."""
+        """Start 5-minute fallback: if no player reply, auto-advance the game."""
         # Cancel any existing timer for this game
         old = self._fallback_timers.pop(game_id, None)
         if old:
@@ -774,7 +775,7 @@ class CourtHandlers:
         timer.daemon = True
         self._fallback_timers[game_id] = timer
         timer.start()
-        logger.info(f"[COURT] fallback_timer started: game={game_id} round={round_num} (180s)")
+        logger.info(f"[COURT] fallback_timer started: game={game_id} round={round_num} (300s)")
 
     def _process_judge_reply(self, game_id: int, chat_id: int, role: str, reply_text: str, round_num: int):
         """Process a player's reply to a judge question."""
@@ -846,6 +847,8 @@ class CourtHandlers:
         logger.info(f"[COURT] _deliver_verdict: game={game_id} chat={chat_id} statements={list((final_statements or {}).keys())}")
         try:
             self.bot.send_message(chat_id, "⚖️ Судья удаляется на совещание... 🤔", parse_mode='HTML')
+            # Clean up per-game lock
+            self._game_locks.pop(game_id, None)
             logger.info(f"[COURT] _deliver_verdict: generating verdict via LLM")
             parts = self.court_service.generate_verdict(game_id, final_statements or {})
             logger.info(f"[COURT] _deliver_verdict: verdict generated, {len(parts)} parts")
