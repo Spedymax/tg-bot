@@ -45,9 +45,10 @@ class OllamaWakeManager:
         self._state = WakeState.ONLINE
         self._queue: list[WakeRequest] = []
         self._queue_lock = asyncio.Lock()
-        self._last_ollama_request: float = asyncio.get_event_loop().time()
+        self._last_ollama_request: float = 0.0
         self._bot = None
         self._woke_by_bot: bool = False  # True only when bot sent WoL for Ollama
+        self._main_loop: asyncio.AbstractEventLoop | None = None
         self._initialized = True
 
     @property
@@ -204,12 +205,21 @@ class OllamaWakeManager:
                 logger.warning("OllamaWakeManager: PC_MAC_ADDRESS not set, skipping WoL")
         except Exception as e:
             logger.error(f"OllamaWakeManager: WoL send failed: {e}")
-        asyncio.create_task(self._poll_until_online())
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._poll_until_online())
+        except RuntimeError:
+            # Called from a worker thread (e.g. asyncio.to_thread)
+            if self._main_loop is not None and self._main_loop.is_running():
+                asyncio.run_coroutine_threadsafe(self._poll_until_online(), self._main_loop)
+            else:
+                logger.warning("OllamaWakeManager: WoL sent but polling skipped (no event loop)")
 
     async def _poll_until_online(self, timeout: float = 180.0, interval: float = 5.0):
         """Poll Ollama every interval seconds up to timeout. Drain queue when ready."""
         from src.config.settings import Settings
-        deadline = asyncio.get_event_loop().time() + timeout
+        self._main_loop = asyncio.get_event_loop()
+        deadline = self._main_loop.time() + timeout
         while asyncio.get_event_loop().time() < deadline:
             try:
                 url = f"{Settings.LOCAL_LLM_URL}/api/tags"
