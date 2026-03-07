@@ -34,6 +34,31 @@ class ShopHandlers:
     def _register(self):
         """Setup all shop-related command handlers"""
 
+        @self.router.message(Command('items'))
+        async def show_items(message: Message):
+            """Handle /items command"""
+            player_id = message.from_user.id
+            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+
+            if not player:
+                await message.reply("Вы не зарегистрированы как игрок")
+                return
+
+            if not player.items:
+                await message.reply("У вас нету предметов(")
+                return
+
+            item_descriptions = []
+            for item in player.items:
+                if item in self.shop_data.get('description', {}):
+                    display_name = self.shop_data.get('names', {}).get(item, item)
+                    item_descriptions.append(f"{display_name}: {self.shop_data['description'][item]}")
+
+            if item_descriptions:
+                await message.reply(f"Ваши предметы:\n\n" + "\n\n".join(item_descriptions))
+            else:
+                await message.reply("Нету описания предметов (Странно)")
+
         @self.router.message(Command('shop'))
         async def show_shop(message: Message):
             """Handle /shop command with inline keyboard"""

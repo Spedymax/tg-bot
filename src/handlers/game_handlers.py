@@ -4,11 +4,13 @@ import random
 import time
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 logger = logging.getLogger(__name__)
 from config.game_config import GameConfig
 from config.settings import Settings
+from states.registration import RegistrationStates
 from utils.helpers import safe_split_callback, safe_int, escape_html, safe_username
 
 class GameHandlers:
@@ -38,6 +40,85 @@ class GameHandlers:
 
     def _register(self):
         """Register all game-related command handlers"""
+
+        @self.router.message(Command('start'))
+        async def start_command(message: Message, state: FSMContext):
+            """Show profile or begin registration"""
+            player_id = message.from_user.id
+            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+
+            if player:
+                await message.reply(
+                    f"Ваш писюнчик: {player.pisunchik_size} cm\n"
+                    f"У вас {int(player.coins)} BTC!\n"
+                    f"Используйте /pisunchik чтобы прокачать"
+                )
+            else:
+                await message.reply("Добро пожаловать! Напишите ваше имя:")
+                await state.set_state(RegistrationStates.waiting_name)
+
+        @self.router.message(RegistrationStates.waiting_name)
+        async def registration_name(message: Message, state: FSMContext):
+            await state.update_data(name=message.text.strip(), player_id=message.from_user.id)
+            await message.reply("Расскажите как вы нашли этого бота?")
+            await state.set_state(RegistrationStates.waiting_how_found)
+
+        @self.router.message(RegistrationStates.waiting_how_found)
+        async def registration_how_found(message: Message, state: FSMContext):
+            data = await state.get_data()
+            name = data['name']
+            player_id = data['player_id']
+            how_found = message.text.strip()
+            await state.clear()
+
+            markup = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="Одобрить", callback_data=f"reg_approve_{player_id}_{name}"),
+                    InlineKeyboardButton(text="Отклонить", callback_data=f"reg_reject_{player_id}"),
+                ]
+            ])
+            for admin_id in Settings.ADMIN_IDS:
+                await self.bot.send_message(
+                    admin_id,
+                    f"Новый игрок:\nИмя: {name}\nКак нашёл: {how_found}",
+                    reply_markup=markup,
+                )
+            await message.reply("Ваш запрос отправлен на рассмотрение. Пожалуйста, подождите одобрения.")
+
+        @self.router.callback_query(F.data.startswith("reg_approve_"))
+        async def registration_approve(call: CallbackQuery):
+            if call.from_user.id not in Settings.ADMIN_IDS:
+                await call.answer("Нет доступа.")
+                return
+            parts = call.data.split("_", 3)  # reg_approve_<id>_<name>
+            player_id = int(parts[2])
+            name = parts[3] if len(parts) > 3 else "Unknown"
+            await asyncio.to_thread(self.player_service.create_player, player_id, name)
+            await self.bot.send_message(player_id, f"Приятной игры, {name}! Вы зарегистрированы!")
+            await call.message.edit_text(f"Регистрация {name} одобрена.")
+
+        @self.router.callback_query(F.data.startswith("reg_reject_"))
+        async def registration_reject(call: CallbackQuery):
+            if call.from_user.id not in Settings.ADMIN_IDS:
+                await call.answer("Нет доступа.")
+                return
+            player_id = int(call.data.split("_")[2])
+            await self.bot.send_message(player_id, "Ваша регистрация была отклонена.")
+            await call.message.edit_text("Регистрация отклонена.")
+
+        @self.router.message(Command('leaderboard'))
+        async def leaderboard_command(message: Message):
+            """Show top 5 players"""
+            top_players = await asyncio.to_thread(self.player_service.get_leaderboard, 5)
+            text = "🏆 Большой член, большие яйца 🏆\n\n"
+            for i, player in enumerate(top_players):
+                try:
+                    chat = await self.bot.get_chat(player.player_id)
+                    name = chat.first_name or player.player_name
+                except Exception:
+                    name = player.player_name
+                text += f"{i + 1}. {name}: {player.pisunchik_size} sm🌭 и {int(player.coins)} BTC💰\n"
+            await message.reply(text)
 
         @self.router.message(Command('pisunchik'))
         async def pisunchik_command(message: Message):
