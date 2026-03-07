@@ -1,9 +1,11 @@
 import logging
 import os
+import asyncio
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
-from telebot import types
-import telebot
+from aiogram import Router, F, Bot
+from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery
 
 from config.settings import Settings
 from database.db_manager import DatabaseManager
@@ -15,15 +17,15 @@ logger = logging.getLogger(__name__)
 
 class MusicHandlers:
     """Handlers for music tournament commands and callbacks."""
-    
-    def __init__(self, bot: telebot.TeleBot):
+
+    def __init__(self, bot: Bot):
         self.bot = bot
         self.db_manager = DatabaseManager(DB_CONN_STRING)
         self.spotify_service = SpotifyService(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, DOWNLOAD_DIR)
         self.tournament_service = TournamentService(
             STATE_FILE, bot, YOUR_CHAT_ID, self.db_manager, self.spotify_service
         )
-        
+
         # Load song pools from playlists
         self.song_pools = {}
         for friend, playlist_url in PLAYLISTS.items():
@@ -32,100 +34,104 @@ class MusicHandlers:
                 logger.info(f"Loaded {len(self.song_pools[friend])} tracks for {friend}")
             except Exception as e:
                 logger.error(f"Error loading playlist for {friend}: {str(e)}")
-        
-        self.scheduler = None
-        self._register_handlers()
 
-    def _register_handlers(self):
+        self.scheduler = None
+
+        self.router = Router()
+        self._register()
+
+    def _register(self):
         """Register all music-related handlers."""
-        
-        # Callback handlers
-        @self.bot.callback_query_handler(func=lambda call: call.data.startswith("bracket_vote|"))
-        def handle_bracket_vote(call):
+
+        @self.router.callback_query(F.data.startswith("bracket_vote|"))
+        async def handle_bracket_vote(call: CallbackQuery):
             """Handle vote callback from inline keyboard."""
             parts = call.data.split("|")
             if len(parts) != 2:
-                self.bot.answer_callback_query(call.id, "Invalid vote format.")
+                await call.answer("Invalid vote format.")
                 return
 
             vote_value = parts[1]
-            message, success = self.tournament_service.handle_vote(call.from_user.id, vote_value)
-            self.bot.answer_callback_query(call.id, message)
+            message, success = await asyncio.to_thread(
+                self.tournament_service.handle_vote, call.from_user.id, vote_value
+            )
+            await call.answer(message)
 
-        # Command handlers
-        @self.bot.message_handler(commands=['vote_for'])
-        def vote_for_player(message):
+        @self.router.message(Command('vote_for'))
+        async def vote_for_player(message: Message):
             """Admin command to vote on behalf of a user."""
             if message.from_user.id not in ADMIN_IDS:
-                self.bot.reply_to(message, "❌ This command is only available to administrators.")
+                await message.reply("❌ This command is only available to administrators.")
                 return
-                
+
             try:
                 # Format: /vote_for user_id song_number
                 parts = message.text.split()
                 if len(parts) != 3:
-                    self.bot.reply_to(message, "❌ Usage: /vote_for user_id song_number")
+                    await message.reply("❌ Usage: /vote_for user_id song_number")
                     return
-                    
+
                 voter_id = parts[1]
                 vote_value = parts[2]
-                
-                response_message, success = self.tournament_service.handle_admin_vote(voter_id, vote_value)
-                self.bot.reply_to(message, response_message)
+
+                response_message, success = await asyncio.to_thread(
+                    self.tournament_service.handle_admin_vote, voter_id, vote_value
+                )
+                await message.reply(response_message)
             except Exception as e:
-                self.bot.reply_to(message, f"❌ Error: {str(e)}")
+                await message.reply(f"❌ Error: {str(e)}")
 
-        @self.bot.message_handler(commands=['bracket'])
-        def show_bracket(message):
+        @self.router.message(Command('bracket'))
+        async def show_bracket(message: Message):
             """Display the current tournament bracket."""
-            bracket_visual = self.tournament_service.visualize_bracket()
-            self.bot.reply_to(message, f"Current tournament bracket:\n\n{bracket_visual}")
+            bracket_visual = await asyncio.to_thread(self.tournament_service.visualize_bracket)
+            await message.reply(f"Current tournament bracket:\n\n{bracket_visual}")
 
-        @self.bot.message_handler(commands=['start_tournament'])
-        def cmd_start_tournament(message):
+        @self.router.message(Command('start_tournament'))
+        async def cmd_start_tournament(message: Message):
             """Start or continue a tournament."""
             if os.path.exists(STATE_FILE):
-                self.tournament_service.load_tournament_state()
-                self.bot.send_message(MAX_ID, "Continuing existing tournament!")
-                self.tournament_service.post_daily_matchup()
+                await asyncio.to_thread(self.tournament_service.load_tournament_state)
+                await self.bot.send_message(MAX_ID, "Continuing existing tournament!")
+                await asyncio.to_thread(self.tournament_service.post_daily_matchup)
             else:
-                self.tournament_service.initialize_tournament(self.song_pools)
-                self.bot.send_message(MAX_ID, 'Music bot started! New tournament created')
+                await asyncio.to_thread(self.tournament_service.initialize_tournament, self.song_pools)
+                await self.bot.send_message(MAX_ID, 'Music bot started! New tournament created')
 
-        @self.bot.message_handler(commands=['new_tournament'])
-        def cmd_new_tournament(message):
+        @self.router.message(Command('new_tournament'))
+        async def cmd_new_tournament(message: Message):
             """Force start a new tournament."""
             if message.from_user.id not in ADMIN_IDS:
-                self.bot.reply_to(message, "❌ This command is only available to administrators.")
+                await message.reply("❌ This command is only available to administrators.")
                 return
 
-            self.tournament_service.initialize_tournament(self.song_pools)
-            self.bot.reply_to(message, "New tournament started!")
+            await asyncio.to_thread(self.tournament_service.initialize_tournament, self.song_pools)
+            await message.reply("New tournament started!")
 
-        @self.bot.message_handler(commands=['manual_matchup'])
-        def manual_matchup(message):
+        @self.router.message(Command('manual_matchup'))
+        async def manual_matchup(message: Message):
             """Manually trigger the next matchup."""
             if message.from_user.id not in ADMIN_IDS:
-                self.bot.reply_to(message, "❌ This command is only available to administrators.")
+                await message.reply("❌ This command is only available to administrators.")
                 return
 
-            self.tournament_service.post_daily_matchup()
-            self.bot.reply_to(message, "Manual matchup activated!")
+            await asyncio.to_thread(self.tournament_service.post_daily_matchup)
+            await message.reply("Manual matchup activated!")
 
-        @self.bot.message_handler(commands=['leaderboard'])
-        def show_leaderboard(message):
+        @self.router.message(Command('leaderboard'))
+        async def show_leaderboard(message: Message):
             """Show song leaderboard."""
-            leaderboard = self.tournament_service.get_leaderboard()
-            self.bot.reply_to(message, leaderboard)
+            leaderboard = await asyncio.to_thread(self.tournament_service.get_leaderboard)
+            await message.reply(leaderboard)
 
-        @self.bot.message_handler(commands=['playlist_stats'])
-        def show_playlist_stats(message):
+        @self.router.message(Command('playlist_stats'))
+        async def show_playlist_stats(message: Message):
             """Show statistics for each playlist."""
-            stats = self.tournament_service.get_friend_stats()
-            self.bot.reply_to(message, stats)
+            stats = await asyncio.to_thread(self.tournament_service.get_friend_stats)
+            await message.reply(stats)
 
-        @self.bot.message_handler(commands=['winners_playlist'])
-        def create_winners_playlist(message):
+        @self.router.message(Command('winners_playlist'))
+        async def create_winners_playlist(message: Message):
             """Generate a playlist of tournament winners."""
             try:
                 # Get winning songs from database
@@ -148,16 +154,18 @@ class MusicHandlers:
                 conn.close()
 
                 if not winner_uris:
-                    self.bot.reply_to(message, "No winners found yet!")
+                    await message.reply("No winners found yet!")
                     return
 
                 # Generate playlist text
-                playlist_text = self.spotify_service.create_playlist_from_tracks(winner_uris, "Tournament Winners")
-                self.bot.reply_to(message, playlist_text)
+                playlist_text = await asyncio.to_thread(
+                    self.spotify_service.create_playlist_from_tracks, winner_uris, "Tournament Winners"
+                )
+                await message.reply(playlist_text)
 
             except Exception as e:
                 logger.error(f"Error creating winners playlist: {str(e)}")
-                self.bot.reply_to(message, "Error creating playlist")
+                await message.reply("Error creating playlist")
 
     def notify_non_voters(self):
         """Send notification to users who haven't voted."""
@@ -213,10 +221,12 @@ class MusicHandlers:
             # Load or create tournament
             if os.path.exists(STATE_FILE):
                 self.tournament_service.load_tournament_state()
-                self.bot.send_message(MAX_ID, 'Music bot started! Existing tournament loaded')
+                import asyncio as _asyncio
+                _asyncio.create_task(self.bot.send_message(MAX_ID, 'Music bot started! Existing tournament loaded'))
             else:
                 self.tournament_service.initialize_tournament(self.song_pools)
-                self.bot.send_message(MAX_ID, 'Music bot started! New tournament created')
+                import asyncio as _asyncio
+                _asyncio.create_task(self.bot.send_message(MAX_ID, 'Music bot started! New tournament created'))
 
             # Start scheduler
             self.scheduler = self.schedule_daily_matchups()
@@ -224,7 +234,7 @@ class MusicHandlers:
 
             logger.info("Music bot functionality initialized successfully")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error starting music bot: {str(e)}")
             return False
@@ -236,6 +246,6 @@ class MusicHandlers:
             logger.info("Music bot scheduler stopped")
 
 
-def register_music_handlers(bot: telebot.TeleBot) -> MusicHandlers:
+def register_music_handlers(bot: Bot) -> MusicHandlers:
     """Register music handlers with the bot and return the handler instance."""
     return MusicHandlers(bot)

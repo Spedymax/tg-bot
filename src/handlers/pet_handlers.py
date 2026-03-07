@@ -1,5 +1,8 @@
 import logging
-from telebot import types
+import asyncio
+from aiogram import Router, F, Bot
+from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from typing import Optional
 from services.pet_service import PetService
 from utils.helpers import escape_html
@@ -16,32 +19,35 @@ class PetHandlers:
         self.game_service = game_service
         self.pet_service = PetService()
 
-    def setup_handlers(self):
+        self.router = Router()
+        self._register()
+
+    def _register(self):
         """Setup all pet-related command handlers."""
 
-        @self.bot.message_handler(commands=['pet'])
-        def pet_command(message):
-            self.show_pet_menu(message.chat.id, message.from_user.id)
+        @self.router.message(Command('pet'))
+        async def pet_command(message: Message):
+            await self.show_pet_menu(message.chat.id, message.from_user.id)
 
-        @self.bot.callback_query_handler(func=lambda call: call.data.startswith('pet_'))
-        def pet_callback(call):
-            self.handle_pet_callback(call)
+        @self.router.callback_query(F.data.startswith('pet_'))
+        async def pet_callback(call: CallbackQuery):
+            await self.handle_pet_callback(call)
 
     # ──────────────────────────────────────────────
     # Core display
     # ──────────────────────────────────────────────
 
-    def show_pet_menu(self, chat_id: int, user_id: int, delete_message_id: int = None):
+    async def show_pet_menu(self, chat_id: int, user_id: int, delete_message_id: int = None):
         """Send a fresh pet menu, optionally deleting an old message first."""
         if delete_message_id:
             try:
-                self.bot.delete_message(chat_id, delete_message_id)
+                await self.bot.delete_message(chat_id, delete_message_id)
             except Exception:
                 pass
 
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if not player:
-            self.bot.send_message(chat_id, "Вы не зарегистрированы как игрок.")
+            await self.bot.send_message(chat_id, "Вы не зарегистрированы как игрок.")
             return
 
         # Apply lazy decay on every pet view
@@ -50,14 +56,15 @@ class PetHandlers:
             now = datetime.now(timezone.utc)
             self.pet_service.apply_hunger_decay(player, now)
             self.pet_service.apply_happiness_decay(player, now)
-            self.player_service.save_player(player)
+            await asyncio.to_thread(self.player_service.save_player, player)
 
         pet = getattr(player, 'pet', None)
 
         if not pet:
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🥚 Создать питомца", callback_data="pet_create"))
-            self.bot.send_message(chat_id, "У тебя ещё нет питомца!", reply_markup=markup)
+            markup = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🥚 Создать питомца", callback_data="pet_create")
+            ]])
+            await self.bot.send_message(chat_id, "У тебя ещё нет питомца!", reply_markup=markup)
             return
 
         active_title = getattr(player, 'pet_active_title', None)
@@ -69,51 +76,51 @@ class PetHandlers:
 
         if pet.get('image_file_id'):
             try:
-                self.bot.send_photo(chat_id, pet['image_file_id'], caption=text,
-                                    reply_markup=markup, parse_mode='HTML')
+                await self.bot.send_photo(chat_id, pet['image_file_id'], caption=text,
+                                          reply_markup=markup, parse_mode='HTML')
                 return
             except Exception as e:
                 logger.error(f"Error sending pet image: {e}")
 
-        self.bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        await self.bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
-    def _get_pet_buttons(self, pet: dict, player) -> types.InlineKeyboardMarkup:
+    def _get_pet_buttons(self, pet: dict, player) -> InlineKeyboardMarkup:
         """Get appropriate buttons based on pet state."""
-        markup = types.InlineKeyboardMarkup()
+        rows = []
 
         if not pet.get('is_alive'):
             # Dead pet
             revives_used = getattr(player, 'pet_revives_used', 0)
             revives_remaining = self.pet_service.max_revives - revives_used
             if revives_remaining <= 0:
-                markup.add(types.InlineKeyboardButton("❤️ Возродить (нет возрождений)", callback_data="pet_revive"))
+                rows.append([InlineKeyboardButton(text="❤️ Возродить (нет возрождений)", callback_data="pet_revive")])
             else:
-                markup.add(types.InlineKeyboardButton("❤️ Возродить", callback_data="pet_revive"))
-            markup.add(types.InlineKeyboardButton("🗑 Удалить навсегда", callback_data="pet_delete_confirm"))
+                rows.append([InlineKeyboardButton(text="❤️ Возродить", callback_data="pet_revive")])
+            rows.append([InlineKeyboardButton(text="🗑 Удалить навсегда", callback_data="pet_delete_confirm")])
 
         elif not pet.get('is_locked'):
             # Initial setup (new, never confirmed)
-            markup.row(
-                types.InlineKeyboardButton("✏️ Изменить имя", callback_data="pet_name"),
-                types.InlineKeyboardButton("🖼 Изменить фото", callback_data="pet_image")
-            )
-            markup.add(types.InlineKeyboardButton("✅ Подтвердить", callback_data="pet_confirm"))
+            rows.append([
+                InlineKeyboardButton(text="✏️ Изменить имя", callback_data="pet_name"),
+                InlineKeyboardButton(text="🖼 Изменить фото", callback_data="pet_image")
+            ])
+            rows.append([InlineKeyboardButton(text="✅ Подтвердить", callback_data="pet_confirm")])
 
         else:
             # Alive and active — customization always available
-            markup.row(
-                types.InlineKeyboardButton("✏️ Имя", callback_data="pet_name"),
-                types.InlineKeyboardButton("🖼 Фото", callback_data="pet_image")
-            )
+            rows.append([
+                InlineKeyboardButton(text="✏️ Имя", callback_data="pet_name"),
+                InlineKeyboardButton(text="🖼 Фото", callback_data="pet_image")
+            ])
             pet_titles = getattr(player, 'pet_titles', [])
             if pet_titles:
-                markup.add(types.InlineKeyboardButton("🏷 Титулы", callback_data="pet_titles"))
+                rows.append([InlineKeyboardButton(text="🏷 Титулы", callback_data="pet_titles")])
             stage = pet.get('stage', 'egg')
             if self.pet_service.is_ulta_available(player):
                 ulta_name = self.pet_service.get_ulta_name(stage)
-                markup.add(types.InlineKeyboardButton(
-                    f"⚡ {ulta_name}", callback_data="pet_ulta"
-                ))
+                rows.append([InlineKeyboardButton(
+                    text=f"⚡ {ulta_name}", callback_data="pet_ulta"
+                )])
             else:
                 stage = player.pet.get('stage', 'egg')
                 ulta_name = self.pet_service.get_ulta_name(stage)
@@ -129,17 +136,17 @@ class PetHandlers:
                     label = f"⚡ {ulta_name} ({time_label}){suffix}"
                 else:
                     label = f"⚡ {ulta_name} (не готова)"
-                markup.add(types.InlineKeyboardButton(label, callback_data="pet_ulta_info"))
-            markup.add(types.InlineKeyboardButton("💀 Убить", callback_data="pet_kill_confirm"))
-            markup.add(types.InlineKeyboardButton("🍖 Покормить", callback_data="pet_feed"))
+                rows.append([InlineKeyboardButton(text=label, callback_data="pet_ulta_info")])
+            rows.append([InlineKeyboardButton(text="💀 Убить", callback_data="pet_kill_confirm")])
+            rows.append([InlineKeyboardButton(text="🍖 Покормить", callback_data="pet_feed")])
 
-        return markup
+        return InlineKeyboardMarkup(inline_keyboard=rows)
 
     # ──────────────────────────────────────────────
     # Callback routing
     # ──────────────────────────────────────────────
 
-    def handle_pet_callback(self, call):
+    async def handle_pet_callback(self, call: CallbackQuery):
         """Route pet callbacks to appropriate handlers."""
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -150,9 +157,9 @@ class PetHandlers:
         if action.startswith('title_') and action != 'titles' and action != 'titles_back':
             try:
                 idx = int(action.replace('title_', '', 1))
-                self.select_title(call, idx)
+                await self.select_title(call, idx)
             except ValueError:
-                self.bot.answer_callback_query(call.id, "Ошибка выбора титула")
+                await call.answer("Ошибка выбора титула")
             return
 
         handlers = {
@@ -181,68 +188,69 @@ class PetHandlers:
 
         handler = handlers.get(action)
         if handler:
-            handler()
+            await handler()
         else:
-            self.bot.answer_callback_query(call.id, "Неизвестное действие")
+            await call.answer("Неизвестное действие")
 
     # ──────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────
 
-    def _dismiss_and_reopen(self, call):
+    async def _dismiss_and_reopen(self, call: CallbackQuery):
         """Delete current message and reopen pet menu."""
-        self.show_pet_menu(call.message.chat.id, call.from_user.id,
-                           delete_message_id=call.message.message_id)
+        await self.show_pet_menu(call.message.chat.id, call.from_user.id,
+                                 delete_message_id=call.message.message_id)
 
-    def _replace_with_text(self, call, text, markup):
+    async def _replace_with_text(self, call: CallbackQuery, text, markup):
         """Delete current message, send a plain text message."""
         try:
-            self.bot.delete_message(call.message.chat.id, call.message.message_id)
+            await self.bot.delete_message(call.message.chat.id, call.message.message_id)
         except Exception:
             pass
-        self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
+        await self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
 
     # ──────────────────────────────────────────────
     # Feed
     # ──────────────────────────────────────────────
 
-    def show_feed_menu(self, call):
+    async def show_feed_menu(self, call: CallbackQuery):
         """Show food selection menu."""
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if not player or not player.pet:
-            self.bot.answer_callback_query(call.id)
+            await call.answer()
             return
 
         basic_count = player.items.count('pet_food_basic')
         deluxe_count = player.items.count('pet_food_deluxe')
 
         if basic_count == 0 and deluxe_count == 0:
-            self.bot.answer_callback_query(call.id, "У тебя нет еды для питомца!")
+            await call.answer("У тебя нет еды для питомца!")
             return
 
-        self.bot.answer_callback_query(call.id)
-        markup = types.InlineKeyboardMarkup()
+        await call.answer()
+        rows = []
         if basic_count > 0:
-            markup.add(types.InlineKeyboardButton(
-                f"🍖 Корм ({basic_count} шт.) +30 голод",
+            rows.append([InlineKeyboardButton(
+                text=f"🍖 Корм ({basic_count} шт.) +30 голод",
                 callback_data="pet_feed_basic"
-            ))
+            )])
         if deluxe_count > 0:
-            markup.add(types.InlineKeyboardButton(
-                f"🍗 Деликатес ({deluxe_count} шт.) +60 голод +20 настроение",
+            rows.append([InlineKeyboardButton(
+                text=f"🍗 Деликатес ({deluxe_count} шт.) +60 голод +20 настроение",
                 callback_data="pet_feed_deluxe"
-            ))
-        markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="pet_feed_back"))
-        self._replace_with_text(call, "🍽 Чем покормить питомца?", markup)
+            )])
+        rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pet_feed_back")])
+        markup = InlineKeyboardMarkup(inline_keyboard=rows)
+        await self._replace_with_text(call, "🍽 Чем покормить питомца?", markup)
 
-    def feed_pet(self, call, food_type: str):
+    async def feed_pet(self, call: CallbackQuery, food_type: str):
         """Feed the pet with selected food item."""
         from datetime import datetime, timezone
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if not player or not player.pet:
-            self.bot.answer_callback_query(call.id, "Питомец не найден")
+            await call.answer("Питомец не найден")
             return
 
         item_key = 'pet_food_basic' if food_type == 'basic' else 'pet_food_deluxe'
@@ -253,7 +261,7 @@ class PetHandlers:
         effect = effects[item_key]
 
         if not player.remove_item(item_key):
-            self.bot.answer_callback_query(call.id, "Еда не найдена!")
+            await call.answer("Еда не найдена!")
             return
 
         now = datetime.now(timezone.utc)
@@ -262,96 +270,97 @@ class PetHandlers:
         if effect['happiness'] > 0:
             player.pet_happiness = min(100, getattr(player, 'pet_happiness', 50) + effect['happiness'])
 
-        self.player_service.save_player(player)
-        self.bot.answer_callback_query(call.id, f"🐾 {effect['name']} съеден!")
-        self.show_pet_menu(call.message.chat.id, user_id,
-                           delete_message_id=call.message.message_id)
+        await asyncio.to_thread(self.player_service.save_player, player)
+        await call.answer(f"🐾 {effect['name']} съеден!")
+        await self.show_pet_menu(call.message.chat.id, user_id,
+                                 delete_message_id=call.message.message_id)
 
     # ──────────────────────────────────────────────
     # Pet creation
     # ──────────────────────────────────────────────
 
-    def create_pet(self, call):
+    async def create_pet(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if not player:
-            self.bot.answer_callback_query(call.id, "Игрок не найден")
+            await call.answer("Игрок не найден")
             return
 
         player.pet = self.pet_service.create_pet("Новый питомец")
-        self.player_service.save_player(player)
-        self.bot.answer_callback_query(call.id, "Питомец создан!")
-        self.show_pet_menu(call.message.chat.id, user_id,
-                           delete_message_id=call.message.message_id)
+        await asyncio.to_thread(self.player_service.save_player, player)
+        await call.answer("Питомец создан!")
+        await self.show_pet_menu(call.message.chat.id, user_id,
+                                 delete_message_id=call.message.message_id)
 
     # ──────────────────────────────────────────────
     # Name / image customization
     # ──────────────────────────────────────────────
 
-    def request_name(self, call):
-        self.bot.answer_callback_query(call.id)
-        msg = self.bot.send_message(call.message.chat.id, "Напиши новое имя для питомца:")
-        self.bot.register_next_step_handler(msg, self.process_name_input)
+    async def request_name(self, call: CallbackQuery):
+        await call.answer()
+        await self.bot.send_message(call.message.chat.id, "Напиши новое имя для питомца:")
+        # Note: register_next_step_handler is telebot-specific.
+        # In aiogram v3 the next message from the user is handled via state machine (FSM).
+        # For now we store pending state in a simple dict keyed by user_id.
+        self._pending_name[call.from_user.id] = call.message.chat.id
 
-    def process_name_input(self, message):
+    async def process_name_input(self, message: Message):
         user_id = message.from_user.id
         new_name = message.text.strip()[:50]
 
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if player and player.pet:
             player.pet['name'] = escape_html(new_name)
-            self.player_service.save_player(player)
-            self.bot.send_message(message.chat.id, f"Имя изменено на: {new_name}")
+            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.bot.send_message(message.chat.id, f"Имя изменено на: {new_name}")
 
-        self.show_pet_menu(message.chat.id, user_id)
+        await self.show_pet_menu(message.chat.id, user_id)
 
-    def request_image(self, call):
-        self.bot.answer_callback_query(call.id)
-        msg = self.bot.send_message(call.message.chat.id, "Пришли новое фото для питомца:")
-        self.bot.register_next_step_handler(msg, self.process_image_input)
+    async def request_image(self, call: CallbackQuery):
+        await call.answer()
+        await self.bot.send_message(call.message.chat.id, "Пришли новое фото для питомца:")
 
-    def process_image_input(self, message):
+    async def process_image_input(self, message: Message):
         user_id = message.from_user.id
 
         if not message.photo:
-            self.bot.send_message(message.chat.id, "Это не фото. Пришли изображение.")
-            self.bot.register_next_step_handler(message, self.process_image_input)
+            await self.bot.send_message(message.chat.id, "Это не фото. Пришли изображение.")
             return
 
         file_id = message.photo[-1].file_id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if player and player.pet:
             player.pet['image_file_id'] = file_id
-            self.player_service.save_player(player)
-            self.bot.send_message(message.chat.id, "Фото обновлено!")
+            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.bot.send_message(message.chat.id, "Фото обновлено!")
 
-        self.show_pet_menu(message.chat.id, user_id)
+        await self.show_pet_menu(message.chat.id, user_id)
 
     # ──────────────────────────────────────────────
     # Confirm (initial setup only)
     # ──────────────────────────────────────────────
 
-    def confirm_pet(self, call):
+    async def confirm_pet(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if player and player.pet:
             player.pet['is_locked'] = True
-            self.player_service.save_player(player)
-            self.bot.answer_callback_query(call.id, "Питомец подтверждён! Теперь он будет расти.")
+            await asyncio.to_thread(self.player_service.save_player, player)
+            await call.answer("Питомец подтверждён! Теперь он будет расти.")
 
-        self.show_pet_menu(call.message.chat.id, user_id,
-                           delete_message_id=call.message.message_id)
+        await self.show_pet_menu(call.message.chat.id, user_id,
+                                 delete_message_id=call.message.message_id)
 
     # ──────────────────────────────────────────────
     # Revive
     # ──────────────────────────────────────────────
 
-    def revive_pet(self, call):
+    async def revive_pet(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
 
         if not player or not player.pet:
-            self.bot.answer_callback_query(call.id, "Питомец не найден")
+            await call.answer("Питомец не найден")
             return
 
         revives_used = getattr(player, 'pet_revives_used', 0)
@@ -365,134 +374,131 @@ class PetHandlers:
             player.pet = pet
             player.pet_revives_used = new_revives
             player.pet_revives_reset_date = new_reset
-            self.player_service.save_player(player)
-            self.bot.answer_callback_query(call.id, "Питомец возрождён!")
+            await asyncio.to_thread(self.player_service.save_player, player)
+            await call.answer("Питомец возрождён!")
         else:
-            self.bot.answer_callback_query(call.id, "Нет возрождений на этот месяц!")
+            await call.answer("Нет возрождений на этот месяц!")
 
-        self.show_pet_menu(call.message.chat.id, user_id,
-                           delete_message_id=call.message.message_id)
+        await self.show_pet_menu(call.message.chat.id, user_id,
+                                 delete_message_id=call.message.message_id)
 
     # ──────────────────────────────────────────────
     # Kill
     # ──────────────────────────────────────────────
 
-    def show_kill_confirm(self, call):
-        markup = types.InlineKeyboardMarkup()
-        markup.row(
-            types.InlineKeyboardButton("❌ Нет, оставить", callback_data="pet_kill_no"),
-            types.InlineKeyboardButton("✅ Да, убить", callback_data="pet_kill_yes")
-        )
-        self._replace_with_text(call, "⚠️ Ты уверен? Питомец умрёт и потребует возрождения!", markup)
+    async def show_kill_confirm(self, call: CallbackQuery):
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Нет, оставить", callback_data="pet_kill_no"),
+            InlineKeyboardButton(text="✅ Да, убить", callback_data="pet_kill_yes")
+        ]])
+        await self._replace_with_text(call, "⚠️ Ты уверен? Питомец умрёт и потребует возрождения!", markup)
 
-    def kill_pet(self, call):
+    async def kill_pet(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if player and player.pet:
             player.pet = self.pet_service.kill_pet(player.pet)
-            self.player_service.save_player(player)
-            self.bot.answer_callback_query(call.id, "Питомец умер 💀")
+            await asyncio.to_thread(self.player_service.save_player, player)
+            await call.answer("Питомец умер 💀")
 
-        self.show_pet_menu(call.message.chat.id, user_id,
-                           delete_message_id=call.message.message_id)
+        await self.show_pet_menu(call.message.chat.id, user_id,
+                                 delete_message_id=call.message.message_id)
 
     # ──────────────────────────────────────────────
     # Delete
     # ──────────────────────────────────────────────
 
-    def show_delete_confirm(self, call):
-        markup = types.InlineKeyboardMarkup()
-        markup.row(
-            types.InlineKeyboardButton("❌ Нет, оставить", callback_data="pet_delete_no"),
-            types.InlineKeyboardButton("✅ Да, удалить", callback_data="pet_delete_yes")
-        )
-        self._replace_with_text(call,
+    async def show_delete_confirm(self, call: CallbackQuery):
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Нет, оставить", callback_data="pet_delete_no"),
+            InlineKeyboardButton(text="✅ Да, удалить", callback_data="pet_delete_yes")
+        ]])
+        await self._replace_with_text(call,
             "⚠️ Ты уверен? Питомец будет удалён НАВСЕГДА! Весь прогресс будет потерян!", markup)
 
-    def delete_pet(self, call):
+    async def delete_pet(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if player:
             player.pet = None
-            self.player_service.save_player(player)
-            self.bot.answer_callback_query(call.id, "Питомец удалён")
+            await asyncio.to_thread(self.player_service.save_player, player)
+            await call.answer("Питомец удалён")
 
-        self.show_pet_menu(call.message.chat.id, user_id,
-                           delete_message_id=call.message.message_id)
+        await self.show_pet_menu(call.message.chat.id, user_id,
+                                 delete_message_id=call.message.message_id)
 
     # ──────────────────────────────────────────────
     # Titles
     # ──────────────────────────────────────────────
 
-    def show_titles(self, call):
+    async def show_titles(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
 
         if not player:
-            self.bot.answer_callback_query(call.id)
+            await call.answer()
             return
 
         titles = getattr(player, 'pet_titles', [])
         active_title = getattr(player, 'pet_active_title', None)
 
         if not titles:
-            self.bot.answer_callback_query(call.id, "У тебя ещё нет титулов!")
+            await call.answer("У тебя ещё нет титулов!")
             return
 
-        self.bot.answer_callback_query(call.id)
+        await call.answer()
 
         text = "🏷 Твои титулы:\n\n"
         for title in titles:
             marker = " ✅" if title == active_title else ""
             text += f"• {escape_html(title)}{marker}\n"
 
-        markup = types.InlineKeyboardMarkup(row_width=2)
         # Use index as callback data — avoids UTF-8 byte limit issues
-        buttons = [
-            types.InlineKeyboardButton(t, callback_data=f"pet_title_{i}")
+        rows = [
+            [InlineKeyboardButton(text=t, callback_data=f"pet_title_{i}")]
             for i, t in enumerate(titles)
         ]
-        markup.add(*buttons)
-        markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="pet_titles_back"))
+        rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pet_titles_back")])
+        markup = InlineKeyboardMarkup(inline_keyboard=rows)
 
         try:
-            self.bot.delete_message(call.message.chat.id, call.message.message_id)
+            await self.bot.delete_message(call.message.chat.id, call.message.message_id)
         except Exception:
             pass
-        self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
+        await self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
 
-    def select_title(self, call, idx: int):
+    async def select_title(self, call: CallbackQuery, idx: int):
         """Activate title by index."""
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
 
         if player:
             titles = getattr(player, 'pet_titles', [])
             if 0 <= idx < len(titles):
                 title = titles[idx]
                 player.pet_active_title = title
-                self.player_service.save_player(player)
-                self.bot.answer_callback_query(call.id, f"Титул «{title}» активирован!")
+                await asyncio.to_thread(self.player_service.save_player, player)
+                await call.answer(f"Титул «{title}» активирован!")
             else:
-                self.bot.answer_callback_query(call.id, "Титул не найден")
+                await call.answer("Титул не найден")
         else:
-            self.bot.answer_callback_query(call.id)
+            await call.answer()
 
-        self.show_titles(call)
+        await self.show_titles(call)
 
     # ──────────────────────────────────────────────
     # Ulta system
     # ──────────────────────────────────────────────
 
-    def activate_ulta(self, call):
+    async def activate_ulta(self, call: CallbackQuery):
         """Dispatch to stage-specific ulta handler."""
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if not player or not player.pet:
-            self.bot.answer_callback_query(call.id, "Питомец не найден")
+            await call.answer("Питомец не найден")
             return
         if not self.pet_service.is_ulta_available(player):
-            self.bot.answer_callback_query(call.id, "Ульта ещё не готова!")
+            await call.answer("Ульта ещё не готова!")
             return
 
         stage = player.pet.get('stage', 'egg')
@@ -504,58 +510,53 @@ class PetHandlers:
         }
         handler = dispatch.get(stage)
         if handler:
-            handler(call, player)
+            await handler(call, player)
         else:
-            self.bot.answer_callback_query(call.id, "Неизвестная стадия")
+            await call.answer("Неизвестная стадия")
 
-    def _show_ulta_info(self, call):
+    async def _show_ulta_info(self, call: CallbackQuery):
         """Show info about ulta cooldown."""
-        self.bot.answer_callback_query(
-            call.id,
+        await call.answer(
             "Ульта будет готова через 24 часа после последнего использования "
             "(48 часов если питомец подавлен, настроение < 20). "
             "Убедись, что питомец не голоден (голод ≥ 10).",
             show_alert=True
         )
 
-    def _ulta_casino_plus(self, call, player):
+    async def _ulta_casino_plus(self, call: CallbackQuery, player):
         """Egg ulta: +2 casino attempts today."""
         player.pet_casino_extra_spins = getattr(player, 'pet_casino_extra_spins', 0) + 2
         self.pet_service.mark_ulta_used(player)
-        self.player_service.save_player(player)
-        self.bot.answer_callback_query(
-            call.id, "🎰 Казино+: +2 попытки казино сегодня!", show_alert=True
-        )
-        self.show_pet_menu(call.message.chat.id, call.from_user.id,
-                           delete_message_id=call.message.message_id)
+        await asyncio.to_thread(self.player_service.save_player, player)
+        await call.answer("🎰 Казино+: +2 попытки казино сегодня!", show_alert=True)
+        await self.show_pet_menu(call.message.chat.id, call.from_user.id,
+                                 delete_message_id=call.message.message_id)
 
-    def _ulta_free_roll(self, call, player):
+    async def _ulta_free_roll(self, call: CallbackQuery, player):
         """Baby ulta: next roll is free."""
         player.pet_ulta_free_roll_pending = True
         self.pet_service.mark_ulta_used(player)
-        self.player_service.save_player(player)
-        self.bot.answer_callback_query(
-            call.id,
+        await asyncio.to_thread(self.player_service.save_player, player)
+        await call.answer(
             "🎲 Халявный ролл активирован! Следующий /roll бесплатный.",
             show_alert=True
         )
-        self.show_pet_menu(call.message.chat.id, call.from_user.id,
-                           delete_message_id=call.message.message_id)
+        await self.show_pet_menu(call.message.chat.id, call.from_user.id,
+                                 delete_message_id=call.message.message_id)
 
-    def _ulta_oracle(self, call, player):
+    async def _ulta_oracle(self, call: CallbackQuery, player):
         """Adult ulta: preview pisunchik result before rolling."""
         preview = self.game_service.preview_pisunchik_result(player)
         player.pet_ulta_oracle_pending = True
         player.pet_ulta_oracle_preview = preview
         self.pet_service.mark_ulta_used(player)
-        self.player_service.save_player(player)
-        self.bot.answer_callback_query(call.id)
+        await asyncio.to_thread(self.player_service.save_player, player)
+        await call.answer()
 
-        markup = types.InlineKeyboardMarkup()
-        markup.row(
-            types.InlineKeyboardButton("✅ Бросить!", callback_data="pet_oracle_yes"),
-            types.InlineKeyboardButton("❌ Пропустить", callback_data="pet_oracle_no"),
-        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Бросить!", callback_data="pet_oracle_yes"),
+            InlineKeyboardButton(text="❌ Пропустить", callback_data="pet_oracle_no"),
+        ]])
         sign = '+' if preview['size_change'] >= 0 else ''
         text = (
             f"🔮 Оракул предсказывает:\n\n"
@@ -564,32 +565,31 @@ class PetHandlers:
             f"Бросать?"
         )
         try:
-            self.bot.delete_message(call.message.chat.id, call.message.message_id)
+            await self.bot.delete_message(call.message.chat.id, call.message.message_id)
         except Exception:
             pass
-        self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
+        await self.bot.send_message(call.message.chat.id, text, reply_markup=markup)
 
-    def _ulta_khalyava(self, call, player):
+    async def _ulta_khalyava(self, call: CallbackQuery, player):
         """Legendary ulta: auto-correct next trivia answer."""
         player.pet_ulta_trivia_pending = True
         self.pet_service.mark_ulta_used(player)
-        self.player_service.save_player(player)
-        self.bot.answer_callback_query(
-            call.id,
+        await asyncio.to_thread(self.player_service.save_player, player)
+        await call.answer(
             "✅ Халява активирована! Следующий вопрос викторины засчитается автоматически.",
             show_alert=True
         )
-        self.show_pet_menu(call.message.chat.id, call.from_user.id,
-                           delete_message_id=call.message.message_id)
+        await self.show_pet_menu(call.message.chat.id, call.from_user.id,
+                                 delete_message_id=call.message.message_id)
 
-    def oracle_confirm(self, call):
+    async def oracle_confirm(self, call: CallbackQuery):
         """Oracle: player confirmed — apply the stored preview result."""
         from datetime import datetime, timezone
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if not player or not player.pet_ulta_oracle_preview:
-            self.bot.answer_callback_query(call.id, "Предсказание устарело")
-            self._dismiss_and_reopen(call)
+            await call.answer("Предсказание устарело")
+            await self._dismiss_and_reopen(call)
             return
 
         preview = player.pet_ulta_oracle_preview
@@ -598,32 +598,32 @@ class PetHandlers:
         player.pisunchik_size += preview['size_change']
         player.add_coins(preview['coins_change'])
         player.last_used = datetime.now(timezone.utc)
-        self.player_service.save_player(player)
+        await asyncio.to_thread(self.player_service.save_player, player)
 
-        self.bot.answer_callback_query(call.id)
+        await call.answer()
         sign = '+' if preview['size_change'] >= 0 else ''
         try:
-            self.bot.delete_message(call.message.chat.id, call.message.message_id)
+            await self.bot.delete_message(call.message.chat.id, call.message.message_id)
         except Exception:
             pass
-        self.bot.send_message(
+        await self.bot.send_message(
             call.message.chat.id,
             f"🔮 Бросок совершён!\n"
             f"Ваш писюнчик: {player.pisunchik_size} см ({sign}{preview['size_change']} см)\n"
             f"Монеты: +{preview['coins_change']} BTC"
         )
 
-    def oracle_cancel(self, call):
+    async def oracle_cancel(self, call: CallbackQuery):
         """Oracle: player skipped — no cooldown refund (ulta was already used)."""
         user_id = call.from_user.id
-        player = self.player_service.get_player(user_id)
+        player = await asyncio.to_thread(self.player_service.get_player, user_id)
         if player:
             player.pet_ulta_oracle_pending = False
             player.pet_ulta_oracle_preview = None
-            self.player_service.save_player(player)
-        self.bot.answer_callback_query(call.id, "Пропущено. Писюнчик не брошен.")
-        self.show_pet_menu(call.message.chat.id, user_id,
-                           delete_message_id=call.message.message_id)
+            await asyncio.to_thread(self.player_service.save_player, player)
+        await call.answer("Пропущено. Писюнчик не брошен.")
+        await self.show_pet_menu(call.message.chat.id, user_id,
+                                 delete_message_id=call.message.message_id)
 
     def get_player_mention(self, user_id: int, player_name: str, username: Optional[str] = None) -> str:
         if username:
