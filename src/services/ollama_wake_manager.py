@@ -242,13 +242,15 @@ class OllamaWakeManager:
         """Direct Ollama call (no WoL logic)."""
         from src.config.settings import Settings
         r = httpx.post(
-            f"{Settings.LOCAL_LLM_URL}/v1/chat/completions",
+            f"{Settings.LOCAL_LLM_URL}/api/chat",
             json={"model": Settings.LOCAL_LLM_MODEL,
+                  "think": False,
+                  "stream": False,
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=180,
         )
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+        return r.json()["message"]["content"]
 
     async def call(self, prompt: str, bot, message,
              reply_fn: Callable[[str], None] | None = None) -> str | None:
