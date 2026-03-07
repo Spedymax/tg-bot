@@ -753,8 +753,11 @@ class MoltbotHandlers:
         )
         try:
             raw = await asyncio.to_thread(self._call_ollama_direct, prompt)
-            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            logger.debug(f"MoltBot: danetka raw response: {raw[:200]!r}")
+            clean = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+            match = re.search(r'\{.*\}', clean, re.DOTALL)
             if not match:
+                logger.warning(f"MoltBot: danetka no JSON found in: {clean[:200]!r}")
                 return None
             data = json.loads(match.group())
             if 'situation' in data and 'answer' in data:
