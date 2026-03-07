@@ -244,7 +244,7 @@ class OllamaWakeManager:
             f"{Settings.LOCAL_LLM_URL}/v1/chat/completions",
             json={"model": Settings.LOCAL_LLM_MODEL,
                   "messages": [{"role": "user", "content": prompt}]},
-            timeout=90,
+            timeout=180,
         )
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
