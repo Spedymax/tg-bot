@@ -58,6 +58,8 @@ class CourtHandlers:
         # AI role IDs (fake, never sent DMs)
         self.AI_LAWYER_ID = 0
         self.AI_WITNESS_ID = -1
+        # Per-game locks to prevent simultaneous card plays
+        self._game_locks: dict[int, threading.Lock] = {}
 
     def setup_handlers(self):
 
@@ -429,53 +431,69 @@ class CourtHandlers:
                 self.bot.answer_callback_query(call.id, "Игра уже завершена.", show_alert=True)
                 return
 
-            # Check it's the player's turn
-            current_phase = game.get('current_phase', 'prosecution')
-            if role == 'prosecutor' and current_phase != 'prosecution':
-                self.bot.answer_callback_query(
-                    call.id,
-                    "⚖️ Не ваша очередь — суд ещё не передал вам слово!",
-                    show_alert=True
-                )
-                return
-            if role in ('lawyer', 'witness') and current_phase != 'defense':
-                self.bot.answer_callback_query(
-                    call.id,
-                    "⚖️ Не ваша очередь — суд ещё не передал вам слово!",
-                    show_alert=True
-                )
-                return
-
-            # Проверяем что это карта этого игрока
-            expected_role_id = game[f"{role}_id"]
-            if user_id != expected_role_id:
-                self.bot.answer_callback_query(call.id, "Сейчас не твой ход!", show_alert=True)
-                return
-
-            cards_left_key = f"{role}_cards_left"
-            if game[cards_left_key] <= 0:
-                self.bot.answer_callback_query(call.id, "Ты уже сыграл все свои карты!", show_alert=True)
-                return
-
-            # Защита может сыграть только одну карту за раунд
-            if role in ('lawyer', 'witness'):
-                current_round = game['current_round']
-                defense_played = any(
-                    p['role'] in ('lawyer', 'witness') and p['round'] == current_round
-                    for p in game['played_cards']
-                )
-                if defense_played:
-                    self.bot.answer_callback_query(call.id, "Защита уже ответила в этом раунде!", show_alert=True)
+            lock = self._game_locks.setdefault(game_id, threading.Lock())
+            with lock:
+                # Re-fetch game inside lock for freshness
+                game = self.court_service.get_active_game_by_id(game_id)
+                if not game or game['status'] != 'in_progress':
+                    self.bot.answer_callback_query(call.id, "Игра уже завершена.", show_alert=True)
                     return
 
-            cards_key = f"{role}_cards"
-            try:
-                card_text = game[cards_key][card_index]
-            except (KeyError, IndexError):
-                self.bot.answer_callback_query(call.id, "Карта не найдена (устаревшая кнопка).", show_alert=True)
-                return
+                # Check it's the player's turn
+                current_phase = game.get('current_phase', 'prosecution')
+                if role == 'prosecutor' and current_phase != 'prosecution':
+                    self.bot.answer_callback_query(
+                        call.id,
+                        "⚖️ Не ваша очередь — суд ещё не передал вам слово!",
+                        show_alert=True
+                    )
+                    return
+                if role in ('lawyer', 'witness') and current_phase != 'defense':
+                    self.bot.answer_callback_query(
+                        call.id,
+                        "⚖️ Не ваша очередь — суд ещё не передал вам слово!",
+                        show_alert=True
+                    )
+                    return
 
-            logger.info(f"[COURT] handle_play_card: game={game_id} role={role} card_index={card_index} user={user_id} card='{card_text[:60]}'")
+                # Проверяем что это карта этого игрока
+                expected_role_id = game[f"{role}_id"]
+                if user_id != expected_role_id:
+                    self.bot.answer_callback_query(call.id, "Сейчас не твой ход!", show_alert=True)
+                    return
+
+                cards_left_key = f"{role}_cards_left"
+                if game[cards_left_key] <= 0:
+                    self.bot.answer_callback_query(call.id, "Ты уже сыграл все свои карты!", show_alert=True)
+                    return
+
+                # Защита может сыграть только одну карту за раунд
+                if role in ('lawyer', 'witness'):
+                    current_round = game['current_round']
+                    defense_played = any(
+                        p['role'] in ('lawyer', 'witness') and p['round'] == current_round
+                        for p in game['played_cards']
+                    )
+                    if defense_played:
+                        self.bot.answer_callback_query(call.id, "Защита уже ответила в этом раунде!", show_alert=True)
+                        return
+
+                cards_key = f"{role}_cards"
+                try:
+                    card_text = game[cards_key][card_index]
+                except (KeyError, IndexError):
+                    self.bot.answer_callback_query(call.id, "Карта не найдена (устаревшая кнопка).", show_alert=True)
+                    return
+
+                logger.info(f"[COURT] handle_play_card: game={game_id} role={role} card_index={card_index} user={user_id} card='{card_text[:60]}'")
+
+                # Advance phase to speech-waiting (blocks other cards while speech is pending)
+                if role == 'prosecutor':
+                    self.court_service.set_phase(game_id, 'prosecution_speech')
+                elif role in ('lawyer', 'witness'):
+                    self.court_service.set_phase(game_id, 'defense_speech')
+
+            # UI updates and thread spawn are outside the lock
             self.bot.answer_callback_query(call.id, "Карта сыграна!")
             try:
                 new_markup = types.InlineKeyboardMarkup()
@@ -486,12 +504,6 @@ class CourtHandlers:
                 self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=new_markup)
             except Exception as e:
                 logger.warning(f"handle_play_card: не удалось обновить разметку: {e}")
-
-            # Advance phase to speech-waiting (blocks other cards while speech is pending)
-            if role == 'prosecutor':
-                self.court_service.set_phase(game_id, 'prosecution_speech')
-            elif role in ('lawyer', 'witness'):
-                self.court_service.set_phase(game_id, 'defense_speech')
 
             threading.Thread(
                 target=self._process_played_card,
