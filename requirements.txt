@@ -23,8 +23,7 @@ pyscreenshot==3.1
 PyScreeze==0.1.29
 PySocks==1.7.1
 aiogram>=3.7,<4.0
-# Note: no published aiogram v3 postgres FSM storage package exists on PyPI.
-# Custom BaseStorage implementation using psycopg2-binary (already listed) will be used.
+redis>=5.0
 pytweening==1.0.7
 requests~=2.32.3
 rsa==4.9
