@@ -1,7 +1,7 @@
 from __future__ import annotations
+import asyncio
 import subprocess
 import threading
-import time
 import logging
 import httpx
 import wakeonlan
@@ -44,8 +44,8 @@ class OllamaWakeManager:
     def _init_state(self):
         self._state = WakeState.ONLINE
         self._queue: list[WakeRequest] = []
-        self._queue_lock = threading.Lock()
-        self._last_ollama_request: float = time.time()
+        self._queue_lock = asyncio.Lock()
+        self._last_ollama_request: float = asyncio.get_event_loop().time()
         self._bot = None
         self._woke_by_bot: bool = False  # True only when bot sent WoL for Ollama
         self._initialized = True
@@ -59,40 +59,40 @@ class OllamaWakeManager:
         self._state = new_state
         logger.info(f"OllamaWakeManager: {old.value} → {new_state.value}")
 
-    def _enqueue(self, prompt: str, chat_id: int, message_id: int,
+    async def _enqueue(self, prompt: str, chat_id: int, message_id: int,
                  reply_fn: Callable[[str], None]):
-        with self._queue_lock:
+        async with self._queue_lock:
             self._queue.append(WakeRequest(prompt, chat_id, message_id, reply_fn))
 
-    def _drain_queue(self, ollama_fn: Callable[[str], str]):
-        with self._queue_lock:
+    async def _drain_queue(self, ollama_fn: Callable[[str], str]):
+        async with self._queue_lock:
             requests = list(self._queue)
             self._queue.clear()
         for req in requests:
             try:
-                result = ollama_fn(req.prompt)
+                result = await asyncio.to_thread(ollama_fn, req.prompt)
                 req.reply_fn(result)
             except Exception as e:
                 logger.error(f"OllamaWakeManager: drain error: {e}")
 
-    def _heartbeat_tick(self):
-        """Called by background thread every 30s. Detects PC going to sleep."""
+    async def _heartbeat_tick(self):
+        """Called by async loop every 120s. Detects PC going to sleep."""
         if self._state != WakeState.ONLINE:
             return
         try:
             from src.config.settings import Settings
-            r = httpx.get(f"{Settings.LOCAL_LLM_URL}/api/tags", timeout=5)
-            r.raise_for_status()
+            url = f"{Settings.LOCAL_LLM_URL}/api/tags"
+            await asyncio.to_thread(lambda: httpx.get(url, timeout=5).raise_for_status())
         except Exception:
             self._set_state(WakeState.OFFLINE)
-            self._notify_admin("😴 PC went to sleep (Ollama unreachable)")
+            await self._notify_admin("😴 PC went to sleep (Ollama unreachable)")
 
-    def _notify_admin(self, text: str):
+    async def _notify_admin(self, text: str):
         """Send DM to admin. No-op if bot or admin_id not configured."""
         try:
             from src.config.settings import Settings
             if self._bot and Settings.ADMIN_TELEGRAM_ID:
-                self._bot.send_message(Settings.ADMIN_TELEGRAM_ID, text)
+                await self._bot.send_message(Settings.ADMIN_TELEGRAM_ID, text)
         except Exception as e:
             logger.warning(f"OllamaWakeManager: admin notify failed: {e}")
 
@@ -132,38 +132,42 @@ class OllamaWakeManager:
             logger.info("OllamaWakeManager: sleep command timed out (PC likely asleep — OK)")
         except Exception as e:
             logger.error(f"OllamaWakeManager: sleep command failed: {e}")
-            self._notify_admin(f"⚠️ Failed to put PC to sleep: {e}")
+            # _notify_admin is async; schedule it as a fire-and-forget task
+            try:
+                asyncio.get_event_loop().create_task(
+                    self._notify_admin(f"⚠️ Failed to put PC to sleep: {e}")
+                )
+            except RuntimeError:
+                pass  # no event loop available at this point
 
-    def _sleep_check_tick(self):
+    async def _sleep_check_tick(self):
         """Called every 5 min. Sleeps PC only if bot woke it and user has been idle 15+ min."""
         if self._state != WakeState.ONLINE or not self._woke_by_bot:
             return
         from src.config.settings import Settings
         threshold = Settings.OLLAMA_IDLE_SLEEP_MINUTES * 60
-        user_idle = self._get_windows_idle_seconds()
+        user_idle = await asyncio.to_thread(self._get_windows_idle_seconds)
         if user_idle < threshold:
             return
-        self._notify_admin(
+        await self._notify_admin(
             f"😴 PC going to sleep (user idle {int(user_idle // 60)}m)"
         )
-        self.sleep_pc()
+        await self.sleep_pc()
 
-    def _sleep_check_loop(self):
+    async def _sleep_check_loop(self):
         while True:
             try:
-                time.sleep(300)  # every 5 min
-                self._sleep_check_tick()
+                await asyncio.sleep(300)  # every 5 min
+                await self._sleep_check_tick()
             except Exception as e:
                 logger.error(f"OllamaWakeManager: sleep check loop error: {e}")
 
     def start(self, bot):
-        """Start background threads. Call once at bot startup."""
+        """Start background asyncio tasks. Call once at bot startup."""
         self._bot = bot
-        t = threading.Thread(target=self._heartbeat_loop, daemon=True, name="ollama-heartbeat")
-        t.start()
-        s = threading.Thread(target=self._sleep_check_loop, daemon=True, name="ollama-sleep-check")
-        s.start()
-        logger.info("OllamaWakeManager: started heartbeat and sleep-check threads")
+        asyncio.create_task(self._heartbeat_loop())
+        asyncio.create_task(self._sleep_check_loop())
+        logger.info("OllamaWakeManager: started heartbeat and sleep-check tasks")
 
     def trigger_wake(self):
         """Public: send WoL and transition to WAKING. No-op if already waking/online."""
@@ -172,17 +176,17 @@ class OllamaWakeManager:
             return
         self._trigger_wake()
 
-    def sleep_pc(self):
+    async def sleep_pc(self):
         """Public: SSH to Windows PC and put it to sleep."""
-        self._send_sleep_command()
+        await asyncio.to_thread(self._send_sleep_command)
         self._woke_by_bot = False
         self._set_state(WakeState.OFFLINE)
 
-    def _heartbeat_loop(self):
+    async def _heartbeat_loop(self):
         while True:
             try:
-                time.sleep(120)
-                self._heartbeat_tick()
+                await asyncio.sleep(120)
+                await self._heartbeat_tick()
             except Exception as e:
                 logger.error(f"OllamaWakeManager: heartbeat loop error: {e}")
 
@@ -200,28 +204,27 @@ class OllamaWakeManager:
                 logger.warning("OllamaWakeManager: PC_MAC_ADDRESS not set, skipping WoL")
         except Exception as e:
             logger.error(f"OllamaWakeManager: WoL send failed: {e}")
-        t = threading.Thread(target=self._poll_until_online, daemon=True, name="ollama-poll")
-        t.start()
+        asyncio.create_task(self._poll_until_online())
 
-    def _poll_until_online(self, timeout: float = 180.0, interval: float = 5.0):
+    async def _poll_until_online(self, timeout: float = 180.0, interval: float = 5.0):
         """Poll Ollama every interval seconds up to timeout. Drain queue when ready."""
         from src.config.settings import Settings
-        deadline = time.time() + timeout
-        while time.time() < deadline:
+        deadline = asyncio.get_event_loop().time() + timeout
+        while asyncio.get_event_loop().time() < deadline:
             try:
-                r = httpx.get(f"{Settings.LOCAL_LLM_URL}/api/tags", timeout=5)
-                r.raise_for_status()
+                url = f"{Settings.LOCAL_LLM_URL}/api/tags"
+                await asyncio.to_thread(lambda: httpx.get(url, timeout=5).raise_for_status())
                 self._set_state(WakeState.ONLINE)
-                self._notify_admin("✅ PC is online (Ollama ready)")
-                self._drain_queue(self._call_ollama_raw)
+                await self._notify_admin("✅ PC is online (Ollama ready)")
+                await self._drain_queue(self._call_ollama_raw)
                 # Second drain catches requests that arrived during the WAKING→ONLINE transition
-                self._drain_queue(self._call_ollama_raw)
+                await self._drain_queue(self._call_ollama_raw)
                 return
             except Exception:
-                time.sleep(interval)
+                await asyncio.sleep(interval)
         logger.warning("OllamaWakeManager: PC did not wake within timeout, using Claude fallback")
-        self._notify_admin("⚠️ PC did not wake (3 min timeout) — using Claude fallback")
-        self._drain_queue(self._call_claude_fallback)
+        await self._notify_admin("⚠️ PC did not wake (3 min timeout) — using Claude fallback")
+        await self._drain_queue(self._call_claude_fallback)
         self._set_state(WakeState.OFFLINE)
 
     def _call_ollama_raw(self, prompt: str) -> str:
@@ -236,21 +239,21 @@ class OllamaWakeManager:
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
 
-    def call(self, prompt: str, bot, message,
+    async def call(self, prompt: str, bot, message,
              reply_fn: Callable[[str], None] | None = None) -> str | None:
         """
         Main entry point for all Ollama calls.
 
         If ONLINE: calls Ollama synchronously and returns the result string.
         If OFFLINE/WAKING: enqueues request, sends "waking up" message (OFFLINE only),
-        returns None. reply_fn is called from background thread when result is ready.
-        If reply_fn is None, defaults to bot.reply_to(message, result).
+        returns None. reply_fn is called from background task when result is ready.
+        If reply_fn is None, defaults to bot.send_message(chat_id, result).
         """
-        self._last_ollama_request = time.time()
+        self._last_ollama_request = asyncio.get_event_loop().time()
 
         if self._state == WakeState.ONLINE:
             try:
-                return self._call_ollama_raw(prompt)
+                return await asyncio.to_thread(self._call_ollama_raw, prompt)
             except Exception as e:
                 logger.warning(f"OllamaWakeManager: online call failed: {e}")
                 self._set_state(WakeState.OFFLINE)
@@ -263,17 +266,20 @@ class OllamaWakeManager:
             return None
 
         if reply_fn is None:
+            chat_id = message.chat.id
+            msg_id = message.message_id
+
             def reply_fn(text: str):
                 try:
-                    bot.reply_to(message, text)
+                    asyncio.create_task(bot.send_message(chat_id, text, reply_to_message_id=msg_id))
                 except Exception as ex:
                     logger.error(f"OllamaWakeManager: reply failed: {ex}")
 
-        self._enqueue(prompt, message.chat.id, message.message_id, reply_fn)
+        await self._enqueue(prompt, message.chat.id, message.message_id, reply_fn)
 
         if self._state == WakeState.OFFLINE:
             try:
-                bot.send_message(message.chat.id,
+                await bot.send_message(message.chat.id,
                     "⏳ Ollama is waking up… (~1–3 min). I'll reply when ready!")
             except Exception:
                 pass
