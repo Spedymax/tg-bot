@@ -380,6 +380,24 @@ class CourtService:
 
         raw = self._call_judge_llm(prompt)
         clean, signal = self.parse_judge_signal(raw)
+
+        # Retry once if LLM returned empty or no signal tag
+        if not raw or signal is None:
+            logger.warning(f"[COURT] judge_react: no signal (empty={not raw}), retrying")
+            raw = self._call_judge_llm(prompt)
+            clean, signal = self.parse_judge_signal(raw)
+
+        # Fallback if still no signal
+        if not raw or signal is None:
+            logger.error(f"[COURT] judge_react: fallback after 2 failed LLM calls")
+            clean = "Суд принял к сведению. Продолжаем заседание."
+            if role == "prosecutor":
+                signal = "ЗАЩИТА_ВАШ_ХОД"
+            elif is_last_round:
+                signal = "ФИНАЛ"
+            else:
+                signal = "ПРОКУРОР_ВАШ_ХОД"
+
         self.log_message(game_id, "judge", clean, round_num)
         return clean, signal
 
@@ -401,6 +419,24 @@ class CourtService:
 
         raw = self._call_judge_llm(prompt)
         clean, signal = self.parse_judge_signal(raw)
+
+        if not raw or signal is None:
+            logger.warning(f"[COURT] judge_react_to_reply: no signal, retrying")
+            raw = self._call_judge_llm(prompt)
+            clean, signal = self.parse_judge_signal(raw)
+
+        if not raw or signal is None:
+            logger.error(f"[COURT] judge_react_to_reply: fallback after 2 failed LLM calls")
+            clean = "Суд принял к сведению. Продолжаем заседание."
+            game = self.get_active_game_by_id(game_id)
+            is_last = game and game.get('current_round', 0) >= 4
+            if role == "prosecutor":
+                signal = "ЗАЩИТА_ВАШ_ХОД"
+            elif is_last:
+                signal = "ФИНАЛ"
+            else:
+                signal = "ПРОКУРОР_ВАШ_ХОД"
+
         self.log_message(game_id, role, reply_text, round_num)
         self.log_message(game_id, "judge", clean, round_num)
         return clean, signal
