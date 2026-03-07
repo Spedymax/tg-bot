@@ -970,14 +970,14 @@ class MoltbotHandlers:
                 danetka = await self._generate_danetka()
                 if not danetka:
                     await self.bot.edit_message_text("❌ Не смог придумать, попробуй ещё раз.",
-                                                     chat_id, waiting.message_id)
+                                                     chat_id=chat_id, message_id=waiting.message_id)
                     return
                 self._save_danetka(danetka['situation'], danetka['answer'])
                 await self.bot.edit_message_text(
                     f"🎲 *Данетка!*\n\n{danetka['situation']}\n\n"
                     "_Задавайте вопросы — отвечаю только Да / Нет / Не важно_\n"
                     "Используй /сдаюсь чтобы узнать ответ",
-                    chat_id, waiting.message_id, parse_mode="Markdown"
+                    chat_id=chat_id, message_id=waiting.message_id, parse_mode="Markdown"
                 )
                 self._active_danetka[chat_id] = {
                     'situation': danetka['situation'],
