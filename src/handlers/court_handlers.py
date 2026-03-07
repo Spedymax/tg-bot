@@ -752,7 +752,7 @@ class CourtHandlers:
                     except Exception:
                         pass
 
-        timer = threading.Timer(180, on_timeout)  # 3 minutes
+        timer = threading.Timer(300, on_timeout)  # 5 minutes
         timer.daemon = True
         self._fallback_timers[game_id] = timer
         timer.start()
