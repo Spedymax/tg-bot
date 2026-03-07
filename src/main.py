@@ -68,6 +68,7 @@ async def main():
     moltbot_h = MoltbotHandlers(bot, db_manager)
     pet_h = PetHandlers(bot, player_service, game_service)
     court_h = CourtHandlers(bot, db_manager)
+    court_h.set_storage(storage)
 
     # ── Cross-handler wiring ──────────────────────────────────────────────────
     quiz_scheduler = QuizScheduler(bot, db_manager, trivia_h.trivia_service)
