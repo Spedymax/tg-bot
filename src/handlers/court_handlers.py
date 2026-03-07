@@ -470,12 +470,18 @@ class CourtHandlers:
                 # Защита может сыграть только одну карту за раунд
                 if role in ('lawyer', 'witness'):
                     current_round = game['current_round']
-                    defense_played = any(
-                        p['role'] in ('lawyer', 'witness') and p['round'] == current_round
-                        for p in game['played_cards']
+                    played_defense_role = next(
+                        (p['role'] for p in game['played_cards']
+                         if p['role'] in ('lawyer', 'witness') and p['round'] == current_round),
+                        None
                     )
-                    if defense_played:
-                        self.bot.answer_callback_query(call.id, "Защита уже ответила в этом раунде!", show_alert=True)
+                    if played_defense_role is not None:
+                        who = "🛡️ Адвокат" if played_defense_role == 'lawyer' else "👁️ Свидетель"
+                        self.bot.answer_callback_query(
+                            call.id,
+                            f"{who} уже ответил в этом раунде!",
+                            show_alert=True
+                        )
                         return
 
                 cards_key = f"{role}_cards"
