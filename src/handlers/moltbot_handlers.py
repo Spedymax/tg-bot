@@ -935,10 +935,10 @@ class MoltbotHandlers:
                 if reply and reply.strip():
                     sent = self.bot.reply_to(message, reply)
                     self._store_bot_reply(reply, sent.message_id)
+                else:
+                    self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
                 self.bot.reply_to(message, "⚠️ Не могу подключиться к AI, попробуй позже")
-            except _AIRefusalError:
-                self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
             except Exception as e:
                 logger.error(f"MoltBot API error: {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
@@ -1026,10 +1026,10 @@ class MoltbotHandlers:
                 if reply and reply.strip():
                     sent = self.bot.reply_to(message, reply)
                     self._store_bot_reply(reply, sent.message_id)
+                else:
+                    self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
                 self.bot.reply_to(message, "⚠️ Не могу подключиться к AI, попробуй позже")
-            except _AIRefusalError:
-                self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
             except Exception as e:
                 logger.error(f"MoltBot API error (reply): {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
@@ -1116,10 +1116,10 @@ class MoltbotHandlers:
                 if reply and reply.strip():
                     sent = self.bot.reply_to(message, reply)
                     self._store_bot_reply(reply, sent.message_id)
+                else:
+                    self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
                 self.bot.reply_to(message, "⚠️ Не могу подключиться к AI, попробуй позже")
-            except _AIRefusalError:
-                self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
             except Exception as e:
                 logger.error(f"MoltBot API error (photo): {e}")
                 self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
