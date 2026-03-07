@@ -482,11 +482,32 @@ class CourtService:
 Блок 4: ПРИГОВОР (драматично, 2-4 предложения)
 ОБЯЗАТЕЛЬНО: первая строка блока 4 — ровно одно из двух слов: **ВИНОВЕН** или **НЕ ВИНОВЕН** (жирным, отдельной строкой). Затем — сам приговор с характером.
 
+Пример правильного формата ответа:
+Обвинение настаивало на том, что...
+---
+Защита утверждала, что...
+---
+Ключевое противоречие состоит в том, что...
+---
+**НЕ ВИНОВЕН**
+Суд постановил: ...
+
 Будь ироничным — это не совсем обычный суд. Если аргументы обеих сторон примерно равны по нелепости — можешь оправдать по нестандартной причине. Наказание должно звучать как настоящий приговор, но может быть неожиданным или комичным.
 ВАЖНО: в приговоре НЕ используй теги [ВОПРОС], [ФИНАЛ] и другие — строго следуй формату 4 блоков с разделителем ---."""
 
         raw = self._call_judge_llm(prompt)
         parts = [p.strip() for p in raw.split("---") if p.strip()]
+
         if len(parts) < 4:
-            parts = parts + [""] * (4 - len(parts))
+            logger.warning(f"[COURT] generate_verdict: got {len(parts)} blocks, retrying")
+            raw = self._call_judge_llm(prompt)
+            parts = [p.strip() for p in raw.split("---") if p.strip()]
+
+        if len(parts) < 4:
+            logger.error(f"[COURT] generate_verdict: still {len(parts)} blocks after retry, using fallback")
+            if not parts:
+                parts = ["", "", "", raw.strip()]
+            else:
+                parts = parts + [""] * (4 - len(parts))
+
         return parts[:4]
