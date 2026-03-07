@@ -166,6 +166,7 @@ class OllamaWakeManager:
     def start(self, bot):
         """Start background asyncio tasks. Call once at bot startup."""
         self._bot = bot
+        self._main_loop = asyncio.get_event_loop()
         asyncio.create_task(self._heartbeat_loop())
         asyncio.create_task(self._sleep_check_loop())
         logger.info("OllamaWakeManager: started heartbeat and sleep-check tasks")
