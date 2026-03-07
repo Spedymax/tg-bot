@@ -917,6 +917,8 @@ class MoltbotHandlers:
     # ── Handlers ──────────────────────────────────────────────────────────────
 
     def setup_handlers(self):
+        bot_id = self.bot.get_me().id
+
         @self.bot.message_handler(func=lambda m: self._is_bot_mentioned(m))
         def handle_mention(message):
             sender_name = self._resolve_sender_name(message.from_user)
@@ -1000,7 +1002,7 @@ class MoltbotHandlers:
         @self.bot.message_handler(func=lambda m: (
             m.reply_to_message is not None
             and m.reply_to_message.from_user is not None
-            and m.reply_to_message.from_user.id == self.bot.get_me().id
+            and m.reply_to_message.from_user.id == bot_id
             and not self._is_bot_mentioned(m)
         ))
         def handle_reply_to_bot(message):
@@ -1053,7 +1055,7 @@ class MoltbotHandlers:
             and not self._is_bot_mentioned(m)
             and not _has_other_mention(m)
             and not (m.reply_to_message and m.reply_to_message.from_user
-                     and m.reply_to_message.from_user.id == self.bot.get_me().id)
+                     and m.reply_to_message.from_user.id == bot_id)
         ))
         def handle_probabilistic(message):
             self._maybe_update_summary()
