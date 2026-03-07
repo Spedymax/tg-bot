@@ -299,8 +299,8 @@ class MoltbotHandlers:
                     lines = [l for l in lines if l not in stripped]
                     text = '\n'.join(lines).strip()
                     if "no response" in text.lower() and "openclaw" in text.lower():
-                        logger.warning("MoltBot: OpenClaw returned no-response string, treating as refusal")
-                        raise _AIRefusalError("AI refused to respond")
+                        logger.info("MoltBot: OpenClaw returned NO_REPLY signal, skipping response")
+                        return ""
                     return text
             except httpx.TimeoutException as e:
                 # Timeout = OpenClaw already received the message, don't retry (would cause duplicates)
