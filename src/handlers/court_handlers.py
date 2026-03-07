@@ -192,8 +192,10 @@ class CourtHandlers:
         @self.bot.message_handler(func=lambda m: (
             m.chat.type != 'private'
             and m.reply_to_message is not None
+            and m.reply_to_message.from_user is not None
             and m.reply_to_message.from_user.id == self._get_bot_id()
             and m.chat.id not in self._pending_speech  # Don't conflict with speech handler
+            and bool(self.court_service.get_active_game(m.chat.id))  # Only when game active
         ))
         def handle_judge_reply(message):
             chat_id = message.chat.id
