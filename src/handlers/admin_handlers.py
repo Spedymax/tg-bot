@@ -936,6 +936,16 @@ class AdminHandlers:
                 logger.error(f"Error in sho_tam_novogo command: {e}")
                 await message.reply(f"❌ Ошибка: {str(e)}")
 
+        # ── /metrics ─────────────────────────────────────────────────────────
+
+        @self.router.message(Command('metrics'))
+        async def show_metrics(message: Message):
+            """Show bot metrics (admin-only)."""
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                return
+            from services.metrics import metrics
+            await message.reply(metrics.format_report())
+
         # ── Catch-all: store non-command messages (StateFilter(None) = no FSM active) ──
 
         @self.router.message(StateFilter(None), F.text, ~F.text.startswith('/'))
