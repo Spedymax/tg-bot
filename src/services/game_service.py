@@ -65,7 +65,7 @@ class GameService:
         
         return size_change, coins_change, effects_applied
     
-    def execute_pisunchik_command(self, player: Player) -> Dict:
+    async def execute_pisunchik_command(self, player: Player) -> Dict:
         """Execute the pisunchik command and return results"""
         # Check cooldown
         can_use, time_left = self.can_use_pisunchik(player)
@@ -95,8 +95,8 @@ class GameService:
         player.ballzzz_number = random.randint(GameConfig.PISUNCHIK_MIN_CHANGE, GameConfig.PISUNCHIK_MAX_CHANGE)
         
         # Save player
-        self.player_service.save_player(player)
-        
+        await self.player_service.save_player(player)
+
         return {
             'success': True,
             'size_change': size_change,
@@ -134,7 +134,7 @@ class GameService:
         
         return True, None
     
-    def execute_casino_command(self, player: Player) -> Dict:
+    async def execute_casino_command(self, player: Player) -> Dict:
         """Execute casino command with 6 casino dice throws"""
         can_use, error_message = self.can_use_casino(player)
         if not can_use:
@@ -145,7 +145,7 @@ class GameService:
         
         # Mark that we need to send 6 casino dice
         # The actual dice sending will be handled in the handler
-        self.player_service.save_player(player)
+        await self.player_service.save_player(player)
         
         return {
             'success': True,
@@ -179,7 +179,7 @@ class GameService:
         
         return max(0, base_cost)
     
-    def execute_roll_command(self, player: Player, rolls: int) -> Dict:
+    async def execute_roll_command(self, player: Player, rolls: int) -> Dict:
         """Execute roll command"""
         if getattr(player, 'pet_ulta_free_roll_pending', False):
             cost = 0
@@ -211,8 +211,8 @@ class GameService:
                 jackpots += 1
                 player.add_coins(400)
         
-        self.player_service.save_player(player)
-        
+        await self.player_service.save_player(player)
+
         return {
             'success': True,
             'cost': cost,
@@ -236,7 +236,7 @@ class GameService:
         
         return True, None
     
-    def execute_theft(self, thief: Player, victim: Player) -> Dict:
+    async def execute_theft(self, thief: Player, victim: Player) -> Dict:
         """Execute theft between players"""
         can_steal, error_message = self.can_steal(thief)
         if not can_steal:
@@ -255,8 +255,8 @@ class GameService:
         thief.pisunchik_size += theft_amount
         
         # Save both players
-        self.player_service.save_player(thief)
-        self.player_service.save_player(victim)
+        await self.player_service.save_player(thief)
+        await self.player_service.save_player(victim)
         
         return {
             'success': True,
@@ -277,7 +277,7 @@ class GameService:
         discounted_price = int(base_price * (100 - discount_percent) / 100)
         return discounted_price
     
-    def upgrade_characteristic(self, player: Player, characteristic_name: str, levels: int) -> Dict:
+    async def upgrade_characteristic(self, player: Player, characteristic_name: str, levels: int) -> Dict:
         """Upgrade a player's characteristic"""
         current_level = player.get_characteristic_level(characteristic_name)
         new_level = current_level + levels
@@ -291,7 +291,7 @@ class GameService:
             return {'success': False, 'message': 'Недостаточно денег для улучшения.'}
         
         player.update_characteristic_level(characteristic_name, new_level)
-        self.player_service.save_player(player)
+        await self.player_service.save_player(player)
         
         return {
             'success': True,
@@ -300,7 +300,7 @@ class GameService:
             'cost': cost
         }
     
-    def use_masturbator(self, player: Player, donation_amount: int) -> Dict:
+    async def use_masturbator(self, player: Player, donation_amount: int) -> Dict:
         """Use masturbator item"""
         if not player.has_item('masturbator'):
             return {'success': False, 'message': "У вас нету предмета 'masturbator'"}
@@ -318,8 +318,8 @@ class GameService:
         player.pisunchik_size -= donation_amount
         player.add_coins(coins_awarded)
         player.remove_item('masturbator')
-        
-        self.player_service.save_player(player)
+
+        await self.player_service.save_player(player)
         
         return {
             'success': True,
@@ -328,7 +328,7 @@ class GameService:
             'new_size': player.pisunchik_size
         }
     
-    def apply_daily_effects(self, player: Player) -> List[str]:
+    async def apply_daily_effects(self, player: Player) -> List[str]:
         """Apply daily effects like Gold characteristic income"""
         effects = []
         
@@ -349,6 +349,6 @@ class GameService:
                 effects.append(f"Ваш член менее {min_size} сантиметров :( Но благодаря Big Black характеристике ваш член снова стал {min_size} см")
         
         if effects:
-            self.player_service.save_player(player)
+            await self.player_service.save_player(player)
         
         return effects

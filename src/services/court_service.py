@@ -1,6 +1,7 @@
 import json
 import logging
 
+import httpx
 import google.generativeai as genai
 
 from config.settings import Settings
@@ -14,17 +15,17 @@ class CourtService:
 
     # ── DB-хелперы ─────────────────────────────────────────────────────────
 
-    def create_game(self, chat_id: int, defendant: str, crime: str) -> int:
+    async def create_game(self, chat_id: int, defendant: str, crime: str) -> int:
         """Создать строку игры в БД, вернуть её id."""
-        rows = self.db.execute_query(
+        rows = await self.db.execute_query(
             "INSERT INTO court_games (chat_id, defendant, crime) VALUES (%s, %s, %s) RETURNING id",
             (chat_id, defendant, crime),
         )
         return rows[0][0] if rows else None
 
-    def get_active_game(self, chat_id: int) -> dict | None:
+    async def get_active_game(self, chat_id: int) -> dict | None:
         """Вернуть активную игру для чата или None."""
-        rows = self.db.execute_query(
+        rows = await self.db.execute_query(
             "SELECT id, chat_id, defendant, crime, prosecutor_id, lawyer_id, witness_id, "
             "prosecutor_cards, lawyer_cards, witness_cards, played_cards, current_round, "
             "prosecutor_cards_left, lawyer_cards_left, witness_cards_left, status, "
@@ -48,27 +49,27 @@ class CourtService:
             "last_judge_msg_id": r[17],
         }
 
-    def assign_role(self, game_id: int, role: str, user_id: int):
+    async def assign_role(self, game_id: int, role: str, user_id: int):
         """Установить prosecutor_id / lawyer_id / witness_id."""
         queries = {
             "prosecutor": "UPDATE court_games SET prosecutor_id = %s WHERE id = %s",
             "lawyer": "UPDATE court_games SET lawyer_id = %s WHERE id = %s",
             "witness": "UPDATE court_games SET witness_id = %s WHERE id = %s",
         }
-        self.db.execute_query(queries[role], (user_id, game_id))
+        await self.db.execute_query(queries[role], (user_id, game_id))
 
-    def set_status(self, game_id: int, status: str):
-        self.db.execute_query("UPDATE court_games SET status = %s WHERE id = %s", (status, game_id))
+    async def set_status(self, game_id: int, status: str):
+        await self.db.execute_query("UPDATE court_games SET status = %s WHERE id = %s", (status, game_id))
 
-    def save_cards(self, game_id: int, prosecutor_cards: list, lawyer_cards: list, witness_cards: list):
-        self.db.execute_query(
+    async def save_cards(self, game_id: int, prosecutor_cards: list, lawyer_cards: list, witness_cards: list):
+        await self.db.execute_query(
             "UPDATE court_games SET prosecutor_cards=%s, lawyer_cards=%s, witness_cards=%s WHERE id=%s",
             (json.dumps(prosecutor_cards), json.dumps(lawyer_cards), json.dumps(witness_cards), game_id),
         )
 
-    def record_played_card(self, game_id: int, role: str, card: str, round_num: int):
+    async def record_played_card(self, game_id: int, role: str, card: str, round_num: int):
         """Добавить сыгранную карту в массив и уменьшить счётчик оставшихся."""
-        game = self.get_active_game_by_id(game_id)
+        game = await self.get_active_game_by_id(game_id)
         if not game:
             logger.warning(f"Game {game_id} not found in record_played_card")
             return
@@ -81,10 +82,10 @@ class CourtService:
             "lawyer": "UPDATE court_games SET played_cards=%s, lawyer_cards_left=lawyer_cards_left-1 WHERE id=%s",
             "witness": "UPDATE court_games SET played_cards=%s, witness_cards_left=witness_cards_left-1 WHERE id=%s",
         }
-        self.db.execute_query(queries_left[role], (json.dumps(played), game_id))
+        await self.db.execute_query(queries_left[role], (json.dumps(played), game_id))
 
-    def get_active_game_by_id(self, game_id: int) -> dict | None:
-        rows = self.db.execute_query(
+    async def get_active_game_by_id(self, game_id: int) -> dict | None:
+        rows = await self.db.execute_query(
             "SELECT id, chat_id, defendant, crime, prosecutor_id, lawyer_id, witness_id, "
             "prosecutor_cards, lawyer_cards, witness_cards, played_cards, current_round, "
             "prosecutor_cards_left, lawyer_cards_left, witness_cards_left, status, "
@@ -106,36 +107,36 @@ class CourtService:
             "last_judge_msg_id": r[17],
         }
 
-    def advance_round(self, game_id: int, new_round: int):
-        self.db.execute_query("UPDATE court_games SET current_round=%s WHERE id=%s", (new_round, game_id))
+    async def advance_round(self, game_id: int, new_round: int):
+        await self.db.execute_query("UPDATE court_games SET current_round=%s WHERE id=%s", (new_round, game_id))
 
-    def set_phase(self, game_id: int, phase: str):
+    async def set_phase(self, game_id: int, phase: str):
         """Установить текущую фазу игры."""
-        self.db.execute_query(
+        await self.db.execute_query(
             "UPDATE court_games SET current_phase = %s WHERE id = %s",
             (phase, game_id)
         )
 
-    def set_last_judge_msg(self, game_id: int, msg_id: int):
+    async def set_last_judge_msg(self, game_id: int, msg_id: int):
         """Запомнить message_id последнего сообщения судьи."""
-        self.db.execute_query(
+        await self.db.execute_query(
             "UPDATE court_games SET last_judge_msg_id = %s WHERE id = %s",
             (msg_id, game_id)
         )
 
-    def save_verdict(self, game_id: int, verdict: str):
-        self.db.execute_query(
+    async def save_verdict(self, game_id: int, verdict: str):
+        await self.db.execute_query(
             "UPDATE court_games SET verdict=%s, status='finished' WHERE id=%s", (verdict, game_id)
         )
 
-    def log_message(self, game_id: int, role: str, content: str, round_number: int = None):
-        self.db.execute_query(
+    async def log_message(self, game_id: int, role: str, content: str, round_number: int = None):
+        await self.db.execute_query(
             "INSERT INTO court_messages (game_id, role, content, round_number) VALUES (%s, %s, %s, %s)",
             (game_id, role, content, round_number),
         )
 
-    def get_session_messages(self, game_id: int) -> list[dict]:
-        rows = self.db.execute_query(
+    async def get_session_messages(self, game_id: int) -> list[dict]:
+        rows = await self.db.execute_query(
             "SELECT role, content, round_number FROM court_messages WHERE game_id=%s ORDER BY created_at",
             (game_id,),
         )
@@ -178,38 +179,38 @@ class CourtService:
         "Говоришь от первого лица, только на русском. Не выходишь из роли."
     )
 
-    def _call_llm(self, system_prompt: str | None, user_prompt: str) -> str:
+    async def _call_llm(self, system_prompt: str | None, user_prompt: str) -> str:
         """Вызов Ollama (Qwen) с опциональным системным промптом."""
-        import httpx
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
         try:
-            r = httpx.post(
-                f"{Settings.LOCAL_LLM_URL}/api/chat",
-                json={"model": Settings.LOCAL_LLM_MODEL,
-                      "think": False,
-                      "stream": False,
-                      "messages": messages},
-                timeout=180,
-            )
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    f"{Settings.LOCAL_LLM_URL}/api/chat",
+                    json={"model": Settings.LOCAL_LLM_MODEL,
+                          "think": False,
+                          "stream": False,
+                          "messages": messages},
+                    timeout=180,
+                )
             r.raise_for_status()
             return r.json()["message"]["content"].strip()
         except Exception as e:
             logger.error(f"CourtService: Ollama error: {e}")
             return ""
 
-    def _call_judge_llm(self, prompt: str, use_judge_persona: bool = True) -> str:
+    async def _call_judge_llm(self, prompt: str, use_judge_persona: bool = True) -> str:
         system = self.JUDGE_SYSTEM_PROMPT if use_judge_persona else None
-        return self._call_llm(system, prompt)
+        return await self._call_llm(system, prompt)
 
-    def player_argue(self, game_id: int, role: str, card: str, round_num: int) -> str:
+    async def player_argue(self, game_id: int, role: str, card: str, round_num: int) -> str:
         """Генерирует речь игрока при розыгрыше карты (2-3 предложения от роли)."""
-        game = self.get_active_game_by_id(game_id)
+        game = await self.get_active_game_by_id(game_id)
         if not game:
             return ""
-        history = self.get_session_messages(game_id)
+        history = await self.get_session_messages(game_id)
         history_text = "\n".join(f"[{m['role']}] {m['content']}" for m in history[-8:])
         defendant = game["defendant"]
         crime = game["crime"]
@@ -239,12 +240,12 @@ class CourtService:
                 f"и почему это говорит в пользу «{defendant}». Можешь немного путаться в деталях."
             ),
         }
-        speech = self._call_llm(system_prompts[role], user_prompts[role])
+        speech = await self._call_llm(system_prompts[role], user_prompts[role])
         if speech:
-            self.log_message(game_id, role, speech, round_num)
+            await self.log_message(game_id, role, speech, round_num)
         return speech
 
-    def generate_cards(self, defendant: str, crime: str) -> tuple[list, list, list]:
+    async def generate_cards(self, defendant: str, crime: str) -> tuple[list, list, list]:
         """Попросить ИИ сгенерировать 16 карт. Возвращает (prosecutor[8], lawyer[4], witness[4])."""
         prompt = f"""Ты — помощник судьи. Придумай 16 карт для судебного заседания по делу:
 
@@ -284,7 +285,7 @@ class CourtService:
 4. [карта]"""
 
         for attempt in range(3):
-            raw = self._call_llm(None, prompt)
+            raw = await self._call_llm(None, prompt)
             if not raw:
                 logger.warning(f"CourtService: пустой ответ от LLM при генерации карт (попытка {attempt + 1}/3)")
                 continue
@@ -334,12 +335,12 @@ class CourtService:
                 return clean, signal
         return text, None
 
-    def ai_defense_card(self, game_id: int, prosecutor_card: str, round_num: int) -> str:
+    async def ai_defense_card(self, game_id: int, prosecutor_card: str, round_num: int) -> str:
         """Генерирует ответный аргумент AI-защитника на карту прокурора."""
-        game = self.get_active_game_by_id(game_id)
+        game = await self.get_active_game_by_id(game_id)
         if not game:
             return ""
-        history = self.get_session_messages(game_id)
+        history = await self.get_session_messages(game_id)
         history_text = "\n".join(f"[{m['role']}] {m['content']}" for m in history[-8:])
         prompt = (
             f"Контекст заседания:\n{history_text}\n\n"
@@ -347,19 +348,19 @@ class CourtService:
             f"Придумай конкретный контраргумент защиты (1 предложение — как улика или показание). "
             f"Это должен быть ТОЛЬКО сам аргумент, без вводных слов."
         )
-        card = self._call_llm(self.LAWYER_SYSTEM_PROMPT, prompt)
+        card = await self._call_llm(self.LAWYER_SYSTEM_PROMPT, prompt)
         return card or "Защита не имеет возражений."
 
-    def judge_react(self, game_id: int, role: str, card: str, round_num: int) -> tuple[str, str | None]:
+    async def judge_react(self, game_id: int, role: str, card: str, round_num: int) -> tuple[str, str | None]:
         """Короткая реакция судьи после розыгрыша карты.
         Возвращает (текст_для_отображения, сигнал).
         """
-        history = self.get_session_messages(game_id)
+        history = await self.get_session_messages(game_id)
         history_text = "\n".join(f"[{m['role']}] {m['content']}" for m in history[-20:])
 
         role_ru = {"prosecutor": "Прокурор", "lawyer": "Адвокат", "witness": "Свидетель защиты"}[role]
 
-        game = self.get_active_game_by_id(game_id)
+        game = await self.get_active_game_by_id(game_id)
         is_last_round = game and game.get('current_round', 0) >= 4
 
         if role == "prosecutor":
@@ -386,13 +387,13 @@ class CourtService:
 {direction}
 {last_round_note}"""
 
-        raw = self._call_judge_llm(prompt)
+        raw = await self._call_judge_llm(prompt)
         clean, signal = self.parse_judge_signal(raw)
 
         # Retry once if LLM returned empty or no signal tag
         if not raw or signal is None:
             logger.warning(f"[COURT] judge_react: no signal (empty={not raw}), retrying")
-            raw = self._call_judge_llm(prompt)
+            raw = await self._call_judge_llm(prompt)
             clean, signal = self.parse_judge_signal(raw)
 
         # Fallback if still no signal
@@ -406,14 +407,14 @@ class CourtService:
             else:
                 signal = "ПРОКУРОР_ВАШ_ХОД"
 
-        self.log_message(game_id, "judge", clean, round_num)
+        await self.log_message(game_id, "judge", clean, round_num)
         return clean, signal
 
-    def judge_react_to_reply(self, game_id: int, role: str, reply_text: str, round_num: int) -> tuple[str, str | None]:
+    async def judge_react_to_reply(self, game_id: int, role: str, reply_text: str, round_num: int) -> tuple[str, str | None]:
         """Реакция судьи на ответ игрока в диалоге.
         Возвращает (текст_для_отображения, сигнал).
         """
-        history = self.get_session_messages(game_id)
+        history = await self.get_session_messages(game_id)
         history_text = "\n".join(f"[{m['role']}] {m['content']}" for m in history[-20:])
         role_ru = {"prosecutor": "Прокурор", "lawyer": "Адвокат", "witness": "Свидетель защиты"}.get(role, role)
 
@@ -425,18 +426,18 @@ class CourtService:
 Оцени ответ. Если он достаточен — передай ход следующей стороне нужным тегом.
 Если недостаточен — задай уточняющий вопрос с тегом [ВОПРОС]."""
 
-        raw = self._call_judge_llm(prompt)
+        raw = await self._call_judge_llm(prompt)
         clean, signal = self.parse_judge_signal(raw)
 
         if not raw or signal is None:
             logger.warning(f"[COURT] judge_react_to_reply: no signal, retrying")
-            raw = self._call_judge_llm(prompt)
+            raw = await self._call_judge_llm(prompt)
             clean, signal = self.parse_judge_signal(raw)
 
         if not raw or signal is None:
             logger.error(f"[COURT] judge_react_to_reply: fallback after 2 failed LLM calls")
             clean = "Суд принял к сведению. Продолжаем заседание."
-            game = self.get_active_game_by_id(game_id)
+            game = await self.get_active_game_by_id(game_id)
             is_last = game and game.get('current_round', 0) >= 4
             if role == "prosecutor":
                 signal = "ЗАЩИТА_ВАШ_ХОД"
@@ -445,16 +446,16 @@ class CourtService:
             else:
                 signal = "ПРОКУРОР_ВАШ_ХОД"
 
-        self.log_message(game_id, role, reply_text, round_num)
-        self.log_message(game_id, "judge", clean, round_num)
+        await self.log_message(game_id, role, reply_text, round_num)
+        await self.log_message(game_id, "judge", clean, round_num)
         return clean, signal
 
-    def generate_verdict(self, game_id: int, final_statements: dict = None) -> list[str]:
+    async def generate_verdict(self, game_id: int, final_statements: dict = None) -> list[str]:
         """Сгенерировать драматичный многосообщный приговор. Возвращает список из 4 строк."""
-        game = self.get_active_game_by_id(game_id)
+        game = await self.get_active_game_by_id(game_id)
         if not game:
             return ["Игра не найдена."] + [""] * 3
-        messages = self.get_session_messages(game_id)
+        messages = await self.get_session_messages(game_id)
 
         played = game["played_cards"]
         prosecution_plays = [p["card"] for p in played if p["role"] == "prosecutor"]
@@ -503,12 +504,12 @@ class CourtService:
 Будь ироничным — это не совсем обычный суд. Если аргументы обеих сторон примерно равны по нелепости — можешь оправдать по нестандартной причине. Наказание должно звучать как настоящий приговор, но может быть неожиданным или комичным.
 ВАЖНО: в приговоре НЕ используй теги [ВОПРОС], [ФИНАЛ] и другие — строго следуй формату 4 блоков с разделителем ---."""
 
-        raw = self._call_judge_llm(prompt)
+        raw = await self._call_judge_llm(prompt)
         parts = [p.strip() for p in raw.split("---") if p.strip()]
 
         if len(parts) < 4:
             logger.warning(f"[COURT] generate_verdict: got {len(parts)} blocks, retrying")
-            raw = self._call_judge_llm(prompt)
+            raw = await self._call_judge_llm(prompt)
             parts = [p.strip() for p in raw.split("---") if p.strip()]
 
         if len(parts) < 4:

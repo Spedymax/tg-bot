@@ -38,7 +38,7 @@ class ShopHandlers:
         async def show_items(message: Message):
             """Handle /items command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок")
@@ -63,7 +63,7 @@ class ShopHandlers:
         async def show_shop(message: Message):
             """Handle /shop command with inline keyboard"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок")
@@ -89,7 +89,7 @@ class ShopHandlers:
         async def show_items(message: Message):
             """Handle /items command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок")
@@ -115,7 +115,7 @@ class ShopHandlers:
         async def show_statuetki(message: Message):
             """Handle /statuetki command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок")
@@ -165,7 +165,7 @@ class ShopHandlers:
         async def show_statuetki_shop(message: Message):
             """Handle /statuetki_shop command with inline keyboard"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок")
@@ -198,7 +198,7 @@ class ShopHandlers:
         async def show_characteristics(message: Message):
             """Handle /characteristics command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок, используйте /start")
@@ -237,7 +237,7 @@ class ShopHandlers:
         async def upgrade_characteristic(message: Message):
             """Handle /upgrade_char command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок, используйте /start")
@@ -264,7 +264,7 @@ class ShopHandlers:
             await call.message.edit_reply_markup(reply_markup=None)
 
             player_id = call.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
             item_name = call.data.split("_", 2)[2]
             base_price = self.shop_data['prices'].get(item_name, 0)
 
@@ -273,7 +273,7 @@ class ShopHandlers:
 
                 if player.spend_coins(discounted_price):
                     player.add_item(item_name)
-                    await asyncio.to_thread(self.player_service.save_player, player)
+                    await self.player_service.save_player(player)
                     display_name = self.shop_data.get('names', {}).get(item_name, item_name)
                     await self.bot.send_message(call.message.chat.id, f"Вы купили {display_name} за {discounted_price} BTC.")
                 else:
@@ -286,14 +286,14 @@ class ShopHandlers:
             await call.message.edit_reply_markup(reply_markup=None)
 
             player_id = call.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
             item_name = call.data.split("_", 2)[2]
             item_price = self.statuetki_data['prices'].get(item_name, 0)
 
             if player and item_price > 0:
                 if player.spend_coins(item_price):
                     player.statuetki.append(item_name)
-                    await asyncio.to_thread(self.player_service.save_player, player)
+                    await self.player_service.save_player(player)
                     await self.bot.send_message(call.message.chat.id, f"Вы купили {item_name} за {item_price} BTC.")
                 else:
                     await self.bot.send_message(call.message.chat.id, "Недостаточно денег((")
@@ -302,7 +302,7 @@ class ShopHandlers:
         async def handle_statuetki_purchase(call: CallbackQuery):
             """Handle statuetki purchase from inline keyboard"""
             player_id = call.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await call.answer("Вы не зарегистрированы как игрок")
@@ -343,7 +343,7 @@ class ShopHandlers:
         async def handle_shop_purchase(call: CallbackQuery):
             """Handle shop purchase from inline keyboard"""
             player_id = call.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await call.answer("Вы не зарегистрированы как игрок")
@@ -407,7 +407,7 @@ class ShopHandlers:
             await call.answer()
             chat_id = call.message.chat.id
             player_id = call.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await self.bot.send_message(chat_id, "Игрок не найден")
@@ -416,8 +416,7 @@ class ShopHandlers:
             call_data = call.data.split("_")
             selected_characteristic, levels_to_upgrade = call_data[1], int(call_data[2])
 
-            result = await asyncio.to_thread(
-                self.game_service.upgrade_characteristic,
+            result = await self.game_service.upgrade_characteristic(
                 player, selected_characteristic.split(":")[0], levels_to_upgrade
             )
 
@@ -433,22 +432,26 @@ class ShopHandlers:
             from config.settings import ADMIN_IDS
             if message.from_user.id in ADMIN_IDS:
                 try:
-                    conn = self.player_service.get_connection()
-                    cursor = conn.cursor()
+                    async with self.player_service.db.connection() as conn:
+                        cursor = await conn.execute("SELECT company_name, price FROM stocks")
+                        rows = await cursor.fetchall()
+                        old_stock_data = {row[0]: row[1] for row in rows}
 
-                    old_stock_data = self.stock_service.get_stock_data(cursor)
-                    self.stock_service.update_stock_prices(cursor)
-                    conn.commit()
-                    new_stock_data = self.stock_service.get_stock_data(cursor)
+                        for company, old_price in old_stock_data.items():
+                            change_percent = random.uniform(-0.1, 0.4)
+                            new_price = round(old_price * (1 + change_percent), 2) or 1
+                            await conn.execute("UPDATE stocks SET price = %s WHERE company_name = %s", (new_price, company))
+                        await conn.commit()
+
+                        cursor = await conn.execute("SELECT company_name, price FROM stocks")
+                        rows = await cursor.fetchall()
+                        new_stock_data = {row[0]: row[1] for row in rows}
 
                     stock_message = "Акции компаний на данный момент:\n\n"
                     for company, new_price in new_stock_data.items():
                         old_price = old_stock_data.get(company, new_price)
                         change, arrow = self.stock_service.calculate_price_change(old_price, new_price)
                         stock_message += f"{company}: {new_price} BTC ({abs(change):.2f}% {arrow})\n"
-
-                    cursor.close()
-                    conn.close()
 
                     await self.bot.send_message(message.chat.id, stock_message)
                     await self.bot.send_message(
@@ -464,17 +467,12 @@ class ShopHandlers:
         async def current_stocks(message: Message):
             """Handle /current_stocks command"""
             try:
-                conn = self.player_service.get_connection()
-                cursor = conn.cursor()
-
-                stock_data = self.stock_service.get_stock_data(cursor)
+                async with self.player_service.db.connection() as conn:
+                    cursor = await conn.execute("SELECT company_name, price FROM stocks")
+                    rows = await cursor.fetchall()
                 stock_message = "Акции компаний на данный момент:\n\n"
-                for company, price in stock_data.items():
+                for company, price in rows:
                     stock_message += f"{company}: {price} BTC\n"
-
-                cursor.close()
-                conn.close()
-
                 await message.reply(stock_message)
             except Exception as e:
                 await message.reply(f"Ошибка получения данных об акциях: {str(e)}")
@@ -483,7 +481,7 @@ class ShopHandlers:
         async def my_stocks(message: Message):
             """Handle /my_stocks command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок, используйте /start")
@@ -494,25 +492,20 @@ class ShopHandlers:
                 return
 
             try:
-                conn = self.player_service.get_connection()
-                cursor = conn.cursor()
-
                 stocks_text = "Ваши акции:\n"
-                for stock in player.player_stocks:
-                    company_name, quantity = stock.split(":")
-                    cursor.execute("SELECT price FROM stocks WHERE company_name = %s", (company_name,))
-                    result = cursor.fetchone()
+                async with self.player_service.db.connection() as conn:
+                    for stock in player.player_stocks:
+                        company_name, quantity = stock.split(":")
+                        cursor = await conn.execute("SELECT price FROM stocks WHERE company_name = %s", (company_name,))
+                        result = await cursor.fetchone()
 
-                    if result:
-                        quantity = int(quantity)
-                        stock_price = result[0]
-                        total_cost = stock_price * quantity
-                        stocks_text += f"Компания {company_name}, кол-во акций: {quantity}\nЦена ваших активов компании {company_name}: {total_cost}\n\n"
-                    else:
-                        stocks_text += f"Компания {company_name} не найдена\n"
-
-                cursor.close()
-                conn.close()
+                        if result:
+                            quantity = int(quantity)
+                            stock_price = result[0]
+                            total_cost = stock_price * quantity
+                            stocks_text += f"Компания {company_name}, кол-во акций: {quantity}\nЦена ваших активов компании {company_name}: {total_cost}\n\n"
+                        else:
+                            stocks_text += f"Компания {company_name} не найдена\n"
 
                 await message.reply(stocks_text)
             except Exception as e:
@@ -530,7 +523,7 @@ class ShopHandlers:
         async def sell_stocks(message: Message):
             """Handle /sell_stocks command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player or not hasattr(player, 'player_stocks') or not player.player_stocks:
                 await self.bot.send_message(message.chat.id, "Ты бомж, у тебя вообще нету акций.")
@@ -578,19 +571,17 @@ class ShopHandlers:
                 quantity = int(message.text)
                 company = data['company']
 
-                player = await asyncio.to_thread(self.player_service.get_player, message.from_user.id)
+                player = await self.player_service.get_player(message.from_user.id)
                 if not player:
                     await message.reply("Игрок не найден")
                     return
 
-                conn = self.player_service.get_connection()
-                cursor = conn.cursor()
-
-                cursor.execute("SELECT price FROM stocks WHERE company_name = %s", (company,))
-                result = cursor.fetchone()
-                if not result:
-                    await message.reply(f"Company {company} not found.")
-                    return
+                async with self.player_service.db.connection() as conn:
+                    cursor = await conn.execute("SELECT price FROM stocks WHERE company_name = %s", (company,))
+                    result = await cursor.fetchone()
+                    if not result:
+                        await message.reply(f"Company {company} not found.")
+                        return
 
                 stock_price = result[0]
                 total_cost = stock_price * quantity
@@ -609,10 +600,7 @@ class ShopHandlers:
 
                 player.spend_coins(int(cost))
                 player.player_stocks = list(updated_stocks)
-                await asyncio.to_thread(self.player_service.save_player, player)
-
-                cursor.close()
-                conn.close()
+                await self.player_service.save_player(player)
 
                 await message.reply(f"Мои поздравления! Вы купили {quantity} акций компании {company}.")
 
@@ -628,7 +616,7 @@ class ShopHandlers:
                 quantity = int(message.text)
                 company = data['company_to_sell']
 
-                player = await asyncio.to_thread(self.player_service.get_player, message.from_user.id)
+                player = await self.player_service.get_player(message.from_user.id)
                 if not player:
                     await message.reply("Игрок не найден")
                     return
@@ -648,14 +636,12 @@ class ShopHandlers:
                     await message.reply(f"У вас нет столько акций. У вас {current_quantity} акций.")
                     return
 
-                conn = self.player_service.get_connection()
-                cursor = conn.cursor()
-
-                cursor.execute("SELECT price FROM stocks WHERE company_name = %s", (company,))
-                result = cursor.fetchone()
-                if not result:
-                    await message.reply(f"Company {company} not found.")
-                    return
+                async with self.player_service.db.connection() as conn:
+                    cursor = await conn.execute("SELECT price FROM stocks WHERE company_name = %s", (company,))
+                    result = await cursor.fetchone()
+                    if not result:
+                        await message.reply(f"Company {company} not found.")
+                        return
 
                 current_price = result[0]
 
@@ -666,10 +652,7 @@ class ShopHandlers:
 
                 player.add_coins(int(abs(earnings)))
                 player.player_stocks = list(updated_stocks)
-                await asyncio.to_thread(self.player_service.save_player, player)
-
-                cursor.close()
-                conn.close()
+                await self.player_service.save_player(player)
 
                 await message.reply(f"Вы успешно продали {quantity} акций компании {company}.\nИ вы заработали: {abs(earnings)}")
 
@@ -726,7 +709,7 @@ class ShopHandlers:
                 new_characteristic = f"{selected_characteristic}:1"
                 player.characteristics.append(new_characteristic)
 
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
 
             characteristic_description = char_data['description'][selected_characteristic]
             final_message = f"🎉 Поздравляем! Вы получили новую характеристику: **{selected_characteristic}**\n\n"
@@ -740,4 +723,4 @@ class ShopHandlers:
         except Exception as e:
             await self.bot.send_message(message.chat.id, f"Произошла ошибка во время особого события: {str(e)}")
             player.statuetki.clear()
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)

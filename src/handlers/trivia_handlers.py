@@ -69,7 +69,7 @@ class TriviaHandlers:
                 await status_msg.edit_text("❌ Планировщик квизов не инициализирован.")
                 return
 
-            result = await asyncio.to_thread(self.quiz_scheduler.refill_question_pool, count)
+            result = await self.quiz_scheduler.refill_question_pool(count)
             await status_msg.edit_text(
                 f"✅ Готово!\n\n"
                 f"Добавлено в пул: {result['added']}\n"
@@ -158,16 +158,16 @@ class TriviaHandlers:
             # Try pool first, fall back to AI
             question_id = None
             question_data = None
-            result = await asyncio.to_thread(self.trivia_service.get_unused_question_for_chat, chat_id)
+            result = await self.trivia_service.get_unused_question_for_chat(chat_id)
             if result is not None:
                 question_id, question_data = result
                 logger.info(f"Reusing pooled question id={question_id} for /trivia in chat {chat_id}")
             else:
                 logger.info(f"Pool exhausted for chat {chat_id}, generating batch of 30 via AI for /trivia")
                 if self.quiz_scheduler:
-                    refill = await asyncio.to_thread(self.quiz_scheduler.refill_question_pool, 30)
+                    refill = await self.quiz_scheduler.refill_question_pool(30)
                     logger.info(f"Batch refill: {refill['added']} added, {refill['skipped']} skipped")
-                    result = await asyncio.to_thread(self.trivia_service.get_unused_question_for_chat, chat_id)
+                    result = await self.trivia_service.get_unused_question_for_chat(chat_id)
                     if result is not None:
                         question_id, question_data = result
 
@@ -195,9 +195,9 @@ class TriviaHandlers:
             # Record in history so this question won't be repeated for this chat
             if question_id is None:
                 # AI-generated: look up the id by text
-                question_id = self.quiz_scheduler._get_question_id_by_text(question_text) if self.quiz_scheduler else None
+                question_id = await self.quiz_scheduler._get_question_id_by_text(question_text) if self.quiz_scheduler else None
             if question_id is not None:
-                await asyncio.to_thread(self.trivia_service.record_question_sent_to_chat, question_id, chat_id)
+                await self.trivia_service.record_question_sent_to_chat(question_id, chat_id)
 
         except Exception as e:
             await self.bot.send_message(chat_id, f'Ошибка при создании вопроса: {e}')
@@ -226,7 +226,7 @@ class TriviaHandlers:
         }
 
         self.question_messages[question_msg.message_id] = question_data
-        await asyncio.to_thread(self.save_question_state, question_msg.message_id, question, {}, answer_options)
+        await self.save_question_state(question_msg.message_id, question, {}, answer_options)
 
     async def handle_answer_callback(self, call: CallbackQuery):
         """Handle trivia answer selection"""
@@ -242,7 +242,7 @@ class TriviaHandlers:
                 question_data = self.question_messages[message_id]
             else:
                 # Load from database
-                question_data = await asyncio.to_thread(self.load_question_state_from_db, message_id)
+                question_data = await self.load_question_state_from_db(message_id)
                 if question_data:
                     # Store in memory for future use
                     self.question_messages[message_id] = question_data
@@ -265,24 +265,21 @@ class TriviaHandlers:
             selected_answer = question_data["options"][answer_index]
 
             # Check if answer is correct
-            connection = None
             is_correct = False
             try:
-                connection = self.db_manager.get_connection()
-                with connection.cursor() as cursor:
-                    cursor.execute(
+                async with self.db_manager.connection() as conn:
+                    cursor = await conn.execute(
                         "SELECT correct_answer FROM questions WHERE question = %s ORDER BY date_added DESC LIMIT 1",
                         (question_data["text"],)
                     )
-                    result = cursor.fetchone()
+                    result = await cursor.fetchone()
                     if result:
                         is_correct = result[0] == selected_answer
-            finally:
-                if connection:
-                    self.db_manager.release_connection(connection)
+            except Exception as e:
+                logger.error(f"Error checking correct answer: {e}")
 
             # Халява ulta override: force correct BEFORE emoji and response are recorded
-            player = await asyncio.to_thread(self.player_service.get_player, user_id)
+            player = await self.player_service.get_player(user_id)
             if player and getattr(player, 'pet_ulta_trivia_pending', False):
                 player.pet_ulta_trivia_pending = False
                 is_correct = True
@@ -301,8 +298,7 @@ class TriviaHandlers:
             await self.update_question_message(call.message, question_data)
 
             # Update question state in database
-            await asyncio.to_thread(
-                self.save_question_state,
+            await self.save_question_state(
                 message_id,
                 question_data["text"],
                 question_data["players_responses"],
@@ -312,7 +308,7 @@ class TriviaHandlers:
             # Update player score if correct
             if is_correct:
                 if not player:
-                    player = await asyncio.to_thread(self.player_service.get_player, user_id)
+                    player = await self.player_service.get_player(user_id)
                 if player:
                     chat_id = call.message.chat.id
                     current_score = player.get_quiz_score(chat_id)
@@ -344,14 +340,14 @@ class TriviaHandlers:
                         await self.bot.send_message(chat_id, f"🍖 {player.player_name} получил +1 корм для питомца!", disable_notification=True)
 
                     self._maybe_send_death_notice(chat_id, player)
-                    await asyncio.to_thread(self.player_service.save_player, player)
+                    await self.player_service.save_player(player)
             else:
                 # Reset streak on wrong answer
                 if not player:
-                    player = await asyncio.to_thread(self.player_service.get_player, user_id)
+                    player = await self.player_service.get_player(user_id)
                 if player and getattr(player, 'trivia_streak', 0) > 0:
                     player.trivia_streak = 0
-                    await asyncio.to_thread(self.player_service.save_player, player)
+                    await self.player_service.save_player(player)
 
         except Exception as e:
             print(f"Error in answer callback: {e}")
@@ -384,12 +380,10 @@ class TriviaHandlers:
         except Exception as e:
             print(f"Error updating question message: {e}")
 
-    def save_question_state(self, message_id, question, players_responses, answer_options=None):
+    async def save_question_state(self, message_id, question, players_responses, answer_options=None):
         """Save question state to database"""
-        connection = None
         try:
-            connection = self.db_manager.get_connection()
-            with connection.cursor() as cursor:
+            async with self.db_manager.connection() as conn:
                 data_to_save = {
                     "players_responses": players_responses
                 }
@@ -398,42 +392,35 @@ class TriviaHandlers:
                     data_to_save["options"] = answer_options
 
                 # Check if record exists
-                cursor.execute(
+                cursor = await conn.execute(
                     "SELECT 1 FROM question_state WHERE message_id = %s",
                     (message_id,)
                 )
 
-                if cursor.fetchone():
+                if await cursor.fetchone():
                     # Update existing record
-                    cursor.execute(
+                    await conn.execute(
                         "UPDATE question_state SET original_question = %s, players_responses = %s WHERE message_id = %s",
                         (question, json.dumps(data_to_save), message_id)
                     )
                 else:
                     # Insert new record
-                    cursor.execute(
+                    await conn.execute(
                         "INSERT INTO question_state (message_id, original_question, players_responses) VALUES (%s, %s, %s)",
                         (message_id, question, json.dumps(data_to_save))
                     )
-
-                connection.commit()
         except Exception as e:
             print(f"Error saving question state: {e}")
-        finally:
-            if connection:
-                self.db_manager.release_connection(connection)
 
-    def load_question_state_from_db(self, message_id):
+    async def load_question_state_from_db(self, message_id):
         """Load question state from database"""
-        connection = None
         try:
-            connection = self.db_manager.get_connection()
-            with connection.cursor() as cursor:
-                cursor.execute(
+            async with self.db_manager.connection() as conn:
+                cursor = await conn.execute(
                     "SELECT original_question, players_responses FROM question_state WHERE message_id = %s",
                     (message_id,)
                 )
-                result = cursor.fetchone()
+                result = await cursor.fetchone()
 
                 if result:
                     question_text, players_responses_json = result
@@ -480,20 +467,15 @@ class TriviaHandlers:
         except Exception as e:
             print(f"Error loading question state: {e}")
             return None
-        finally:
-            if connection:
-                self.db_manager.release_connection(connection)
 
     async def get_correct_answers(self, message: Message):
         """Show today's questions with correct answers"""
-        connection = None
         try:
-            connection = self.db_manager.get_connection()
             chat_id = message.chat.id
 
-            with connection.cursor() as cursor:
+            async with self.db_manager.connection() as conn:
                 # Get today's questions that were actually sent to this chat
-                cursor.execute(
+                cursor = await conn.execute(
                     "SELECT q.question, q.correct_answer, q.explanation, h.sent_at "
                     "FROM questions q "
                     "JOIN chat_question_history h ON h.question_id = q.id AND h.chat_id = %s "
@@ -501,138 +483,110 @@ class TriviaHandlers:
                     "ORDER BY h.sent_at ASC",
                     (chat_id,)
                 )
+                today_questions = await cursor.fetchall()
 
-                today_questions = cursor.fetchall()
+            if not today_questions:
+                await message.reply("📋 Сегодня вопросов еще не было!")
+                return
 
-                if not today_questions:
-                    await message.reply("📋 Сегодня вопросов еще не было!")
-                    return
+            # Get player scores for this chat
+            scores_text = await self.get_player_scores_for_chat(chat_id)
 
-                # Get player scores for this chat
-                scores_text = self.get_player_scores_for_chat(chat_id)
+            # Build response message
+            response_text = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
 
-                # Build response message
-                response_text = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
+            for i, (question, correct_answer, explanation, sent_at) in enumerate(today_questions, 1):
+                time_str = sent_at.strftime('%H:%M') if sent_at else 'N/A'
+                response_text += f"<b>{i}.</b> {question}\n"
+                response_text += f"✅ <b>Ответ:</b> {correct_answer}\n"
+                if explanation:
+                    response_text += f"💡 <i>{explanation}</i>\n"
+                response_text += f"⏰ {time_str}\n\n"
+
+            # Add player scores
+            if scores_text:
+                response_text += "\n🏆 <b>Очки игроков:</b>\n" + scores_text
+
+            # Split message if too long
+            max_length = 4000
+            if len(response_text) > max_length:
+                parts = []
+                current_part = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
 
                 for i, (question, correct_answer, explanation, sent_at) in enumerate(today_questions, 1):
                     time_str = sent_at.strftime('%H:%M') if sent_at else 'N/A'
-                    response_text += f"<b>{i}.</b> {question}\n"
-                    response_text += f"✅ <b>Ответ:</b> {correct_answer}\n"
+                    question_text = f"<b>{i}.</b> {question}\n"
+                    question_text += f"✅ <b>Ответ:</b> {correct_answer}\n"
                     if explanation:
-                        response_text += f"💡 <i>{explanation}</i>\n"
-                    response_text += f"⏰ {time_str}\n\n"
+                        question_text += f"💡 <i>{explanation}</i>\n"
+                    question_text += f"⏰ {time_str}\n\n"
 
-                # Add player scores
-                if scores_text:
-                    response_text += "\n🏆 <b>Очки игроков:</b>\n" + scores_text
-
-                # Split message if too long
-                max_length = 4000
-                if len(response_text) > max_length:
-                    parts = []
-                    current_part = "📋 <b>Сегодняшние вопросы и ответы:</b>\n\n"
-
-                    for i, (question, correct_answer, explanation, sent_at) in enumerate(today_questions, 1):
-                        time_str = sent_at.strftime('%H:%M') if sent_at else 'N/A'
-                        question_text = f"<b>{i}.</b> {question}\n"
-                        question_text += f"✅ <b>Ответ:</b> {correct_answer}\n"
-                        if explanation:
-                            question_text += f"💡 <i>{explanation}</i>\n"
-                        question_text += f"⏰ {time_str}\n\n"
-
-                        if len(current_part + question_text) > max_length:
-                            parts.append(current_part)
-                            current_part = question_text
-                        else:
-                            current_part += question_text
-
-                    if current_part:
+                    if len(current_part + question_text) > max_length:
                         parts.append(current_part)
+                        current_part = question_text
+                    else:
+                        current_part += question_text
 
-                    # Send all parts
-                    for part in parts:
-                        await message.reply(part, parse_mode='HTML')
-                else:
-                    await message.reply(response_text, parse_mode='HTML')
+                if current_part:
+                    parts.append(current_part)
+
+                # Send all parts
+                for part in parts:
+                    await message.reply(part, parse_mode='HTML')
+            else:
+                await message.reply(response_text, parse_mode='HTML')
 
         except Exception as e:
             print(f"Error getting correct answers: {e}")
             await message.reply("❌ Произошла ошибка при получении вопросов")
-        finally:
-            if connection:
-                self.db_manager.release_connection(connection)
 
     def load_trivia_data(self):
-        """Load trivia data from database"""
-        connection = None
-        try:
-            connection = self.db_manager.get_connection()
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT * FROM questions ORDER BY date_added DESC")
-                return [{
-                    'question': row[0],
-                    'correct_answer': row[1],
-                    'date_added': row[3].strftime('%d-%m-%Y %H:%M') if row[3] else 'Unknown'
-                } for row in cursor.fetchall()]
-        except Exception as e:
-            print(f"Error loading trivia data: {e}")
-            return []
-        finally:
-            if connection:
-                self.db_manager.release_connection(connection)
+        """Load trivia data from database — legacy sync stub, not used in async flow."""
+        logger.warning("load_trivia_data() is a legacy sync stub and cannot access the async DB")
+        return []
 
-    def get_player_scores_for_chat(self, chat_id):
+    async def get_player_scores_for_chat(self, chat_id):
         """Get player scores for specific chat"""
-        connection = None
         try:
-            connection = self.db_manager.get_connection()
+            async with self.db_manager.connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT player_id, player_name, correct_answers FROM pisunchik_data"
+                )
+                players_data = await cursor.fetchall()
 
-            try:
-                with connection.cursor() as cursor:
-                    # Get all players from pisunchik_data table
-                    cursor.execute("SELECT player_id, player_name, correct_answers FROM pisunchik_data")
-                    players_data = cursor.fetchall()
+            scores = []
+            chat_id_str = str(chat_id)
 
-                    scores = []
-                    chat_id_str = str(chat_id)
+            for player_id, player_name, correct_answers in players_data:
+                if not correct_answers:
+                    continue
 
-                    for player_id, player_name, correct_answers in players_data:
-                        if not correct_answers:
+                # Parse correct_answers array to find score for this chat
+                score_for_chat = 0
+                for score_entry in correct_answers:
+                    if score_entry.startswith(f"{chat_id_str}:"):
+                        try:
+                            score_for_chat = int(score_entry.split(":")[1])
+                            break
+                        except (ValueError, IndexError):
                             continue
 
-                        # Parse correct_answers array to find score for this chat
-                        score_for_chat = 0
-                        for score_entry in correct_answers:
-                            if score_entry.startswith(f"{chat_id_str}:"):
-                                try:
-                                    score_for_chat = int(score_entry.split(":")[1])
-                                    break
-                                except (ValueError, IndexError):
-                                    continue
+                if score_for_chat > 0:
+                    name = player_name or f"Player {player_id}"
+                    scores.append((name, score_for_chat))
 
-                        if score_for_chat > 0:
-                            name = player_name or f"Player {player_id}"
-                            scores.append((name, score_for_chat))
+            # Sort by score descending
+            scores.sort(key=lambda x: x[1], reverse=True)
 
-                    # Sort by score descending
-                    scores.sort(key=lambda x: x[1], reverse=True)
-
-                    if scores:
-                        scores_text = ""
-                        for i, (name, score) in enumerate(scores, 1):
-                            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🔸"
-                            scores_text += f"{medal} {name}: {score} очков\n"
-                        return scores_text
-                    else:
-                        return "Пока никто не набрал очков в этом чате."
-
-            finally:
-                if connection:
-                    self.db_manager.release_connection(connection)
+            if scores:
+                scores_text = ""
+                for i, (name, score) in enumerate(scores, 1):
+                    medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🔸"
+                    scores_text += f"{medal} {name}: {score} очков\n"
+                return scores_text
+            else:
+                return "Пока никто не набрал очков в этом чате."
 
         except Exception as e:
             print(f"Error getting player scores: {e}")
             return "Ошибка при получении очков."
-        finally:
-            if connection:
-                self.db_manager.release_connection(connection)

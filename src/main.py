@@ -45,8 +45,9 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    # ── Core services (unchanged from old architecture) ──────────────────────
+    # ── Core services (async database pool) ──────────────────────────────────
     db_manager = DatabaseManager()
+    await db_manager.init_pool()
     player_service = PlayerService(db_manager)
     game_service = GameService(player_service)
 
@@ -142,7 +143,7 @@ async def main():
         await dp.start_polling(bot)
     finally:
         await redis.aclose()
-        db_manager.close_all_connections()
+        await db_manager.close_all_connections()
         logger.info("Shutdown complete")
 
 

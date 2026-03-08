@@ -4,7 +4,6 @@ Handlers for mini-app integration
 """
 
 import logging
-import asyncio
 import json
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
@@ -28,7 +27,7 @@ class MiniAppHandlers:
         async def casino_app(message: Message):
             """Handle /casino_app command to launch mini-app"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок, используйте /start")
@@ -64,7 +63,7 @@ class MiniAppHandlers:
         async def casino_status(message: Message):
             """Handle /casino_status command to check daily limits"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок, используйте /start")
@@ -118,7 +117,7 @@ class MiniAppHandlers:
         """Handle casino game result"""
         try:
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Игрок не найден")
@@ -136,7 +135,7 @@ class MiniAppHandlers:
             player.daily_spins = spins_used
 
             # Save the updated player
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
 
             # Send confirmation message
             result_message = f"🎰 **Результат игры в казино** 🎰\\n\\n"
@@ -158,7 +157,7 @@ class MiniAppHandlers:
         """Handle end of casino session"""
         try:
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 return
@@ -173,7 +172,7 @@ class MiniAppHandlers:
                 player.daily_spins = 0
             player.daily_spins = total_spins
 
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
 
             # Send session summary
             summary_message = f"🎰 **Итоги сессии в казино** 🎰\\n\\n"

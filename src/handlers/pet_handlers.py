@@ -1,5 +1,4 @@
 import logging
-import asyncio
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -45,7 +44,7 @@ class PetHandlers:
             except Exception:
                 pass
 
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if not player:
             await self.bot.send_message(chat_id, "Вы не зарегистрированы как игрок.")
             return
@@ -56,7 +55,7 @@ class PetHandlers:
             now = datetime.now(timezone.utc)
             self.pet_service.apply_hunger_decay(player, now)
             self.pet_service.apply_happiness_decay(player, now)
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
 
         pet = getattr(player, 'pet', None)
 
@@ -216,7 +215,7 @@ class PetHandlers:
     async def show_feed_menu(self, call: CallbackQuery):
         """Show food selection menu."""
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if not player or not player.pet:
             await call.answer()
             return
@@ -248,7 +247,7 @@ class PetHandlers:
         """Feed the pet with selected food item."""
         from datetime import datetime, timezone
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if not player or not player.pet:
             await call.answer("Питомец не найден")
             return
@@ -270,7 +269,7 @@ class PetHandlers:
         if effect['happiness'] > 0:
             player.pet_happiness = min(100, getattr(player, 'pet_happiness', 50) + effect['happiness'])
 
-        await asyncio.to_thread(self.player_service.save_player, player)
+        await self.player_service.save_player(player)
         await call.answer(f"🐾 {effect['name']} съеден!")
         await self.show_pet_menu(call.message.chat.id, user_id,
                                  delete_message_id=call.message.message_id)
@@ -281,13 +280,13 @@ class PetHandlers:
 
     async def create_pet(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if not player:
             await call.answer("Игрок не найден")
             return
 
         player.pet = self.pet_service.create_pet("Новый питомец")
-        await asyncio.to_thread(self.player_service.save_player, player)
+        await self.player_service.save_player(player)
         await call.answer("Питомец создан!")
         await self.show_pet_menu(call.message.chat.id, user_id,
                                  delete_message_id=call.message.message_id)
@@ -308,10 +307,10 @@ class PetHandlers:
         user_id = message.from_user.id
         new_name = message.text.strip()[:50]
 
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if player and player.pet:
             player.pet['name'] = escape_html(new_name)
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
             await self.bot.send_message(message.chat.id, f"Имя изменено на: {new_name}")
 
         await self.show_pet_menu(message.chat.id, user_id)
@@ -328,10 +327,10 @@ class PetHandlers:
             return
 
         file_id = message.photo[-1].file_id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if player and player.pet:
             player.pet['image_file_id'] = file_id
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
             await self.bot.send_message(message.chat.id, "Фото обновлено!")
 
         await self.show_pet_menu(message.chat.id, user_id)
@@ -342,10 +341,10 @@ class PetHandlers:
 
     async def confirm_pet(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if player and player.pet:
             player.pet['is_locked'] = True
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
             await call.answer("Питомец подтверждён! Теперь он будет расти.")
 
         await self.show_pet_menu(call.message.chat.id, user_id,
@@ -357,7 +356,7 @@ class PetHandlers:
 
     async def revive_pet(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
 
         if not player or not player.pet:
             await call.answer("Питомец не найден")
@@ -374,7 +373,7 @@ class PetHandlers:
             player.pet = pet
             player.pet_revives_used = new_revives
             player.pet_revives_reset_date = new_reset
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
             await call.answer("Питомец возрождён!")
         else:
             await call.answer("Нет возрождений на этот месяц!")
@@ -395,10 +394,10 @@ class PetHandlers:
 
     async def kill_pet(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if player and player.pet:
             player.pet = self.pet_service.kill_pet(player.pet)
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
             await call.answer("Питомец умер 💀")
 
         await self.show_pet_menu(call.message.chat.id, user_id,
@@ -418,10 +417,10 @@ class PetHandlers:
 
     async def delete_pet(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if player:
             player.pet = None
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
             await call.answer("Питомец удалён")
 
         await self.show_pet_menu(call.message.chat.id, user_id,
@@ -433,7 +432,7 @@ class PetHandlers:
 
     async def show_titles(self, call: CallbackQuery):
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
 
         if not player:
             await call.answer()
@@ -470,14 +469,14 @@ class PetHandlers:
     async def select_title(self, call: CallbackQuery, idx: int):
         """Activate title by index."""
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
 
         if player:
             titles = getattr(player, 'pet_titles', [])
             if 0 <= idx < len(titles):
                 title = titles[idx]
                 player.pet_active_title = title
-                await asyncio.to_thread(self.player_service.save_player, player)
+                await self.player_service.save_player(player)
                 await call.answer(f"Титул «{title}» активирован!")
             else:
                 await call.answer("Титул не найден")
@@ -493,7 +492,7 @@ class PetHandlers:
     async def activate_ulta(self, call: CallbackQuery):
         """Dispatch to stage-specific ulta handler."""
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if not player or not player.pet:
             await call.answer("Питомец не найден")
             return
@@ -527,7 +526,7 @@ class PetHandlers:
         """Egg ulta: +2 casino attempts today."""
         player.pet_casino_extra_spins = getattr(player, 'pet_casino_extra_spins', 0) + 2
         self.pet_service.mark_ulta_used(player)
-        await asyncio.to_thread(self.player_service.save_player, player)
+        await self.player_service.save_player(player)
         await call.answer("🎰 Казино+: +2 попытки казино сегодня!", show_alert=True)
         await self.show_pet_menu(call.message.chat.id, call.from_user.id,
                                  delete_message_id=call.message.message_id)
@@ -536,7 +535,7 @@ class PetHandlers:
         """Baby ulta: next roll is free."""
         player.pet_ulta_free_roll_pending = True
         self.pet_service.mark_ulta_used(player)
-        await asyncio.to_thread(self.player_service.save_player, player)
+        await self.player_service.save_player(player)
         await call.answer(
             "🎲 Халявный ролл активирован! Следующий /roll бесплатный.",
             show_alert=True
@@ -550,7 +549,7 @@ class PetHandlers:
         player.pet_ulta_oracle_pending = True
         player.pet_ulta_oracle_preview = preview
         self.pet_service.mark_ulta_used(player)
-        await asyncio.to_thread(self.player_service.save_player, player)
+        await self.player_service.save_player(player)
         await call.answer()
 
         markup = InlineKeyboardMarkup(inline_keyboard=[[
@@ -574,7 +573,7 @@ class PetHandlers:
         """Legendary ulta: auto-correct next trivia answer."""
         player.pet_ulta_trivia_pending = True
         self.pet_service.mark_ulta_used(player)
-        await asyncio.to_thread(self.player_service.save_player, player)
+        await self.player_service.save_player(player)
         await call.answer(
             "✅ Халява активирована! Следующий вопрос викторины засчитается автоматически.",
             show_alert=True
@@ -586,7 +585,7 @@ class PetHandlers:
         """Oracle: player confirmed — apply the stored preview result."""
         from datetime import datetime, timezone
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if not player or not player.pet_ulta_oracle_preview:
             await call.answer("Предсказание устарело")
             await self._dismiss_and_reopen(call)
@@ -598,7 +597,7 @@ class PetHandlers:
         player.pisunchik_size += preview['size_change']
         player.add_coins(preview['coins_change'])
         player.last_used = datetime.now(timezone.utc)
-        await asyncio.to_thread(self.player_service.save_player, player)
+        await self.player_service.save_player(player)
 
         await call.answer()
         sign = '+' if preview['size_change'] >= 0 else ''
@@ -616,11 +615,11 @@ class PetHandlers:
     async def oracle_cancel(self, call: CallbackQuery):
         """Oracle: player skipped — no cooldown refund (ulta was already used)."""
         user_id = call.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, user_id)
+        player = await self.player_service.get_player(user_id)
         if player:
             player.pet_ulta_oracle_pending = False
             player.pet_ulta_oracle_preview = None
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
         await call.answer("Пропущено. Писюнчик не брошен.")
         await self.show_pet_menu(call.message.chat.id, user_id,
                                  delete_message_id=call.message.message_id)

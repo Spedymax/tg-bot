@@ -45,7 +45,7 @@ class GameHandlers:
         async def start_command(message: Message, state: FSMContext):
             """Show profile or begin registration"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if player:
                 await message.reply(
@@ -93,7 +93,7 @@ class GameHandlers:
             parts = call.data.split("_", 3)  # reg_approve_<id>_<name>
             player_id = int(parts[2])
             name = parts[3] if len(parts) > 3 else "Unknown"
-            await asyncio.to_thread(self.player_service.create_player, player_id, name)
+            await self.player_service.create_player(player_id, name)
             await self.bot.send_message(player_id, f"Приятной игры, {name}! Вы зарегистрированы!")
             await call.message.edit_text(f"Регистрация {name} одобрена.")
 
@@ -109,7 +109,7 @@ class GameHandlers:
         @self.router.message(Command('leaderboard'))
         async def leaderboard_command(message: Message):
             """Show top 5 players"""
-            top_players = await asyncio.to_thread(self.player_service.get_leaderboard, 5)
+            top_players = await self.player_service.get_leaderboard(5)
             text = "🏆 Большой член, большие яйца 🏆\n\n"
             for i, player in enumerate(top_players):
                 try:
@@ -124,34 +124,34 @@ class GameHandlers:
         async def pisunchik_command(message: Message):
             """Handle /pisunchik command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок, используйте /start")
                 return
 
-            result = await asyncio.to_thread(self.game_service.execute_pisunchik_command, player)
+            result = await self.game_service.execute_pisunchik_command(player)
 
             if not result['success']:
                 await message.reply(result['message'])
                 return
 
             # Reload player since execute_pisunchik_command saves internally
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             # Pet activity tracking + food drop
             import random as _rand
             from datetime import datetime, timezone
             from services.pet_service import PetService as _PetSvc
             _pet_svc = _PetSvc()
-            await asyncio.to_thread(_pet_svc.record_game_activity, player, 'pisunchik', datetime.now(timezone.utc))
+            await _pet_svc.record_game_activity(player, 'pisunchik', datetime.now(timezone.utc))
             got_food = player.pet and player.pet.get('is_alive') and _rand.random() < 0.20
             if got_food:
                 player.add_item('pet_food_basic')
             await self._maybe_send_death_notice(message.chat.id, player)
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
 
-            pet_badge = await asyncio.to_thread(_pet_svc.get_pet_badge, player)
+            pet_badge = await _pet_svc.get_pet_badge(player)
 
             reply_message = (
                 f"Ваш писюнчик{pet_badge}: {result['new_size']} см\n"
@@ -170,13 +170,13 @@ class GameHandlers:
         async def casino_command(message: Message):
             """Handle /kazik command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок")
                 return
 
-            result = await asyncio.to_thread(self.game_service.execute_casino_command, player)
+            result = await self.game_service.execute_casino_command(player)
 
             if not result['success']:
                 await message.reply(result['message'])
@@ -217,13 +217,13 @@ class GameHandlers:
                 from datetime import datetime, timezone
                 from services.pet_service import PetService as _PetSvc
                 _pet_svc = _PetSvc()
-                await asyncio.to_thread(_pet_svc.record_game_activity, player, 'casino', datetime.now(timezone.utc))
+                await _pet_svc.record_game_activity(player, 'casino', datetime.now(timezone.utc))
                 got_food = total_wins > 0 and player.pet and player.pet.get('is_alive') and _rand.random() < 0.15
                 if got_food:
                     player.add_item('pet_food_basic')
 
                 await self._maybe_send_death_notice(message.chat.id, player)
-                await asyncio.to_thread(self.player_service.save_player, player)
+                await self.player_service.save_player(player)
 
                 if total_wins > 0:
                     summary = f"🎰 Казино: {total_wins}/6 побед! Выигрыш: {total_wins * GameConfig.CASINO_JACKPOT_REWARD} BTC 🎉"
@@ -253,13 +253,13 @@ class GameHandlers:
                 return
 
             player_id = call.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await self.bot.send_message(call.message.chat.id, "Вы не зарегистрированы как игрок")
                 return
 
-            result = await asyncio.to_thread(self.game_service.execute_roll_command, player, rolls)
+            result = await self.game_service.execute_roll_command(player, rolls)
 
             if not result['success']:
                 await self.bot.send_message(call.message.chat.id, result['message'])
@@ -269,12 +269,12 @@ class GameHandlers:
             from datetime import datetime, timezone
             from services.pet_service import PetService as _PetSvc
             _pet_svc = _PetSvc()
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
             if player:
-                await asyncio.to_thread(_pet_svc.record_game_activity, player, 'roll', datetime.now(timezone.utc))
+                await _pet_svc.record_game_activity(player, 'roll', datetime.now(timezone.utc))
                 await self._maybe_send_death_notice(call.message.chat.id, player)
-                await asyncio.to_thread(self.player_service.save_player, player)
-                pet_badge = await asyncio.to_thread(_pet_svc.get_pet_badge, player)
+                await self.player_service.save_player(player)
+                pet_badge = await _pet_svc.get_pet_badge(player)
             else:
                 pet_badge = ''
 
@@ -301,13 +301,13 @@ class GameHandlers:
         async def theft_command(message: Message):
             """Handle /vor command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок")
                 return
 
-            can_steal, error_message = await asyncio.to_thread(self.game_service.can_steal, player)
+            can_steal, error_message = self.game_service.can_steal(player)
             if not can_steal:
                 await message.reply(error_message)
                 return
@@ -363,14 +363,14 @@ class GameHandlers:
                 await self.bot.send_message(call.message.chat.id, "Неверная цель для кражи")
                 return
 
-            thief = await asyncio.to_thread(self.player_service.get_player, player_id)
-            victim = await asyncio.to_thread(self.player_service.get_player, target_ids[target])
+            thief = await self.player_service.get_player(player_id)
+            victim = await self.player_service.get_player(target_ids[target])
 
             if not thief or not victim:
                 await self.bot.send_message(call.message.chat.id, "Ошибка: игрок не найден")
                 return
 
-            result = await asyncio.to_thread(self.game_service.execute_theft, thief, victim)
+            result = await self.game_service.execute_theft(thief, victim)
 
             if not result['success']:
                 await self.bot.send_message(call.message.chat.id, result['message'])
@@ -382,7 +382,7 @@ class GameHandlers:
         async def reset_cooldown_command(message: Message):
             """Handle /smazka command to reset pisunchik cooldown"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок")
@@ -396,14 +396,14 @@ class GameHandlers:
             player.last_used = datetime(2000, 1, 1, tzinfo=timezone.utc)
             player.remove_item('smazka')
 
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
             await message.reply("Кулдаун для команды /pisunchik сброшен. Теперь вы можете использовать её снова.")
 
         @self.router.message(Command('krystalnie_ballzzz'))
         async def crystal_balls_command(message: Message):
             """Handle /krystalnie_ballzzz command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок.")
@@ -416,7 +416,7 @@ class GameHandlers:
             if player.ballzzz_number is None:
                 next_effect = random.randint(GameConfig.PISUNCHIK_MIN_CHANGE, GameConfig.PISUNCHIK_MAX_CHANGE)
                 player.ballzzz_number = next_effect
-                await asyncio.to_thread(self.player_service.save_player, player)
+                await self.player_service.save_player(player)
 
             await message.reply(f"Следующее изменение писюнчика будет: {player.ballzzz_number} см.")
 
@@ -424,7 +424,7 @@ class GameHandlers:
         async def masturbator_command(message: Message):
             """Handle /masturbator command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок")
@@ -447,7 +447,7 @@ class GameHandlers:
         async def potion_command(message: Message):
             """Handle /zelie_pisunchika command"""
             player_id = message.from_user.id
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
 
             if not player:
                 await message.reply("Вы не зарегистрированы как игрок.")
@@ -469,7 +469,7 @@ class GameHandlers:
                 effect_message = f"Ваш писюнчик уменьшился на {amount} см."
 
             player.remove_item('zelie_pisunchika')
-            await asyncio.to_thread(self.player_service.save_player, player)
+            await self.player_service.save_player(player)
 
             await message.reply(effect_message)
 
@@ -490,13 +490,13 @@ class GameHandlers:
         """Handle masturbator donation amount input"""
         try:
             # Fetch fresh player data to avoid stale state
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
             if not player:
                 await message.reply("Игрок не найден")
                 return
 
             donation_amount = int(message.text)
-            result = await asyncio.to_thread(self.game_service.use_masturbator, player, donation_amount)
+            result = await self.game_service.use_masturbator(player, donation_amount)
 
             if not result['success']:
                 await message.reply(result['message'])
@@ -511,7 +511,7 @@ class GameHandlers:
     async def handle_potion_command(self, message: Message, size, increase_amount):
         """Handle potion commands"""
         player_id = message.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, player_id)
+        player = await self.player_service.get_player(player_id)
 
         if not player:
             await message.reply("Вы не зарегистрированы как игрок.")
@@ -525,7 +525,7 @@ class GameHandlers:
         player.pisunchik_size += increase_amount
         player.remove_item(potion_name)
 
-        await asyncio.to_thread(self.player_service.save_player, player)
+        await self.player_service.save_player(player)
         await message.reply(f"Your pisunchik size increased by {increase_amount} cm.")
 
     def create_roll_keyboard(self):

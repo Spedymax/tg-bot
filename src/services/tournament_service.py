@@ -135,21 +135,21 @@ class TournamentService:
             logger.error(f"Error creating pairs: {str(e)}")
             raise
 
-    def post_daily_matchup(self) -> bool:
+    async def post_daily_matchup(self) -> bool:
         """Post the next matchup for voting."""
         try:
             # Check if current round is finished
             if self.current_matchup_index >= len(self.bracket[self.current_round_index]):
                 self.bot.send_message(
-                    self.chat_id, 
+                    self.chat_id,
                     f"Round {self.current_round_index + 1} completed. Preparing next round..."
                 )
-                self.build_next_round()
+                await self.build_next_round()
                 return True
-            
+
             # Get current matchup
             matchup = self.bracket[self.current_round_index][self.current_matchup_index]
-            
+
             # Handle bye
             if matchup[1] is None:
                 self.bot.send_message(
@@ -159,22 +159,22 @@ class TournamentService:
                 self.record_matchup_result(matchup, winner=matchup[0], vote1=0, vote2=0)
                 self.current_matchup_index += 1
                 self.save_tournament_state()
-                self.post_daily_matchup()
+                await self.post_daily_matchup()
                 return True
-            
+
             # Check for existing matchup in DB
-            matchup_id = self._check_existing_matchup(matchup)
-            
+            matchup_id = await self._check_existing_matchup(matchup)
+
             # Get song metadata for better UI
             song1_info = self.spotify_service.get_track_info(matchup[0]["track_uri"])
             song2_info = self.spotify_service.get_track_info(matchup[1]["track_uri"])
-            
+
             # Download and send audio for both songs
             file1 = self.spotify_service.download_song(matchup[0]["track_uri"])
             if not file1:
                 self.bot.send_message(self.chat_id, f"Failed to download song from {matchup[0]['friend']}")
                 return False
-            
+
             # Send first song
             try:
                 with open(file1, 'rb') as f:
@@ -184,13 +184,13 @@ class TournamentService:
                 self.bot.send_message(self.chat_id, f"Error sending first song: {str(e)}")
                 self.spotify_service.delete_file(file1)
                 return False
-            
+
             # Download and send second song
             file2 = self.spotify_service.download_song(matchup[1]["track_uri"])
             if not file2:
                 self.bot.send_message(self.chat_id, f"Failed to download song from {matchup[1]['friend']}")
                 return False
-            
+
             # Send second song
             try:
                 with open(file2, 'rb') as f:
@@ -200,7 +200,7 @@ class TournamentService:
                 self.bot.send_message(self.chat_id, f"Error sending second song: {str(e)}")
                 self.spotify_service.delete_file(file2)
                 return False
-            
+
             # Create voting keyboard
             markup = types.InlineKeyboardMarkup(row_width=1)
             btn1 = types.InlineKeyboardButton(
@@ -212,11 +212,11 @@ class TournamentService:
                 callback_data="bracket_vote|2"
             )
             markup.add(btn1, btn2)
-            
+
             # Get existing votes if matchup exists
             existing_votes = {"1": set(), "2": set()}
             if matchup_id:
-                existing_votes = self.db_manager.get_existing_votes(matchup_id)
+                existing_votes = await self.db_manager.get_existing_votes(matchup_id)
                 vote1_count = len(existing_votes["1"])
                 vote2_count = len(existing_votes["2"])
                 msg_text = (
@@ -230,14 +230,14 @@ class TournamentService:
                     f"🎵 Choose the winner of this matchup:\n\n"
                 )
                 # Create new matchup in DB
-                matchup_id = self.db_manager.insert_matchup({
+                matchup_id = await self.db_manager.insert_matchup({
                     "song1": matchup[0],
                     "song2": matchup[1]
                 }, self.current_round_index + 1)
-            
+
             # Send voting message
             msg = self.bot.send_message(self.chat_id, msg_text, reply_markup=markup)
-            
+
             # Store active matchup info
             self.active_matchup = {
                 "round": self.current_round_index + 1,
@@ -253,46 +253,46 @@ class TournamentService:
                 "matchup_id": matchup_id,
                 "start_time": datetime.now()
             }
-            
+
             logger.info(f"Matchup posted: {matchup[0]['track_uri']} vs {matchup[1]['track_uri']}")
-            
+
             return True
         except Exception as e:
             logger.error(f"Error posting matchup: {str(e)}")
             return False
 
-    def _check_existing_matchup(self, matchup: Tuple[Dict[str, str], Dict[str, str]]) -> Optional[int]:
+    async def _check_existing_matchup(self, matchup: Tuple[Dict[str, str], Dict[str, str]]) -> Optional[int]:
         """Check if matchup already exists in database."""
         try:
             # Use the database manager to check for existing matchup
             # This method should be implemented in the database manager
-            return self.db_manager.check_existing_matchup(
-                matchup[0]["track_uri"], 
-                matchup[1]["track_uri"], 
+            return await self.db_manager.check_existing_matchup(
+                matchup[0]["track_uri"],
+                matchup[1]["track_uri"],
                 self.current_round_index + 1
             )
         except Exception as e:
             logger.error(f"Error checking existing matchup: {str(e)}")
             return None
 
-    def handle_vote(self, user_id: int, vote_value: str) -> Tuple[str, bool]:
+    async def handle_vote(self, user_id: int, vote_value: str) -> Tuple[str, bool]:
         """Handle a user's vote for the active matchup."""
         if not self.active_matchup:
             return "No active matchup", False
-        
+
         voter_id = str(user_id)
-        
+
         # Check if user already voted
         if voter_id in self.active_matchup["votes"]["1"] or voter_id in self.active_matchup["votes"]["2"]:
             return "You've already voted!", False
-        
+
         # Record vote
         self.active_matchup["votes"][vote_value].add(voter_id)
-        
+
         # Record vote in database
         if self.active_matchup["matchup_id"]:
-            self.db_manager.insert_vote(self.active_matchup["matchup_id"], voter_id, vote_value)
-        
+            await self.db_manager.insert_vote(self.active_matchup["matchup_id"], voter_id, vote_value)
+
         # Update vote counts
         vote1_count = len(self.active_matchup["votes"]["1"])
         vote2_count = len(self.active_matchup["votes"]["2"])
@@ -303,7 +303,7 @@ class TournamentService:
             f"Song 1: {vote1_count}\n"
             f"Song 2: {vote2_count}"
         )
-        
+
         try:
             self.bot.edit_message_text(
                 new_text,
@@ -313,34 +313,34 @@ class TournamentService:
             )
         except Exception as e:
             logger.error(f"Error updating message: {str(e)}")
-        
+
         # Check if we have enough votes to finalize (this should come from config)
         total_votes = vote1_count + vote2_count
         MIN_VOTES_TO_FINALIZE = 3  # This should be configured
-        
+
         if total_votes >= MIN_VOTES_TO_FINALIZE:
-            self.finalize_matchup()
-            
+            await self.finalize_matchup()
+
         return "Vote counted!", True
 
-    def handle_admin_vote(self, voter_id: str, vote_value: str) -> Tuple[str, bool]:
+    async def handle_admin_vote(self, voter_id: str, vote_value: str) -> Tuple[str, bool]:
         """Handle admin-submitted vote for a user."""
         if not self.active_matchup:
             return "No active matchup", False
-            
+
         if voter_id in self.active_matchup["votes"]["1"] or voter_id in self.active_matchup["votes"]["2"]:
             return f"User {voter_id} has already voted!", False
-            
+
         if vote_value not in ["1", "2"]:
             return "Vote must be 1 or 2", False
-            
+
         # Record vote
         self.active_matchup["votes"][vote_value].add(voter_id)
-        
+
         # Record in database
         if self.active_matchup["matchup_id"]:
-            self.db_manager.insert_vote(self.active_matchup["matchup_id"], voter_id, vote_value)
-            
+            await self.db_manager.insert_vote(self.active_matchup["matchup_id"], voter_id, vote_value)
+
         # Update vote counts
         vote1_count = len(self.active_matchup["votes"]["1"])
         vote2_count = len(self.active_matchup["votes"]["2"])
@@ -351,7 +351,7 @@ class TournamentService:
             f"Song 1: {vote1_count}\n"
             f"Song 2: {vote2_count}"
         )
-        
+
         try:
             self.bot.edit_message_text(
                 new_text,
@@ -361,14 +361,14 @@ class TournamentService:
             )
         except Exception as e:
             logger.error(f"Error updating message: {str(e)}")
-            
+
         # Check if we have enough votes to finalize
         total_votes = vote1_count + vote2_count
         MIN_VOTES_TO_FINALIZE = 3  # This should be configured
-        
+
         if total_votes >= MIN_VOTES_TO_FINALIZE:
-            self.finalize_matchup()
-            
+            await self.finalize_matchup()
+
         return f"Vote for user {voter_id} counted for song {vote_value}!", True
 
     def notify_non_voters(self, participants: Dict[int, Dict[str, str]]) -> bool:
@@ -415,55 +415,55 @@ class TournamentService:
         
         return False
 
-    def finalize_matchup(self) -> bool:
+    async def finalize_matchup(self) -> bool:
         """Finalize the current matchup and move to the next one."""
         if not self.active_matchup:
             return False
-            
+
         vote1 = len(self.active_matchup["votes"]["1"])
         vote2 = len(self.active_matchup["votes"]["2"])
-        
+
         # Handle tie
         if vote1 == vote2:
             self.bot.send_message(self.chat_id, "It's a tie! Voting will continue.")
             return False
-            
+
         # Determine winner
         winner_vote = "1" if vote1 > vote2 else "2"
         loser_vote = "2" if winner_vote == "1" else "1"
         winner_song = self.active_matchup["song1"] if winner_vote == "1" else self.active_matchup["song2"]
         loser_song = self.active_matchup["song1"] if loser_vote == "1" else self.active_matchup["song2"]
-        
+
         # Get winner song info
         song_info = self.active_matchup.get(
-            "song1_info" if winner_vote == "1" else "song2_info", 
+            "song1_info" if winner_vote == "1" else "song2_info",
             self.spotify_service.get_track_info(winner_song["track_uri"])
         )
-        
+
         # Send winner announcement
         self.bot.send_message(
-            self.chat_id, 
+            self.chat_id,
             f"🏆 Winner: {song_info['artist']} - {song_info['title']} from {winner_song['friend']}'s playlist!\n"
             f"Final score: {vote1}-{vote2}"
         )
-        
+
         # Update database
         if self.active_matchup["matchup_id"]:
-            self.db_manager.finalize_matchup(self.active_matchup["matchup_id"], vote1, vote2, winner_song)
-            
+            await self.db_manager.finalize_matchup(self.active_matchup["matchup_id"], vote1, vote2, winner_song)
+
         # Record result in tournament bracket
         self.record_matchup_result(
-            self.bracket[self.current_round_index][self.current_matchup_index], 
-            winner_song, 
-            vote1, 
+            self.bracket[self.current_round_index][self.current_matchup_index],
+            winner_song,
+            vote1,
             vote2
         )
-        
+
         # Reset active matchup and move to next
         self.active_matchup = None
         self.current_matchup_index += 1
         self.save_tournament_state()
-        
+
         return True
 
     def record_matchup_result(self, matchup: Tuple[Dict[str, str], Optional[Dict[str, str]]], 
@@ -472,7 +472,7 @@ class TournamentService:
         matchup_result = {"winner": winner, "vote1": vote1, "vote2": vote2}
         self.bracket[self.current_round_index][self.current_matchup_index] = [matchup[0], matchup[1], matchup_result]
 
-    def build_next_round(self) -> bool:
+    async def build_next_round(self) -> bool:
         """Build the next round from winners of the current round."""
         winners = []
         
@@ -514,8 +514,8 @@ class TournamentService:
         )
         
         # Post first matchup of new round
-        self.post_daily_matchup()
-        
+        await self.post_daily_matchup()
+
         return True
 
     def visualize_bracket(self) -> str:
@@ -561,15 +561,15 @@ class TournamentService:
             
         return visual
 
-    def get_leaderboard(self) -> str:
+    async def get_leaderboard(self) -> str:
         """Get tournament leaderboard."""
-        leaderboard = self.db_manager.get_leaderboard(limit=10)
-        
+        leaderboard = await self.db_manager.get_leaderboard(limit=10)
+
         if not leaderboard:
             return "No leaderboard data available yet."
-            
+
         text = "🏆 SONG LEADERBOARD 🏆\n\n"
-        
+
         for i, song in enumerate(leaderboard, 1):
             song_info = self.spotify_service.get_track_info(song["track_uri"])
             text += (
@@ -577,23 +577,23 @@ class TournamentService:
                 f"   From: {song['friend']}'s playlist\n"
                 f"   W/L: {song['wins']}-{song['losses']} ({song['win_rate']}%)\n\n"
             )
-            
+
         return text
 
-    def get_friend_stats(self) -> str:
+    async def get_friend_stats(self) -> str:
         """Get statistics for each friend's playlist."""
-        stats = self.db_manager.get_friend_stats()
-        
+        stats = await self.db_manager.get_friend_stats()
+
         if not stats:
             return "No friend statistics available yet."
-            
+
         text = "👥 PLAYLIST STATISTICS 👥\n\n"
-        
+
         for i, stat in enumerate(stats, 1):
             text += (
                 f"{i}. {stat['friend']}'s Playlist\n"
                 f"   Songs: {stat['songs']}\n"
                 f"   W/L: {stat['total_wins']}-{stat['total_losses']} ({stat['win_rate']}%)\n\n"
             )
-            
+
         return text
