@@ -324,13 +324,13 @@ class EntertainmentHandlers:
     async def send_furry_pics(self, chat_id):
         """Send furry pictures"""
         # Try to get images from APIs first
-        image_urls = await asyncio.to_thread(self.get_furry_images_from_multiple_sources)
+        image_urls = self.get_furry_images_from_multiple_sources()
 
         # If no images from APIs, try parsing a simple gallery site
         if not image_urls:
             try:
                 # Use a more reliable source
-                filtered = await asyncio.to_thread(self.parse_furry_images, 'https://www.furaffinity.net/browse/', 'url')
+                filtered = self.parse_furry_images('https://www.furaffinity.net/browse/', 'url')
                 if filtered:
                     image_urls = filtered
             except Exception as e:
@@ -410,7 +410,7 @@ class EntertainmentHandlers:
     async def handle_otsos(self, message: Message):
         """Handle /otsos command"""
         player_id = message.from_user.id
-        player = await asyncio.to_thread(self.player_service.get_player, player_id)
+        player = await self.player_service.get_player(player_id)
 
         if not player:
             await message.reply("Вы не зарегистрированы как игрок")
@@ -461,8 +461,8 @@ class EntertainmentHandlers:
             )
 
             # Get players
-            player = await asyncio.to_thread(self.player_service.get_player, call.from_user.id)
-            target = await asyncio.to_thread(self.player_service.get_player, target_id)
+            player = await self.player_service.get_player(call.from_user.id)
+            target = await self.player_service.get_player(target_id)
 
             if not player or not target:
                 await self.bot.send_message(call.message.chat.id, "Игрок не найден")
@@ -474,8 +474,8 @@ class EntertainmentHandlers:
             player.pisunchik_size += stolen_amount
 
             # Save changes
-            await asyncio.to_thread(self.player_service.save_player, player)
-            await asyncio.to_thread(self.player_service.save_player, target)
+            await self.player_service.save_player(player)
+            await self.player_service.save_player(target)
 
             # Escape player name to prevent XSS
             target_name = escape_html(target.player_name or "игрока")

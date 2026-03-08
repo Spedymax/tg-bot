@@ -80,7 +80,7 @@ class CourtHandlers:
                 await message.reply("Эта команда работает только в групповом чате.")
                 return
             chat_id = message.chat.id
-            existing = await asyncio.to_thread(self.court_service.get_active_game, chat_id)
+            existing = await self.court_service.get_active_game(chat_id)
             if existing:
                 await message.reply("⚖️ Заседание уже идёт! Используй /court_stop чтобы завершить.")
                 return
@@ -98,11 +98,11 @@ class CourtHandlers:
         @self.router.message(Command('court_stop', 'sud_stop'))
         async def cmd_court_stop(message: Message):
             chat_id = message.chat.id
-            game = await asyncio.to_thread(self.court_service.get_active_game, chat_id)
+            game = await self.court_service.get_active_game(chat_id)
             if not game:
                 await message.reply("Активного заседания нет.")
                 return
-            await asyncio.to_thread(self.court_service.set_status, game['id'], 'aborted')
+            await self.court_service.set_status(game['id'], 'aborted')
             self._game_locks.pop(game['id'], None)
             self._active_game_chats.discard(chat_id)
             old_task = self._fallback_timers.pop(game['id'], None)
@@ -114,7 +114,7 @@ class CourtHandlers:
         @self.router.message(Command('deliver_verdict'))
         async def cmd_deliver_verdict(message: Message):
             chat_id = message.chat.id
-            game = await asyncio.to_thread(self.court_service.get_active_game, chat_id)
+            game = await self.court_service.get_active_game(chat_id)
             if not game:
                 await message.reply("Активного заседания нет.")
                 return
@@ -178,7 +178,7 @@ class CourtHandlers:
             statement = (message.text or "").strip()[:500]
             logger.info(f"[COURT] handle_final_word: game={game_id} role={role} user={user_id} statement='{statement[:60]}'")
 
-            await asyncio.to_thread(self.court_service.log_message, game_id, f'final_{role}', statement)
+            await self.court_service.log_message(game_id, f'final_{role}', statement)
             await message.reply("✅ Ваше финальное слово принято судом.")
             role_ru = ROLE_NAMES.get(role, role)
             try:
@@ -233,7 +233,7 @@ class CourtHandlers:
             # Path 2: judge reply (player answering a judge question)
             if chat_id in self._pending_speech:
                 return  # speech pending for another user — don't interfere
-            game = await asyncio.to_thread(self.court_service.get_active_game, chat_id)
+            game = await self.court_service.get_active_game(chat_id)
             if not game or game['status'] != 'in_progress':
                 return
 
@@ -312,9 +312,7 @@ class CourtHandlers:
                     await message.reply("Опишите преступление (до 500 символов).")
                     return
                 defendant = state_data['defendant']
-                game_id = await asyncio.to_thread(
-                    self.court_service.create_game, chat_id, defendant, crime
-                )
+                game_id = await self.court_service.create_game(chat_id, defendant, crime)
                 state_data['game_id'] = game_id
                 state_data['state'] = 'role_selection'
                 state_data['roles_taken'] = {}
@@ -344,7 +342,7 @@ class CourtHandlers:
 
             roles_taken[role] = user_id
             state_data['roles_taken'] = roles_taken
-            await asyncio.to_thread(self.court_service.assign_role, game_id, role, user_id)
+            await self.court_service.assign_role(game_id, role, user_id)
 
             remaining_roles = [r for r in ("prosecutor", "lawyer", "witness") if r not in roles_taken]
             if remaining_roles:
@@ -381,9 +379,9 @@ class CourtHandlers:
                 parse_mode='HTML',
             )
 
-            await asyncio.to_thread(self.court_service.assign_role, game_id, 'prosecutor', user_id)
-            await asyncio.to_thread(self.court_service.assign_role, game_id, 'lawyer', self.AI_LAWYER_ID)
-            await asyncio.to_thread(self.court_service.assign_role, game_id, 'witness', self.AI_WITNESS_ID)
+            await self.court_service.assign_role(game_id, 'prosecutor', user_id)
+            await self.court_service.assign_role(game_id, 'lawyer', self.AI_LAWYER_ID)
+            await self.court_service.assign_role(game_id, 'witness', self.AI_WITNESS_ID)
             self._test_games.add(game_id)
 
             roles_taken = {'prosecutor': user_id, 'lawyer': self.AI_LAWYER_ID, 'witness': self.AI_WITNESS_ID}
@@ -395,7 +393,7 @@ class CourtHandlers:
             game_id, role, card_index = int(parts[1]), parts[2], int(parts[3])
             user_id = call.from_user.id
 
-            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
+            game = await self.court_service.get_active_game_by_id(game_id)
             if not game:
                 await call.answer("Игра не найдена.", show_alert=True)
                 return
@@ -406,7 +404,7 @@ class CourtHandlers:
 
             lock = self._game_locks.setdefault(game_id, asyncio.Lock())
             async with lock:
-                game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
+                game = await self.court_service.get_active_game_by_id(game_id)
                 if not game or game['status'] != 'in_progress':
                     await call.answer("Игра уже завершена.", show_alert=True)
                     return
@@ -460,9 +458,9 @@ class CourtHandlers:
                 )
 
                 if role == 'prosecutor':
-                    await asyncio.to_thread(self.court_service.set_phase, game_id, 'prosecution_speech')
+                    await self.court_service.set_phase(game_id, 'prosecution_speech')
                 elif role in ('lawyer', 'witness'):
-                    await asyncio.to_thread(self.court_service.set_phase, game_id, 'defense_speech')
+                    await self.court_service.set_phase(game_id, 'defense_speech')
 
             # UI updates outside the lock
             await call.answer("Карта сыграна!")
@@ -499,23 +497,21 @@ class CourtHandlers:
     async def _start_game_test(self, user_id: int, defendant: str, crime: str):
         """Запустить тест-игру: пользователь — прокурор, AI — защита."""
         try:
-            game_id = await asyncio.to_thread(self.court_service.create_game, user_id, defendant, crime)
-            await asyncio.to_thread(self.court_service.assign_role, game_id, 'prosecutor', user_id)
-            await asyncio.to_thread(self.court_service.assign_role, game_id, 'lawyer', self.AI_LAWYER_ID)
-            await asyncio.to_thread(self.court_service.assign_role, game_id, 'witness', self.AI_WITNESS_ID)
+            game_id = await self.court_service.create_game(user_id, defendant, crime)
+            await self.court_service.assign_role(game_id, 'prosecutor', user_id)
+            await self.court_service.assign_role(game_id, 'lawyer', self.AI_LAWYER_ID)
+            await self.court_service.assign_role(game_id, 'witness', self.AI_WITNESS_ID)
 
-            prosecutor_cards, lawyer_cards, witness_cards = await asyncio.to_thread(
-                self.court_service.generate_cards, defendant, crime
-            )
+            prosecutor_cards, lawyer_cards, witness_cards = await self.court_service.generate_cards(defendant, crime)
             if not prosecutor_cards:
                 await self.bot.send_message(user_id, "❌ Ошибка генерации карт. Попробуй /court_test ещё раз.")
                 return
 
-            await asyncio.to_thread(self.court_service.save_cards, game_id, prosecutor_cards, lawyer_cards, witness_cards)
-            await asyncio.to_thread(self.court_service.set_status, game_id, 'in_progress')
-            await asyncio.to_thread(self.court_service.advance_round, game_id, 1)
-            await asyncio.to_thread(self.court_service.set_phase, game_id, 'prosecution')
-            await asyncio.to_thread(self.court_service.log_message, game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
+            await self.court_service.save_cards(game_id, prosecutor_cards, lawyer_cards, witness_cards)
+            await self.court_service.set_status(game_id, 'in_progress')
+            await self.court_service.advance_round(game_id, 1)
+            await self.court_service.set_phase(game_id, 'prosecution')
+            await self.court_service.log_message(game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
             self._test_games.add(game_id)
 
             await self._send_cards_dm(user_id, game_id, 'prosecutor', prosecutor_cards)
@@ -536,22 +532,22 @@ class CourtHandlers:
         logger.info(f"[COURT] _ai_play_defense_test: game={game_id} chat={chat_id} round={round_num}")
         try:
             logger.info(f"[COURT] _ai_play_defense_test: generating AI defense card")
-            card = await asyncio.to_thread(self.court_service.ai_defense_card, game_id, prosecutor_card, round_num)
+            card = await self.court_service.ai_defense_card(game_id, prosecutor_card, round_num)
             logger.info(f"[COURT] _ai_play_defense_test: AI card='{card[:60]}'")
 
             await self.bot.send_message(chat_id, f"🃏 <b>🛡️ Адвокат (AI)</b> играет карту:\n\n«{card}»", parse_mode='HTML')
-            await asyncio.to_thread(self.court_service.record_played_card, game_id, 'lawyer', card, round_num)
-            await asyncio.to_thread(self.court_service.log_message, game_id, 'lawyer', card, round_num)
-            await asyncio.to_thread(self.court_service.set_phase, game_id, 'defense_speech')
+            await self.court_service.record_played_card(game_id, 'lawyer', card, round_num)
+            await self.court_service.log_message(game_id, 'lawyer', card, round_num)
+            await self.court_service.set_phase(game_id, 'defense_speech')
 
-            speech = await asyncio.to_thread(self.court_service.player_argue, game_id, 'lawyer', card, round_num)
+            speech = await self.court_service.player_argue(game_id, 'lawyer', card, round_num)
             if speech:
                 await self.bot.send_message(chat_id, f"🛡️ <i>{speech}</i>", parse_mode='HTML')
 
-            reaction, signal = await asyncio.to_thread(self.court_service.judge_react, game_id, 'lawyer', card, round_num)
+            reaction, signal = await self.court_service.judge_react(game_id, 'lawyer', card, round_num)
             if reaction:
                 judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
-                await asyncio.to_thread(self.court_service.set_last_judge_msg, game_id, judge_msg.message_id)
+                await self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
 
             if signal in ("ВОПРОС", None):
                 signal = "ПРОКУРОР_ВАШ_ХОД" if round_num < 4 else "ФИНАЛ"
@@ -569,16 +565,14 @@ class CourtHandlers:
             return
         logger.info(f"[COURT] _start_game: game={game_id} chat={chat_id} roles={roles_taken}")
         try:
-            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
+            game = await self.court_service.get_active_game_by_id(game_id)
             defendant = game['defendant']
             crime = game['crime']
 
             await self.bot.send_message(chat_id, "⚖️ <b>Состав суда сформирован. Генерирую материалы дела...</b>", parse_mode='HTML')
 
             logger.info(f"[COURT] _start_game: generating cards for '{defendant}' / '{crime}'")
-            prosecutor_cards, lawyer_cards, witness_cards = await asyncio.to_thread(
-                self.court_service.generate_cards, defendant, crime
-            )
+            prosecutor_cards, lawyer_cards, witness_cards = await self.court_service.generate_cards(defendant, crime)
             logger.info(
                 f"[COURT] _start_game: cards generated — "
                 f"prosecutor={len(prosecutor_cards)} lawyer={len(lawyer_cards)} witness={len(witness_cards)}"
@@ -586,14 +580,14 @@ class CourtHandlers:
 
             if not prosecutor_cards:
                 await self.bot.send_message(chat_id, "❌ Ошибка генерации карт. Попробуйте /court ещё раз.")
-                await asyncio.to_thread(self.court_service.set_status, game_id, 'aborted')
+                await self.court_service.set_status(game_id, 'aborted')
                 return
 
-            await asyncio.to_thread(self.court_service.save_cards, game_id, prosecutor_cards, lawyer_cards, witness_cards)
-            await asyncio.to_thread(self.court_service.set_status, game_id, 'in_progress')
+            await self.court_service.save_cards(game_id, prosecutor_cards, lawyer_cards, witness_cards)
+            await self.court_service.set_status(game_id, 'in_progress')
             self._active_game_chats.add(chat_id)
-            await asyncio.to_thread(self.court_service.advance_round, game_id, 1)
-            await asyncio.to_thread(self.court_service.log_message, game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
+            await self.court_service.advance_round(game_id, 1)
+            await self.court_service.log_message(game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
             logger.info(f"[COURT] _start_game: game status=in_progress round=1")
 
             await self._send_cards_dm(roles_taken['prosecutor'], game_id, 'prosecutor', prosecutor_cards)
@@ -617,7 +611,7 @@ class CourtHandlers:
             )
         except Exception as e:
             logger.error(f"_start_game: ошибка для game {game_id}: {e}")
-            await asyncio.to_thread(self.court_service.set_status, game_id, 'aborted')
+            await self.court_service.set_status(game_id, 'aborted')
             try:
                 await self.bot.send_message(chat_id, "❌ Ошибка запуска игры. Попробуйте /court ещё раз.")
             except Exception:
@@ -650,7 +644,7 @@ class CourtHandlers:
             await self.bot.send_message(user_id, text, parse_mode='HTML', reply_markup=markup)
         except Exception as e:
             logger.error(f"CourtHandlers: не удалось отправить личку {user_id}: {e}")
-            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
+            game = await self.court_service.get_active_game_by_id(game_id)
             if game:
                 await self.bot.send_message(
                     game['chat_id'],
@@ -666,10 +660,10 @@ class CourtHandlers:
             await self.bot.send_message(chat_id, f"🃏 <b>{role_ru}</b> играет карту:\n\n«{card}»", parse_mode='HTML')
             logger.info(f"[COURT] _process_played_card: card announced in group")
 
-            await asyncio.to_thread(self.court_service.record_played_card, game_id, role, card, round_num)
+            await self.court_service.record_played_card(game_id, role, card, round_num)
             logger.info(f"[COURT] _process_played_card: card recorded in DB")
 
-            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
+            game = await self.court_service.get_active_game_by_id(game_id)
             if not game:
                 logger.error(f"[COURT] _process_played_card: game {game_id} not found after record")
                 return
@@ -702,19 +696,19 @@ class CourtHandlers:
         """Обработать речь игрока: залогировать, показать, запустить реакцию судьи, продвинуть состояние."""
         logger.info(f"[COURT] _after_speech_received: game={game_id} chat={chat_id} role={role} round={round_num} speech='{speech[:60]}'")
         try:
-            await asyncio.to_thread(self.court_service.log_message, game_id, role, speech, round_num)
+            await self.court_service.log_message(game_id, role, speech, round_num)
             role_icon = "⚔️" if role == "prosecutor" else ("🛡️" if role == "lawyer" else "👁️")
             await self.bot.send_message(chat_id, f"{role_icon} <i>{speech}</i>", parse_mode='HTML')
 
             await self.bot.send_chat_action(chat_id, 'typing')
 
             logger.info(f"[COURT] _after_speech_received: calling judge_react")
-            reaction, signal = await asyncio.to_thread(self.court_service.judge_react, game_id, role, card, round_num)
+            reaction, signal = await self.court_service.judge_react(game_id, role, card, round_num)
             logger.info(f"[COURT] _after_speech_received: judge reaction='{str(reaction)[:80]}' signal={signal}")
 
             if reaction:
                 judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
-                await asyncio.to_thread(self.court_service.set_last_judge_msg, game_id, judge_msg.message_id)
+                await self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
 
             await self._handle_judge_signal(game_id, chat_id, signal, round_num)
 
@@ -724,15 +718,15 @@ class CourtHandlers:
     async def _handle_judge_signal(self, game_id: int, chat_id: int, signal: str | None, round_num: int):
         """Двигает игровой стейт по сигналу судьи."""
         if signal == "ВОПРОС":
-            await asyncio.to_thread(self.court_service.set_phase, game_id, 'judge')
+            await self.court_service.set_phase(game_id, 'judge')
             await self._start_fallback_timer(game_id, chat_id, round_num)
 
         elif signal == "ЗАЩИТА_ВАШ_ХОД":
-            await asyncio.to_thread(self.court_service.set_phase, game_id, 'defense')
+            await self.court_service.set_phase(game_id, 'defense')
             if game_id in self._test_games:
                 asyncio.create_task(self._ai_play_defense_test(game_id, chat_id, "", round_num))
             else:
-                game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
+                game = await self.court_service.get_active_game_by_id(game_id)
                 if game:
                     await self.bot.send_message(
                         chat_id,
@@ -743,8 +737,8 @@ class CourtHandlers:
 
         elif signal == "ПРОКУРОР_ВАШ_ХОД":
             next_round = round_num + 1
-            await asyncio.to_thread(self.court_service.advance_round, game_id, next_round)
-            await asyncio.to_thread(self.court_service.set_phase, game_id, 'prosecution')
+            await self.court_service.advance_round(game_id, next_round)
+            await self.court_service.set_phase(game_id, 'prosecution')
             await self.bot.send_message(
                 chat_id,
                 f"⚖️ <b>Раунд {next_round} из 4</b>\n⚔️ Прокурор, ваш ход. Сыграйте карту в личке.",
@@ -752,7 +746,7 @@ class CourtHandlers:
             )
 
         elif signal == "ФИНАЛ":
-            await asyncio.to_thread(self.court_service.set_phase, game_id, 'final')
+            await self.court_service.set_phase(game_id, 'final')
             await self.bot.send_message(
                 chat_id,
                 "⚖️ <b>Все раунды завершены.</b>\n\nСуд предоставляет каждой из сторон <b>последнее слово</b>. Напишите ваше финальное заявление боту в личку.",
@@ -772,17 +766,14 @@ class CourtHandlers:
 
         async def on_timeout():
             self._fallback_timers.pop(game_id, None)
-            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
+            game = await self.court_service.get_active_game_by_id(game_id)
             if not game or game['status'] != 'in_progress':
                 return
             if game.get('current_phase') != 'judge':
                 return
 
             logger.info(f"[COURT] fallback_timer: game={game_id} — сторона не ответила на вопрос суда")
-            await asyncio.to_thread(
-                self.court_service.log_message, game_id, 'system',
-                'Сторона не ответила на вопрос суда.', round_num,
-            )
+            await self.court_service.log_message(game_id, 'system', 'Сторона не ответила на вопрос суда.', round_num)
             try:
                 await self.bot.send_message(
                     chat_id,
@@ -796,19 +787,19 @@ class CourtHandlers:
             has_defense = any(p['role'] in ('lawyer', 'witness') and p['round'] == round_num for p in played)
 
             if not has_defense:
-                await asyncio.to_thread(self.court_service.set_phase, game_id, 'defense')
+                await self.court_service.set_phase(game_id, 'defense')
                 try:
                     await self.bot.send_message(chat_id, "🛡️ <b>Защита, ваш ответ!</b>", parse_mode='HTML')
                 except Exception:
                     pass
             else:
                 if round_num >= 4:
-                    await asyncio.to_thread(self.court_service.set_phase, game_id, 'final')
+                    await self.court_service.set_phase(game_id, 'final')
                     await self._request_final_words(game_id, chat_id)
                 else:
                     next_round = round_num + 1
-                    await asyncio.to_thread(self.court_service.advance_round, game_id, next_round)
-                    await asyncio.to_thread(self.court_service.set_phase, game_id, 'prosecution')
+                    await self.court_service.advance_round(game_id, next_round)
+                    await self.court_service.set_phase(game_id, 'prosecution')
                     try:
                         await self.bot.send_message(
                             chat_id,
@@ -829,20 +820,18 @@ class CourtHandlers:
     async def _process_judge_reply(self, game_id: int, chat_id: int, role: str, reply_text: str, round_num: int):
         """Process a player's reply to a judge question."""
         try:
-            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
+            game = await self.court_service.get_active_game_by_id(game_id)
             if not game or game.get('current_phase') != 'judge':
                 logger.info(f"[COURT] _process_judge_reply: phase already advanced, discarding reply game={game_id}")
                 return
 
             await self.bot.send_chat_action(chat_id, 'typing')
-            reaction, signal = await asyncio.to_thread(
-                self.court_service.judge_react_to_reply, game_id, role, reply_text, round_num
-            )
+            reaction, signal = await self.court_service.judge_react_to_reply(game_id, role, reply_text, round_num)
             logger.info(f"[COURT] _process_judge_reply: game={game_id} role={role} signal={signal} reaction='{str(reaction)[:60]}'")
 
             if reaction:
                 judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
-                await asyncio.to_thread(self.court_service.set_last_judge_msg, game_id, judge_msg.message_id)
+                await self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
 
             await self._handle_judge_signal(game_id, chat_id, signal, round_num)
 
@@ -852,7 +841,7 @@ class CourtHandlers:
     async def _request_final_words(self, game_id: int, chat_id: int):
         """Запросить финальное слово у каждого игрока в личку через FSMContext."""
         logger.info(f"[COURT] _request_final_words: game={game_id} chat={chat_id}")
-        game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
+        game = await self.court_service.get_active_game_by_id(game_id)
         if not game:
             logger.error(f"[COURT] _request_final_words: game {game_id} not found")
             return
@@ -917,9 +906,9 @@ class CourtHandlers:
             await self.bot.send_message(chat_id, "⚖️ Судья удаляется на совещание... 🤔", parse_mode='HTML')
             self._game_locks.pop(game_id, None)
             logger.info(f"[COURT] _deliver_verdict: generating verdict via LLM")
-            parts = await asyncio.to_thread(self.court_service.generate_verdict, game_id, final_statements or {})
+            parts = await self.court_service.generate_verdict(game_id, final_statements or {})
             logger.info(f"[COURT] _deliver_verdict: verdict generated, {len(parts)} parts")
-            await asyncio.to_thread(self.court_service.save_verdict, game_id, "\n---\n".join(parts))
+            await self.court_service.save_verdict(game_id, "\n---\n".join(parts))
             self._active_game_chats.discard(chat_id)
 
             prefixes = [
@@ -935,7 +924,7 @@ class CourtHandlers:
         except Exception as e:
             logger.error(f"_deliver_verdict: ошибка для game {game_id}: {e}")
             self._active_game_chats.discard(chat_id)
-            await asyncio.to_thread(self.court_service.set_status, game_id, 'finished')
+            await self.court_service.set_status(game_id, 'finished')
             try:
                 await self.bot.send_message(chat_id, "⚠️ Ошибка при вынесении приговора. Заседание завершено.")
             except Exception:

@@ -1,6 +1,7 @@
 import logging
 import os
 import asyncio
+import psycopg
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from aiogram import Router, F, Bot
@@ -52,9 +53,7 @@ class MusicHandlers:
                 return
 
             vote_value = parts[1]
-            message, success = await asyncio.to_thread(
-                self.tournament_service.handle_vote, call.from_user.id, vote_value
-            )
+            message, success = await self.tournament_service.handle_vote(call.from_user.id, vote_value)
             await call.answer(message)
 
         @self.router.message(Command('vote_for'))
@@ -74,9 +73,7 @@ class MusicHandlers:
                 voter_id = parts[1]
                 vote_value = parts[2]
 
-                response_message, success = await asyncio.to_thread(
-                    self.tournament_service.handle_admin_vote, voter_id, vote_value
-                )
+                response_message, success = await self.tournament_service.handle_admin_vote(voter_id, vote_value)
                 await message.reply(response_message)
             except Exception as e:
                 await message.reply(f"❌ Error: {str(e)}")
@@ -84,18 +81,18 @@ class MusicHandlers:
         @self.router.message(Command('bracket'))
         async def show_bracket(message: Message):
             """Display the current tournament bracket."""
-            bracket_visual = await asyncio.to_thread(self.tournament_service.visualize_bracket)
+            bracket_visual = self.tournament_service.visualize_bracket()
             await message.reply(f"Current tournament bracket:\n\n{bracket_visual}")
 
         @self.router.message(Command('start_tournament'))
         async def cmd_start_tournament(message: Message):
             """Start or continue a tournament."""
             if os.path.exists(STATE_FILE):
-                await asyncio.to_thread(self.tournament_service.load_tournament_state)
+                self.tournament_service.load_tournament_state()
                 await self.bot.send_message(MAX_ID, "Continuing existing tournament!")
-                await asyncio.to_thread(self.tournament_service.post_daily_matchup)
+                await self.tournament_service.post_daily_matchup()
             else:
-                await asyncio.to_thread(self.tournament_service.initialize_tournament, self.song_pools)
+                self.tournament_service.initialize_tournament(self.song_pools)
                 await self.bot.send_message(MAX_ID, 'Music bot started! New tournament created')
 
         @self.router.message(Command('new_tournament'))
@@ -105,7 +102,7 @@ class MusicHandlers:
                 await message.reply("❌ This command is only available to administrators.")
                 return
 
-            await asyncio.to_thread(self.tournament_service.initialize_tournament, self.song_pools)
+            self.tournament_service.initialize_tournament(self.song_pools)
             await message.reply("New tournament started!")
 
         @self.router.message(Command('manual_matchup'))
@@ -115,29 +112,25 @@ class MusicHandlers:
                 await message.reply("❌ This command is only available to administrators.")
                 return
 
-            await asyncio.to_thread(self.tournament_service.post_daily_matchup)
+            await self.tournament_service.post_daily_matchup()
             await message.reply("Manual matchup activated!")
 
         @self.router.message(Command('leaderboard'))
         async def show_leaderboard(message: Message):
             """Show song leaderboard."""
-            leaderboard = await asyncio.to_thread(self.tournament_service.get_leaderboard)
+            leaderboard = await self.tournament_service.get_leaderboard()
             await message.reply(leaderboard)
 
         @self.router.message(Command('playlist_stats'))
         async def show_playlist_stats(message: Message):
             """Show statistics for each playlist."""
-            stats = await asyncio.to_thread(self.tournament_service.get_friend_stats)
+            stats = await self.tournament_service.get_friend_stats()
             await message.reply(stats)
 
         @self.router.message(Command('winners_playlist'))
         async def create_winners_playlist(message: Message):
             """Generate a playlist of tournament winners."""
             try:
-                # Get winning songs from database
-                conn = self.db_manager.get_connection()
-                cur = conn.cursor()
-
                 # Get winners from completed matchups
                 query = """
                     SELECT DISTINCT winner_track_uri, created_at
@@ -147,11 +140,9 @@ class MusicHandlers:
                     LIMIT 20;
                 """
 
-                cur.execute(query)
-                winner_uris = [row[0] for row in cur.fetchall()]
-
-                cur.close()
-                conn.close()
+                async with await psycopg.AsyncConnection.connect(self.db_manager.conn_string, autocommit=True) as conn:
+                    cursor = await conn.execute(query)
+                    winner_uris = [row[0] for row in await cursor.fetchall()]
 
                 if not winner_uris:
                     await message.reply("No winners found yet!")

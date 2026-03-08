@@ -51,21 +51,20 @@ class PlayerService:
             return self._cache[player_id]["player"]
         return None
 
-    def get_player(self, player_id: int) -> Optional[Player]:
+    async def get_player(self, player_id: int) -> Optional[Player]:
         """Get a player by ID, first checking cache, then database"""
-        # Check cache first
         cached_player = self._get_cached_player(player_id)
         if cached_player:
             return cached_player
 
-        connection = self.db.get_connection()
         try:
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT * FROM pisunchik_data WHERE player_id = %s", (player_id,))
-                row = cursor.fetchone()
+            async with self.db.connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT * FROM pisunchik_data WHERE player_id = %s", (player_id,)
+                )
+                row = await cursor.fetchone()
 
                 if row:
-                    # Get column names
                     column_names = [desc[0] for desc in cursor.description]
                     player = Player.from_db_row(row, column_names)
                     self._cache_player(player)
@@ -74,126 +73,121 @@ class PlayerService:
         except Exception as e:
             logger.error(f"Error getting player {player_id}: {e}")
             return None
-        finally:
-            self.db.release_connection(connection)
 
-    def save_player(self, player: Player) -> bool:
+    async def save_player(self, player: Player) -> bool:
         """Save a player to the database and update cache"""
-        connection = self.db.get_connection()
         try:
-            with connection.cursor() as cursor:
-                # Check if player exists
-                cursor.execute("SELECT player_id FROM pisunchik_data WHERE player_id = %s", (player.player_id,))
-                exists = cursor.fetchone() is not None
-                
-                if exists:
-                    # Update existing player
-                    update_query = """
-                        UPDATE pisunchik_data SET
-                            player_name = %s, pisunchik_size = %s, coins = %s,
-                            items = %s, characteristics = %s, player_stocks = %s,
-                            statuetki = %s, chat_id = %s, correct_answers = %s,
-                            nnn_checkins = %s, last_used = %s, last_vor = %s,
-                            last_prezervativ = %s, last_joke = %s, casino_last_used = %s,
-                            casino_usage_count = %s, ballzzz_number = %s, notified = %s,
-                            miniapp_daily_spins = %s, miniapp_last_spin_date = %s, miniapp_total_winnings = %s,
-                            pet = %s, pet_titles = %s, pet_active_title = %s, pet_revives_used = %s,
-                            pet_revives_reset_date = %s, trivia_streak = %s, last_trivia_date = %s,
-                            pet_hunger = %s, pet_happiness = %s,
-                            pet_hunger_last_decay = %s, pet_happiness_last_activity = %s,
-                            pet_ulta_used_date = %s, pet_ulta_free_roll_pending = %s,
-                            pet_ulta_oracle_pending = %s, pet_ulta_trivia_pending = %s,
-                            pet_casino_extra_spins = %s, pet_ulta_oracle_preview = %s,
-                            pet_death_pending_notify = %s
-                        WHERE player_id = %s
-                    """
-                    cursor.execute(update_query, (
-                        player.player_name, player.pisunchik_size, player.coins,
-                        player.items, player.characteristics, player.player_stocks,
-                        player.statuetki, player.chat_id, player.correct_answers,
-                        player.nnn_checkins, player.last_used, player.last_vor,
-                        player.last_prezervativ, player.last_joke, player.casino_last_used,
-                        player.casino_usage_count, player.ballzzz_number, player.notified,
-                        getattr(player, 'miniapp_daily_spins', 0),
-                        getattr(player, 'miniapp_last_spin_date', datetime.min.replace(tzinfo=timezone.utc)),
-                        getattr(player, 'miniapp_total_winnings', 0.0),
-                        json.dumps(getattr(player, 'pet', None)) if getattr(player, 'pet', None) else None,
-                        json.dumps(getattr(player, 'pet_titles', [])),
-                        getattr(player, 'pet_active_title', None),
-                        getattr(player, 'pet_revives_used', 0),
-                        getattr(player, 'pet_revives_reset_date', None),
-                        getattr(player, 'trivia_streak', 0),
-                        getattr(player, 'last_trivia_date', None),
-                        getattr(player, 'pet_hunger', 100),
-                        getattr(player, 'pet_happiness', 50),
-                        getattr(player, 'pet_hunger_last_decay', None),
-                        getattr(player, 'pet_happiness_last_activity', None),
-                        getattr(player, 'pet_ulta_used_date', None),
-                        getattr(player, 'pet_ulta_free_roll_pending', False),
-                        getattr(player, 'pet_ulta_oracle_pending', False),
-                        getattr(player, 'pet_ulta_trivia_pending', False),
-                        getattr(player, 'pet_casino_extra_spins', 0),
-                        json.dumps(getattr(player, 'pet_ulta_oracle_preview', None)) if getattr(player, 'pet_ulta_oracle_preview', None) else None,
-                        getattr(player, 'pet_death_pending_notify', False),
-                        player.player_id
-                    ))
-                else:
-                    # Insert new player
-                    insert_query = """
-                        INSERT INTO pisunchik_data (
-                            player_id, player_name, pisunchik_size, coins,
-                            items, characteristics, player_stocks, statuetki,
-                            chat_id, correct_answers, nnn_checkins, last_used,
-                            last_vor, last_prezervativ, last_joke, casino_last_used,
-                            casino_usage_count, ballzzz_number, notified,
-                            pet, pet_titles, pet_active_title, pet_revives_used,
-                            pet_revives_reset_date, trivia_streak, last_trivia_date,
-                            pet_hunger, pet_happiness, pet_hunger_last_decay,
-                            pet_happiness_last_activity, pet_ulta_used_date,
-                            pet_ulta_free_roll_pending, pet_ulta_oracle_pending,
-                            pet_ulta_trivia_pending, pet_casino_extra_spins, pet_ulta_oracle_preview,
-                            pet_death_pending_notify
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """
-                    cursor.execute(insert_query, (
-                        player.player_id, player.player_name, player.pisunchik_size, player.coins,
-                        player.items, player.characteristics, player.player_stocks,
-                        player.statuetki, player.chat_id, player.correct_answers,
-                        player.nnn_checkins, player.last_used, player.last_vor,
-                        player.last_prezervativ, player.last_joke, player.casino_last_used,
-                        player.casino_usage_count, player.ballzzz_number, player.notified,
-                        json.dumps(getattr(player, 'pet', None)) if getattr(player, 'pet', None) else None,
-                        json.dumps(getattr(player, 'pet_titles', [])),
-                        getattr(player, 'pet_active_title', None),
-                        getattr(player, 'pet_revives_used', 0),
-                        getattr(player, 'pet_revives_reset_date', None),
-                        getattr(player, 'trivia_streak', 0),
-                        getattr(player, 'last_trivia_date', None),
-                        getattr(player, 'pet_hunger', 100),
-                        getattr(player, 'pet_happiness', 50),
-                        getattr(player, 'pet_hunger_last_decay', None),
-                        getattr(player, 'pet_happiness_last_activity', None),
-                        getattr(player, 'pet_ulta_used_date', None),
-                        getattr(player, 'pet_ulta_free_roll_pending', False),
-                        getattr(player, 'pet_ulta_oracle_pending', False),
-                        getattr(player, 'pet_ulta_trivia_pending', False),
-                        getattr(player, 'pet_casino_extra_spins', 0),
-                        json.dumps(getattr(player, 'pet_ulta_oracle_preview', None)) if getattr(player, 'pet_ulta_oracle_preview', None) else None,
-                        getattr(player, 'pet_death_pending_notify', False),
-                    ))
-                
-                connection.commit()
+            async with self.db.connection() as conn:
+                # Use a transaction for atomicity (SELECT + INSERT/UPDATE)
+                async with conn.transaction():
+                    cursor = await conn.execute(
+                        "SELECT player_id FROM pisunchik_data WHERE player_id = %s",
+                        (player.player_id,),
+                    )
+                    exists = await cursor.fetchone() is not None
+
+                    if exists:
+                        update_query = """
+                            UPDATE pisunchik_data SET
+                                player_name = %s, pisunchik_size = %s, coins = %s,
+                                items = %s, characteristics = %s, player_stocks = %s,
+                                statuetki = %s, chat_id = %s, correct_answers = %s,
+                                nnn_checkins = %s, last_used = %s, last_vor = %s,
+                                last_prezervativ = %s, last_joke = %s, casino_last_used = %s,
+                                casino_usage_count = %s, ballzzz_number = %s, notified = %s,
+                                miniapp_daily_spins = %s, miniapp_last_spin_date = %s, miniapp_total_winnings = %s,
+                                pet = %s, pet_titles = %s, pet_active_title = %s, pet_revives_used = %s,
+                                pet_revives_reset_date = %s, trivia_streak = %s, last_trivia_date = %s,
+                                pet_hunger = %s, pet_happiness = %s,
+                                pet_hunger_last_decay = %s, pet_happiness_last_activity = %s,
+                                pet_ulta_used_date = %s, pet_ulta_free_roll_pending = %s,
+                                pet_ulta_oracle_pending = %s, pet_ulta_trivia_pending = %s,
+                                pet_casino_extra_spins = %s, pet_ulta_oracle_preview = %s,
+                                pet_death_pending_notify = %s
+                            WHERE player_id = %s
+                        """
+                        await conn.execute(update_query, (
+                            player.player_name, player.pisunchik_size, player.coins,
+                            player.items, player.characteristics, player.player_stocks,
+                            player.statuetki, player.chat_id, player.correct_answers,
+                            player.nnn_checkins, player.last_used, player.last_vor,
+                            player.last_prezervativ, player.last_joke, player.casino_last_used,
+                            player.casino_usage_count, player.ballzzz_number, player.notified,
+                            getattr(player, 'miniapp_daily_spins', 0),
+                            getattr(player, 'miniapp_last_spin_date', datetime.min.replace(tzinfo=timezone.utc)),
+                            getattr(player, 'miniapp_total_winnings', 0.0),
+                            json.dumps(getattr(player, 'pet', None)) if getattr(player, 'pet', None) else None,
+                            json.dumps(getattr(player, 'pet_titles', [])),
+                            getattr(player, 'pet_active_title', None),
+                            getattr(player, 'pet_revives_used', 0),
+                            getattr(player, 'pet_revives_reset_date', None),
+                            getattr(player, 'trivia_streak', 0),
+                            getattr(player, 'last_trivia_date', None),
+                            getattr(player, 'pet_hunger', 100),
+                            getattr(player, 'pet_happiness', 50),
+                            getattr(player, 'pet_hunger_last_decay', None),
+                            getattr(player, 'pet_happiness_last_activity', None),
+                            getattr(player, 'pet_ulta_used_date', None),
+                            getattr(player, 'pet_ulta_free_roll_pending', False),
+                            getattr(player, 'pet_ulta_oracle_pending', False),
+                            getattr(player, 'pet_ulta_trivia_pending', False),
+                            getattr(player, 'pet_casino_extra_spins', 0),
+                            json.dumps(getattr(player, 'pet_ulta_oracle_preview', None)) if getattr(player, 'pet_ulta_oracle_preview', None) else None,
+                            getattr(player, 'pet_death_pending_notify', False),
+                            player.player_id
+                        ))
+                    else:
+                        insert_query = """
+                            INSERT INTO pisunchik_data (
+                                player_id, player_name, pisunchik_size, coins,
+                                items, characteristics, player_stocks, statuetki,
+                                chat_id, correct_answers, nnn_checkins, last_used,
+                                last_vor, last_prezervativ, last_joke, casino_last_used,
+                                casino_usage_count, ballzzz_number, notified,
+                                pet, pet_titles, pet_active_title, pet_revives_used,
+                                pet_revives_reset_date, trivia_streak, last_trivia_date,
+                                pet_hunger, pet_happiness, pet_hunger_last_decay,
+                                pet_happiness_last_activity, pet_ulta_used_date,
+                                pet_ulta_free_roll_pending, pet_ulta_oracle_pending,
+                                pet_ulta_trivia_pending, pet_casino_extra_spins, pet_ulta_oracle_preview,
+                                pet_death_pending_notify
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """
+                        await conn.execute(insert_query, (
+                            player.player_id, player.player_name, player.pisunchik_size, player.coins,
+                            player.items, player.characteristics, player.player_stocks,
+                            player.statuetki, player.chat_id, player.correct_answers,
+                            player.nnn_checkins, player.last_used, player.last_vor,
+                            player.last_prezervativ, player.last_joke, player.casino_last_used,
+                            player.casino_usage_count, player.ballzzz_number, player.notified,
+                            json.dumps(getattr(player, 'pet', None)) if getattr(player, 'pet', None) else None,
+                            json.dumps(getattr(player, 'pet_titles', [])),
+                            getattr(player, 'pet_active_title', None),
+                            getattr(player, 'pet_revives_used', 0),
+                            getattr(player, 'pet_revives_reset_date', None),
+                            getattr(player, 'trivia_streak', 0),
+                            getattr(player, 'last_trivia_date', None),
+                            getattr(player, 'pet_hunger', 100),
+                            getattr(player, 'pet_happiness', 50),
+                            getattr(player, 'pet_hunger_last_decay', None),
+                            getattr(player, 'pet_happiness_last_activity', None),
+                            getattr(player, 'pet_ulta_used_date', None),
+                            getattr(player, 'pet_ulta_free_roll_pending', False),
+                            getattr(player, 'pet_ulta_oracle_pending', False),
+                            getattr(player, 'pet_ulta_trivia_pending', False),
+                            getattr(player, 'pet_casino_extra_spins', 0),
+                            json.dumps(getattr(player, 'pet_ulta_oracle_preview', None)) if getattr(player, 'pet_ulta_oracle_preview', None) else None,
+                            getattr(player, 'pet_death_pending_notify', False),
+                        ))
+
                 self._cache_player(player)
                 return True
-                
+
         except Exception as e:
             logger.error(f"Error saving player {player.player_id}: {e}")
-            connection.rollback()
             return False
-        finally:
-            self.db.release_connection(connection)
 
-    def create_player(self, player_id: int, player_name: str) -> Player:
+    async def create_player(self, player_id: int, player_name: str) -> Player:
         """Create a new player with default values"""
         player = Player(
             player_id=player_id,
@@ -209,34 +203,32 @@ class PlayerService:
             ballzzz_number=None,
             notified=False
         )
-        
-        if self.save_player(player):
+
+        if await self.save_player(player):
             return player
         else:
             raise Exception(f"Failed to create player {player_id}")
 
-    def player_exists(self, player_id: int) -> bool:
+    async def player_exists(self, player_id: int) -> bool:
         """Check if a player exists in the database"""
-        connection = self.db.get_connection()
         try:
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT 1 FROM pisunchik_data WHERE player_id = %s", (player_id,))
-                return cursor.fetchone() is not None
+            async with self.db.connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT 1 FROM pisunchik_data WHERE player_id = %s", (player_id,)
+                )
+                return await cursor.fetchone() is not None
         except Exception as e:
             logger.error(f"Error checking if player exists {player_id}: {e}")
             return False
-        finally:
-            self.db.release_connection(connection)
 
-    def get_all_players(self) -> Dict[int, Player]:
+    async def get_all_players(self) -> Dict[int, Player]:
         """Get all players from the database (use carefully, can be memory intensive)"""
-        connection = self.db.get_connection()
         try:
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT * FROM pisunchik_data")
-                rows = cursor.fetchall()
+            async with self.db.connection() as conn:
+                cursor = await conn.execute("SELECT * FROM pisunchik_data")
+                rows = await cursor.fetchall()
                 column_names = [desc[0] for desc in cursor.description]
-                
+
                 players = {}
                 for row in rows:
                     player = Player.from_db_row(row, column_names)
@@ -247,23 +239,19 @@ class PlayerService:
         except Exception as e:
             logger.error(f"Error getting all players: {e}")
             return {}
-        finally:
-            self.db.release_connection(connection)
 
-    def update_player_field(self, player_id: int, field_name: str, value) -> bool:
+    async def update_player_field(self, player_id: int, field_name: str, value) -> bool:
         """Update a specific field for a player"""
         # Validate field_name against whitelist to prevent SQL injection
         if field_name not in ALLOWED_PLAYER_FIELDS:
             logger.error(f"Invalid field name: {field_name}")
             return False
 
-        connection = self.db.get_connection()
         try:
-            with connection.cursor() as cursor:
+            async with self.db.connection() as conn:
                 # Safe because field_name is validated against whitelist
                 query = f"UPDATE pisunchik_data SET {field_name} = %s WHERE player_id = %s"
-                cursor.execute(query, (value, player_id))
-                connection.commit()
+                await conn.execute(query, (value, player_id))
 
                 # Invalidate cache to force reload on next access
                 self.remove_from_cache(player_id)
@@ -271,30 +259,24 @@ class PlayerService:
                 return True
         except Exception as e:
             logger.error(f"Error updating player field {field_name} for player {player_id}: {e}")
-            connection.rollback()
             return False
-        finally:
-            self.db.release_connection(connection)
 
-    def get_leaderboard(self, limit: int = 10) -> List[Player]:
+    async def get_leaderboard(self, limit: int = 10) -> List[Player]:
         """Get top players by pisunchik size"""
-        connection = self.db.get_connection()
         try:
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    SELECT * FROM pisunchik_data 
-                    ORDER BY pisunchik_size DESC 
+            async with self.db.connection() as conn:
+                cursor = await conn.execute("""
+                    SELECT * FROM pisunchik_data
+                    ORDER BY pisunchik_size DESC
                     LIMIT %s
                 """, (limit,))
-                rows = cursor.fetchall()
+                rows = await cursor.fetchall()
                 column_names = [desc[0] for desc in cursor.description]
-                
+
                 return [Player.from_db_row(row, column_names) for row in rows]
         except Exception as e:
             logger.error(f"Error getting leaderboard: {e}")
             return []
-        finally:
-            self.db.release_connection(connection)
 
     def clear_cache(self):
         """Clear the player cache"""

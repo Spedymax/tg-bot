@@ -81,9 +81,7 @@ class QuizScheduler:
             question_data = None
 
             # Try pool first
-            result = await asyncio.to_thread(
-                self.trivia_service.get_unused_question_for_chat, chat_id
-            )
+            result = await self.trivia_service.get_unused_question_for_chat(chat_id)
             if result is not None:
                 question_id, question_data = result
                 logger.info(f"Reusing pooled question id={question_id} for chat {chat_id}")
@@ -91,12 +89,10 @@ class QuizScheduler:
             # Fall back to AI batch generation when pool is exhausted
             if question_data is None:
                 logger.info(f"Pool exhausted for chat {chat_id}, generating batch of 30 via AI")
-                refill = await asyncio.to_thread(self.refill_question_pool, 30)
+                refill = await self.refill_question_pool(30)
                 logger.info(f"Batch refill: {refill['added']} added, {refill['skipped']} skipped")
 
-                result = await asyncio.to_thread(
-                    self.trivia_service.get_unused_question_for_chat, chat_id
-                )
+                result = await self.trivia_service.get_unused_question_for_chat(chat_id)
                 if result is not None:
                     question_id, question_data = result
                 else:
@@ -108,65 +104,24 @@ class QuizScheduler:
 
             # Record history
             if question_id is not None:
-                await asyncio.to_thread(
-                    self.trivia_service.record_question_sent_to_chat, question_id, chat_id
-                )
+                await self.trivia_service.record_question_sent_to_chat(question_id, chat_id)
 
         except Exception as e:
             logger.error(f"Error sending quiz to chat {chat_id}: {e}")
 
-    def _get_question_id_by_text(self, question_text: str):
+    async def _get_question_id_by_text(self, question_text: str):
         """Look up DB id for a just-inserted question by its text."""
-        conn = None
         try:
-            conn = self.db_manager.get_connection()
-            with conn.cursor() as cursor:
-                cursor.execute(
+            async with self.db_manager.connection() as conn:
+                cursor = await conn.execute(
                     "SELECT id FROM questions WHERE question = %s ORDER BY date_added DESC LIMIT 1",
                     (question_text,)
                 )
-                row = cursor.fetchone()
+                row = await cursor.fetchone()
                 return row[0] if row else None
         except Exception as e:
             logger.error(f"Error looking up question id: {e}")
             return None
-        finally:
-            if conn:
-                self.db_manager.release_connection(conn)
-
-    def _generate_question(self, max_retries=3):
-        """Генерация вопроса с использованием TriviaService."""
-        for attempt in range(max_retries):
-            try:
-                result = self.trivia_service.generate_question("system", "Scheduler")
-
-                if result.get("success"):
-                    question_data = result["question"]
-                    return {
-                        "question": question_data["text"],
-                        "answer": question_data["correct_answer"],
-                        "explanation": question_data["explanation"],
-                        "wrong_answers": [opt for opt in question_data["options"] if opt != question_data["correct_answer"]]
-                    }
-                else:
-                    error_message = result.get('message', 'Unknown error')
-                    logger.warning(f"Question generation attempt {attempt + 1} failed: {error_message}")
-
-                    if "уже был задан ранее" in error_message and attempt < max_retries - 1:
-                        logger.info(f"Retrying question generation (attempt {attempt + 2}/{max_retries})")
-                        continue
-                    else:
-                        logger.error(f"Failed to generate question after {attempt + 1} attempts: {error_message}")
-                        return None
-
-            except Exception as e:
-                logger.error(f"Error generating question on attempt {attempt + 1}: {e}")
-                if attempt < max_retries - 1:
-                    logger.info(f"Retrying due to exception (attempt {attempt + 2}/{max_retries})")
-                    continue
-
-        logger.error(f"Failed to generate question after {max_retries} attempts")
-        return None
 
     async def _send_quiz_message(self, chat_id: int, question_data: Dict[str, Any]):
         """Отправка сообщения с квизом."""
@@ -196,40 +151,30 @@ class QuizScheduler:
                 protect_content=True
             )
 
-            await asyncio.to_thread(
-                self._save_question_state, question_msg.message_id, question_data, answer_options
-            )
+            await self._save_question_state(question_msg.message_id, question_data, answer_options)
 
             logger.info(f"Quiz sent to chat {chat_id}, message_id: {question_msg.message_id}")
 
         except Exception as e:
             logger.error(f"Error sending quiz message: {e}")
 
-    def _save_question_state(self, message_id: int, question_data: Dict[str, Any], answer_options: list):
+    async def _save_question_state(self, message_id: int, question_data: Dict[str, Any], answer_options: list):
         """Сохранение состояния квиза в базе данных."""
         try:
-            connection = self.db_manager.get_connection()
+            async with self.db_manager.connection() as conn:
+                question_state_data = {
+                    "players_responses": {},
+                    "options": answer_options
+                }
 
-            try:
-                with connection.cursor() as cursor:
-                    question_state_data = {
-                        "players_responses": {},
-                        "options": answer_options
-                    }
-
-                    cursor.execute(
-                        "INSERT INTO question_state (message_id, original_question, players_responses) VALUES (%s, %s, %s)",
-                        (message_id, question_data["question"], json.dumps(question_state_data))
-                    )
-                    connection.commit()
-
-            finally:
-                self.db_manager.release_connection(connection)
-
+                await conn.execute(
+                    "INSERT INTO question_state (message_id, original_question, players_responses) VALUES (%s, %s, %s)",
+                    (message_id, question_data["question"], json.dumps(question_state_data))
+                )
         except Exception as e:
             logger.error(f"Error saving question state: {e}")
 
-    def refill_question_pool(self, count: int = 5) -> Dict[str, Any]:
+    async def refill_question_pool(self, count: int = 5) -> Dict[str, Any]:
         """Generate `count` new AI questions in one API call and save them to the pool."""
         added = 0
         skipped = 0
@@ -241,11 +186,11 @@ class QuizScheduler:
 
             for question in questions:
                 try:
-                    if self.trivia_service.is_duplicate_question(question.question, question.correct_answer):
+                    if await self.trivia_service.is_duplicate_question(question.question, question.correct_answer):
                         logger.info("Skipping duplicate question during pool refill")
                         skipped += 1
                         continue
-                    result = self.trivia_service.save_question_to_database(question)
+                    result = await self.trivia_service.save_question_to_database(question)
                     if result is not None:
                         added += 1
                     else:
@@ -367,15 +312,13 @@ class QuizScheduler:
         try:
             logger.info("Starting daily answers broadcast...")
 
-            questions = await asyncio.to_thread(self._get_todays_questions, self.target_chat_id)
+            questions = await self._get_todays_questions(self.target_chat_id)
 
             if not questions:
                 logger.info("No questions today, skipping answers broadcast")
                 return
 
-            player_scores = await asyncio.to_thread(
-                self._get_player_scores_for_chat, self.target_chat_id
-            )
+            player_scores = await self._get_player_scores_for_chat(self.target_chat_id)
 
             message = self._format_daily_answers(questions, player_scores)
             await self._send_long_message(self.target_chat_id, message)
@@ -384,14 +327,11 @@ class QuizScheduler:
         except Exception as e:
             logger.error(f"Error sending daily answers: {e}")
 
-    def _get_todays_questions(self, chat_id: int):
+    async def _get_todays_questions(self, chat_id: int):
         """Query today's questions that were actually sent to the given chat."""
-        connection = None
         try:
-            connection = self.db_manager.get_connection()
-
-            with connection.cursor() as cursor:
-                cursor.execute(
+            async with self.db_manager.connection() as conn:
+                cursor = await conn.execute(
                     "SELECT q.question, q.correct_answer, q.explanation, h.sent_at "
                     "FROM questions q "
                     "JOIN chat_question_history h ON h.question_id = q.id AND h.chat_id = %s "
@@ -399,54 +339,46 @@ class QuizScheduler:
                     "ORDER BY h.sent_at ASC",
                     (chat_id,)
                 )
-                return cursor.fetchall()
-
+                return await cursor.fetchall()
         except Exception as e:
             logger.error(f"Error fetching today's questions: {e}")
             return []
-        finally:
-            if connection:
-                self.db_manager.release_connection(connection)
 
-    def _get_player_scores_for_chat(self, chat_id):
+    async def _get_player_scores_for_chat(self, chat_id):
         """Get player scores for specific chat."""
-        connection = None
         try:
-            connection = self.db_manager.get_connection()
+            async with self.db_manager.connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT player_id, player_name, correct_answers FROM pisunchik_data"
+                )
+                players_data = await cursor.fetchall()
 
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT player_id, player_name, correct_answers FROM pisunchik_data")
-                players_data = cursor.fetchall()
+            scores = []
+            chat_id_str = str(chat_id)
 
-                scores = []
-                chat_id_str = str(chat_id)
+            for player_id, player_name, correct_answers in players_data:
+                if not correct_answers:
+                    continue
 
-                for player_id, player_name, correct_answers in players_data:
-                    if not correct_answers:
-                        continue
+                score_for_chat = 0
+                for score_entry in correct_answers:
+                    if score_entry.startswith(f"{chat_id_str}:"):
+                        try:
+                            score_for_chat = int(score_entry.split(":")[1])
+                            break
+                        except (ValueError, IndexError):
+                            continue
 
-                    score_for_chat = 0
-                    for score_entry in correct_answers:
-                        if score_entry.startswith(f"{chat_id_str}:"):
-                            try:
-                                score_for_chat = int(score_entry.split(":")[1])
-                                break
-                            except (ValueError, IndexError):
-                                continue
+                if score_for_chat > 0:
+                    name = player_name or f"Player {player_id}"
+                    scores.append((name, score_for_chat))
 
-                    if score_for_chat > 0:
-                        name = player_name or f"Player {player_id}"
-                        scores.append((name, score_for_chat))
-
-                scores.sort(key=lambda x: x[1], reverse=True)
-                return scores
+            scores.sort(key=lambda x: x[1], reverse=True)
+            return scores
 
         except Exception as e:
             logger.error(f"Error getting player scores: {e}")
             return []
-        finally:
-            if connection:
-                self.db_manager.release_connection(connection)
 
     def _format_daily_answers(self, questions, player_scores):
         """Format questions and leaderboard into HTML message."""

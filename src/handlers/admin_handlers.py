@@ -34,8 +34,8 @@ class AdminHandlers:
             self.gemini_model = None
             logger.warning("GEMINI_API_KEY not found, sho_tam_novogo feature will be disabled")
 
-        # Create messages table if it doesn't exist
-        self._create_messages_table()
+        # Create messages table if it doesn't exist (scheduled as async task)
+        asyncio.ensure_future(self._create_messages_table())
 
         self._register()
 
@@ -43,7 +43,7 @@ class AdminHandlers:
         """Set the quiz scheduler instance"""
         self.quiz_scheduler = quiz_scheduler
 
-    def _create_messages_table(self):
+    async def _create_messages_table(self):
         """Create messages table for storing chat messages (if not exists)"""
         try:
             # Using existing table structure: id, user_id, message_text, timestamp, name
@@ -57,16 +57,16 @@ class AdminHandlers:
                     message_id BIGINT
                 )
             """
-            self.player_service.db.execute_query(query)
+            await self.player_service.db.execute_query(query)
             # Add message_id column if it doesn't exist yet (migration for existing installs)
-            self.player_service.db.execute_query("""
+            await self.player_service.db.execute_query("""
                 ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_id BIGINT
             """)
             logger.info("Messages table created/verified successfully")
         except Exception as e:
             logger.error(f"Error creating messages table: {e}")
 
-    def _store_message(self, message: Message):
+    async def _store_message(self, message: Message):
         """Store a message in the database"""
         try:
             # Don't store bot commands or messages from bots
@@ -84,11 +84,11 @@ class AdminHandlers:
                     name,
                     message.message_id,
                 )
-                self.player_service.db.execute_query(query, params)
+                await self.player_service.db.execute_query(query, params)
         except Exception as e:
             logger.error(f"Error storing message: {e}")
 
-    def _get_recent_messages(self, hours=12, limit=100):
+    async def _get_recent_messages(self, hours=12, limit=100):
         """Get recent messages from the database"""
         try:
             query = """
@@ -99,7 +99,7 @@ class AdminHandlers:
                 LIMIT %s
             """
             params = (hours, limit)
-            results = self.player_service.db.execute_query(query, params)
+            results = await self.player_service.db.execute_query(query, params)
 
             if not results:
                 return []
@@ -215,9 +215,7 @@ class AdminHandlers:
         @self.router.message(Command('start'))
         async def cmd_start(message: Message, state: FSMContext):
             """Show profile or start registration flow."""
-            player = await asyncio.to_thread(
-                self.player_service.get_player, message.from_user.id
-            )
+            player = await self.player_service.get_player(message.from_user.id)
             if player:
                 await message.reply(
                     f"🎮 Ваш профиль:\n"
@@ -286,7 +284,7 @@ class AdminHandlers:
             user_id = int(parts[0])
             name = parts[1] if len(parts) > 1 else "Игрок"
 
-            existing = await asyncio.to_thread(self.player_service.get_player, user_id)
+            existing = await self.player_service.get_player(user_id)
             if existing:
                 await call.answer("Игрок уже зарегистрирован.")
                 await call.message.edit_text(call.message.text + "\n\n✅ Уже зарегистрирован.")
@@ -298,7 +296,7 @@ class AdminHandlers:
                 player_name=name,
                 chat_id=[call.message.chat.id],
             )
-            ok = await asyncio.to_thread(self.player_service.save_player, new_player)
+            ok = await self.player_service.save_player(new_player)
             if ok:
                 await call.answer("Игрок добавлен!")
                 await call.message.edit_text(call.message.text + f"\n\n✅ Принят как '{name}'.")
@@ -361,7 +359,7 @@ class AdminHandlers:
             if action == "broadcast":
                 success_count = 0
                 fail_count = 0
-                all_players = await asyncio.to_thread(self.player_service.get_all_players)
+                all_players = await self.player_service.get_all_players()
                 for player_id, player in all_players.items():
                     try:
                         if player.chat_id:
@@ -385,9 +383,7 @@ class AdminHandlers:
                     await message.reply("❌ Введите число.\n\n/cancel — отмена")
                     return
 
-                player = await asyncio.to_thread(
-                    self.player_service.get_player, user_action["player_id"]
-                )
+                player = await self.player_service.get_player(user_action["player_id"])
                 if not player:
                     await message.reply("❌ Игрок не найден.")
                     del self.admin_actions[message.from_user.id]
@@ -395,7 +391,7 @@ class AdminHandlers:
 
                 if action == "increasePisunchik":
                     player.pisunchik_size += int(amount)
-                    ok = await asyncio.to_thread(self.player_service.save_player, player)
+                    ok = await self.player_service.save_player(player)
                     await message.reply(
                         f"✅ Писюнчик {player.player_name}: +{int(amount)} см → {player.pisunchik_size} см"
                         if ok else "❌ Ошибка при сохранении."
@@ -403,7 +399,7 @@ class AdminHandlers:
 
                 elif action == "decreasePisunchik":
                     player.pisunchik_size -= int(amount)
-                    ok = await asyncio.to_thread(self.player_service.save_player, player)
+                    ok = await self.player_service.save_player(player)
                     await message.reply(
                         f"✅ Писюнчик {player.player_name}: -{int(amount)} см → {player.pisunchik_size} см"
                         if ok else "❌ Ошибка при сохранении."
@@ -411,7 +407,7 @@ class AdminHandlers:
 
                 elif action == "increaseBtc":
                     player.add_coins(amount)
-                    ok = await asyncio.to_thread(self.player_service.save_player, player)
+                    ok = await self.player_service.save_player(player)
                     await message.reply(
                         f"✅ +{amount:.4f} BTC → {player.player_name} имеет {player.coins:.4f} BTC"
                         if ok else "❌ Ошибка при сохранении."
@@ -419,7 +415,7 @@ class AdminHandlers:
 
                 elif action == "decreaseBtc":
                     player.coins = max(0.0, player.coins - amount)
-                    ok = await asyncio.to_thread(self.player_service.save_player, player)
+                    ok = await self.player_service.save_player(player)
                     await message.reply(
                         f"✅ -{amount:.4f} BTC → {player.player_name} имеет {player.coins:.4f} BTC"
                         if ok else "❌ Ошибка при сохранении."
@@ -431,7 +427,7 @@ class AdminHandlers:
                     current = player.get_quiz_score(quiz_chat)
                     new_score = max(0, current + delta)
                     player.update_quiz_score(quiz_chat, new_score)
-                    ok = await asyncio.to_thread(self.player_service.save_player, player)
+                    ok = await self.player_service.save_player(player)
                     sign = "+" if delta >= 0 else ""
                     await message.reply(
                         f"✅ Квиз {player.player_name}: {current} → {new_score} ({sign}{delta})"
@@ -451,9 +447,7 @@ class AdminHandlers:
                     return
 
                 item_name = user_action.get("item_name", "")
-                player = await asyncio.to_thread(
-                    self.player_service.get_player, user_action["player_id"]
-                )
+                player = await self.player_service.get_player(user_action["player_id"])
                 if not player:
                     await message.reply("❌ Игрок не найден.")
                     del self.admin_actions[message.from_user.id]
@@ -462,7 +456,7 @@ class AdminHandlers:
                 if action == "addItem":
                     for _ in range(quantity):
                         player.add_item(item_name)
-                    ok = await asyncio.to_thread(self.player_service.save_player, player)
+                    ok = await self.player_service.save_player(player)
                     await message.reply(
                         f"✅ Добавлено {quantity}x {item_name} игроку {player.player_name}"
                         if ok else "❌ Ошибка при сохранении."
@@ -473,7 +467,7 @@ class AdminHandlers:
                     if removed == 0:
                         await message.reply(f"❌ Предмет '{item_name}' не найден у {player.player_name}")
                     else:
-                        ok = await asyncio.to_thread(self.player_service.save_player, player)
+                        ok = await self.player_service.save_player(player)
                         await message.reply(
                             f"✅ Удалено {removed}x {item_name} у {player.player_name}"
                             if ok else "❌ Ошибка при сохранении."
@@ -482,7 +476,7 @@ class AdminHandlers:
                 elif action == "addStatue":
                     for _ in range(quantity):
                         player.statuetki.append(item_name)
-                    ok = await asyncio.to_thread(self.player_service.save_player, player)
+                    ok = await self.player_service.save_player(player)
                     await message.reply(
                         f"✅ Добавлено {quantity}x '{item_name}' игроку {player.player_name}"
                         if ok else "❌ Ошибка при сохранении."
@@ -694,7 +688,7 @@ class AdminHandlers:
                 if self.quiz_scheduler:
                     try:
                         await call.message.edit_text("🔄 Генерирую 5 вопросов для пула, подождите...")
-                        result = await asyncio.to_thread(self.quiz_scheduler.refill_question_pool, 5)
+                        result = await self.quiz_scheduler.refill_question_pool(5)
                         await call.message.edit_text(
                             f"✅ Готово!\n\n"
                             f"Добавлено в пул: {result['added']}\n"
@@ -707,7 +701,7 @@ class AdminHandlers:
 
             elif action == "backupData":
                 try:
-                    all_players = await asyncio.to_thread(self.player_service.get_all_players)
+                    all_players = await self.player_service.get_all_players()
                     backup_time = datetime.now().strftime("%Y%m%d_%H%M%S")
                     backup_filename = f"backup_{backup_time}.json"
 
@@ -746,7 +740,7 @@ class AdminHandlers:
                     "removeItem": "Убрать предмет",
                     "addStatue": "Добавить статуэтку",
                 }
-                all_players = await asyncio.to_thread(self.player_service.get_all_players)
+                all_players = await self.player_service.get_all_players()
                 player_buttons = [
                     [InlineKeyboardButton(
                         text=p.player_name,
@@ -772,7 +766,7 @@ class AdminHandlers:
             remainder = call.data[len("admin_selectPlayer_"):]
             action, player_id_str = remainder.rsplit("_", 1)
             player_id = int(player_id_str)
-            player = await asyncio.to_thread(self.player_service.get_player, player_id)
+            player = await self.player_service.get_player(player_id)
             if not player:
                 await call.answer("Игрок не найден.")
                 return
@@ -793,7 +787,7 @@ class AdminHandlers:
             elif action == "resetCooldown":
                 from datetime import timezone
                 player.last_used = datetime.min.replace(tzinfo=timezone.utc)
-                ok = await asyncio.to_thread(self.player_service.save_player, player)
+                ok = await self.player_service.save_player(player)
                 await call.message.edit_text(
                     f"✅ Кулдаун {player.player_name} сброшен." if ok else "❌ Ошибка при сохранении."
                 )
@@ -915,9 +909,7 @@ class AdminHandlers:
             if message.from_user.id not in Settings.ADMIN_IDS:
                 await message.reply("У вас нет доступа к этой команде.")
                 return
-            player = await asyncio.to_thread(
-                self.player_service.get_player, message.from_user.id
-            )
+            player = await self.player_service.get_player(message.from_user.id)
             if player:
                 await message.reply("Характеристика добавлена!")
             else:
@@ -933,7 +925,7 @@ class AdminHandlers:
                 return
             try:
                 waiting_msg = await message.reply("🔍 Анализирую сообщения за последние 12 часов...")
-                messages = await asyncio.to_thread(self._get_recent_messages, 12, 100)
+                messages = await self._get_recent_messages(12, 100)
                 analysis = await asyncio.to_thread(self._analyze_messages_with_qwen, messages)
                 await self.bot.edit_message_text(
                     analysis,
@@ -949,4 +941,4 @@ class AdminHandlers:
         @self.router.message(StateFilter(None), F.text, ~F.text.startswith('/'))
         async def store_message_handler(message: Message):
             """Store NON-COMMAND text messages for later analysis (only when no FSM state is active)."""
-            await asyncio.to_thread(self._store_message, message)
+            await self._store_message(message)

@@ -82,7 +82,7 @@ class MoltbotHandlers:
         self._active_danetka: dict[int, dict] = {}
         self._load_state()
         self._init_gemini()
-        self._ensure_danetki_table()
+        asyncio.ensure_future(self._ensure_danetki_table())
         self._register()
 
     # ── Persistence ──────────────────────────────────────────────────────────
@@ -232,10 +232,10 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: Gemini image analysis failed: {e}")
             return "[Не удалось проанализировать изображение]"
 
-    def _store_bot_reply(self, text: str, msg_id: int | None = None):
+    async def _store_bot_reply(self, text: str, msg_id: int | None = None):
         """Store Jarvis bot reply in the messages table."""
         try:
-            self.db.execute_query(
+            await self.db.execute_query(
                 "INSERT INTO messages (user_id, message_text, timestamp, name, message_id) "
                 "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s)",
                 (0, text, "Jarvis", msg_id),
@@ -243,7 +243,7 @@ class MoltbotHandlers:
         except Exception as e:
             logger.warning(f"MoltBot: failed to store bot reply: {e}")
 
-    def _get_recent_group_messages(self, limit: int = 50, chat_id: int | None = None) -> list[str]:
+    async def _get_recent_group_messages(self, limit: int = 50, chat_id: int | None = None) -> list[str]:
         """Fetch last `limit` messages from the group chat history in DB."""
         try:
             reset_time = self._history_reset_time.get(chat_id) if chat_id else None
@@ -255,7 +255,7 @@ class MoltbotHandlers:
                     ORDER BY timestamp DESC
                     LIMIT %s
                 """
-                rows = self.db.execute_query(query, (reset_time, limit))
+                rows = await self.db.execute_query(query, (reset_time, limit))
             else:
                 query = """
                     SELECT name, message_text
@@ -263,7 +263,7 @@ class MoltbotHandlers:
                     ORDER BY timestamp DESC
                     LIMIT %s
                 """
-                rows = self.db.execute_query(query, (limit,))
+                rows = await self.db.execute_query(query, (limit,))
             if not rows:
                 return []
             # Rows come newest-first; reverse to get chronological order
@@ -372,10 +372,10 @@ class MoltbotHandlers:
 
         return await self._call_openclaw(user_content, user_key, model=model)
 
-    def _count_recent_messages(self, minutes: int) -> int:
+    async def _count_recent_messages(self, minutes: int) -> int:
         """Count messages in DB written in the last `minutes` minutes."""
         try:
-            rows = self.db.execute_query(
+            rows = await self.db.execute_query(
                 "SELECT COUNT(*) FROM messages WHERE timestamp > NOW() - INTERVAL '%s minutes'",
                 (minutes,)
             )
@@ -387,7 +387,7 @@ class MoltbotHandlers:
     async def _send_proactive_message(self, chat_id: int):
         """Build context and send a proactive (unprompted) message to the chat."""
         try:
-            history = self._get_recent_group_messages(30, chat_id)
+            history = await self._get_recent_group_messages(30, chat_id)
             summary = _load_chat_summary()
 
             context_prefix = ""
@@ -413,7 +413,7 @@ class MoltbotHandlers:
             # Reply to the most recent stored message if we have its Telegram message_id
             reply_to = None
             try:
-                rows = self.db.execute_query(
+                rows = await self.db.execute_query(
                     "SELECT message_id FROM messages WHERE message_id IS NOT NULL ORDER BY timestamp DESC LIMIT 1"
                 )
                 if rows and rows[0][0]:
@@ -434,7 +434,7 @@ class MoltbotHandlers:
         last = self._last_proactive_sent.get(chat_id)
         if last and (datetime.now(timezone.utc) - last) < timedelta(hours=SPIKE_COOLDOWN_HOURS):
             return
-        count = self._count_recent_messages(30)
+        count = await self._count_recent_messages(30)
         if count >= SPIKE_THRESHOLD:
             self._proactive_queued.add(chat_id)
             delay = random.randint(SPIKE_DELAY_MIN, SPIKE_DELAY_MAX)
@@ -449,10 +449,10 @@ class MoltbotHandlers:
 
     # ── Smart summary ─────────────────────────────────────────────────────────
 
-    def _update_summary_via_qwen(self):
-        """Fetch recent messages and ask Qwen to rewrite chat-summary.md. Sync — run in thread."""
+    async def _update_summary_via_qwen(self):
+        """Fetch recent messages and ask Qwen to rewrite chat-summary.md."""
         try:
-            rows = self.db.execute_query(
+            rows = await self.db.execute_query(
                 "SELECT name, message_text FROM messages ORDER BY timestamp DESC LIMIT %s",
                 (SUMMARY_FETCH_LIMIT,),
             )
@@ -483,7 +483,7 @@ class MoltbotHandlers:
 - Обнови поле "Последнее обновление" на {now}
 - Верни ТОЛЬКО текст нового summary в формате markdown, без пояснений, без обёртки в ```"""
 
-            new_summary = self._call_ollama_direct(prompt)
+            new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
             if not new_summary or len(new_summary) < 100:
                 logger.warning("MoltBot: Qwen returned suspiciously short summary, skipping save")
                 return
@@ -500,7 +500,7 @@ class MoltbotHandlers:
         self._messages_since_summary += 1
         if self._messages_since_summary >= SUMMARY_UPDATE_INTERVAL:
             self._messages_since_summary = 0
-            asyncio.create_task(asyncio.to_thread(self._update_summary_via_qwen))
+            asyncio.create_task(self._update_summary_via_qwen())
             logger.info("MoltBot: triggered background summary update")
 
     # ── Topic detection ───────────────────────────────────────────────────────
@@ -593,7 +593,7 @@ class MoltbotHandlers:
         sender_name = self._resolve_sender_name(message.from_user)
         user_text = message.text or ""
 
-        history = self._get_recent_group_messages(limit=30, chat_id=chat_id)
+        history = await self._get_recent_group_messages(limit=30, chat_id=chat_id)
         history_block = "\n".join(history) if history else "(нет истории)"
         summary = _load_chat_summary()
         summary_block = f"[Долгосрочная память о чате:\n{summary}\n]\n" if summary else ""
@@ -713,9 +713,9 @@ class MoltbotHandlers:
 
     # ── Данетка ───────────────────────────────────────────────────────────────
 
-    def _ensure_danetki_table(self):
+    async def _ensure_danetki_table(self):
         try:
-            self.db.execute_query(
+            await self.db.execute_query(
                 "CREATE TABLE IF NOT EXISTS danetki ("
                 "id SERIAL PRIMARY KEY, "
                 "situation TEXT NOT NULL, "
@@ -726,9 +726,9 @@ class MoltbotHandlers:
         except Exception as e:
             logger.error(f"MoltBot: failed to create danetki table: {e}")
 
-    def _get_used_situations(self, limit: int = 25) -> list[str]:
+    async def _get_used_situations(self, limit: int = 25) -> list[str]:
         try:
-            rows = self.db.execute_query(
+            rows = await self.db.execute_query(
                 "SELECT situation FROM danetki ORDER BY used_at DESC LIMIT %s",
                 (limit,)
             )
@@ -737,7 +737,7 @@ class MoltbotHandlers:
             return []
 
     async def _generate_danetka(self) -> dict | None:
-        used = self._get_used_situations()
+        used = await self._get_used_situations()
         used_text = "\n".join(f"- {s[:80]}" for s in used) if used else "(нет)"
         prompt = (
             "Придумай данетку (логическую загадку) для игры в групповом чате.\n\n"
@@ -767,9 +767,9 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: danetka generation error: {e}")
         return None
 
-    def _save_danetka(self, situation: str, answer: str):
+    async def _save_danetka(self, situation: str, answer: str):
         try:
-            self.db.execute_query(
+            await self.db.execute_query(
                 "INSERT INTO danetki (situation, answer) VALUES (%s, %s)",
                 (situation, answer)
             )
@@ -829,7 +829,7 @@ class MoltbotHandlers:
 
     async def _send_weekly_analytics(self, chat_id: int):
         try:
-            total_rows = self.db.execute_query(
+            total_rows = await self.db.execute_query(
                 "SELECT COUNT(*) FROM messages WHERE timestamp > NOW() - INTERVAL '7 days'",
                 ()
             )
@@ -838,13 +838,13 @@ class MoltbotHandlers:
                 await self.bot.send_message(chat_id, "📊 За эту неделю сообщений не было.")
                 return
 
-            per_person = self.db.execute_query(
+            per_person = await self.db.execute_query(
                 "SELECT name, COUNT(*) FROM messages "
                 "WHERE timestamp > NOW() - INTERVAL '7 days' "
                 "GROUP BY name ORDER BY COUNT(*) DESC LIMIT 10",
                 ()
             )
-            top_hours = self.db.execute_query(
+            top_hours = await self.db.execute_query(
                 "SELECT EXTRACT(HOUR FROM timestamp)::int, COUNT(*) FROM messages "
                 "WHERE timestamp > NOW() - INTERVAL '7 days' "
                 "GROUP BY 1 ORDER BY 2 DESC LIMIT 3",
@@ -852,7 +852,7 @@ class MoltbotHandlers:
             )
 
             # Qwen topic summary
-            recent = self._get_recent_group_messages(limit=300, chat_id=chat_id)
+            recent = await self._get_recent_group_messages(limit=300, chat_id=chat_id)
             topics = ""
             if recent:
                 snippet = "\n".join(recent[-200:])
@@ -911,7 +911,7 @@ class MoltbotHandlers:
                 if hhmm == t and job_key not in sent_today:
                     sent_today.add(job_key)
                     # Only send if chat was active recently
-                    if self._count_recent_messages(8 * 60) >= 5:
+                    if await self._count_recent_messages(8 * 60) >= 5:
                         await self._send_proactive_message(chat_id)
                     else:
                         logger.info(f"MoltBot: skipping {t} proactive — chat inactive")
@@ -954,13 +954,13 @@ class MoltbotHandlers:
             # Fetch group history only for group chats
             history = None
             if message.chat.type in ('group', 'supergroup'):
-                history = self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
+                history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
             try:
                 reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 if reply and reply.strip():
                     sent = await message.reply(reply)
-                    self._store_bot_reply(reply, sent.message_id)
+                    await self._store_bot_reply(reply, sent.message_id)
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
@@ -983,7 +983,7 @@ class MoltbotHandlers:
                     await self.bot.edit_message_text("❌ Не смог придумать, попробуй ещё раз.",
                                                      chat_id=chat_id, message_id=waiting.message_id)
                     return
-                self._save_danetka(danetka['situation'], danetka['answer'])
+                await self._save_danetka(danetka['situation'], danetka['answer'])
                 await self.bot.edit_message_text(
                     f"🎲 *Данетка!*\n\n{danetka['situation']}\n\n"
                     "_Задавайте вопросы — отвечаю только Да / Нет / Не важно_\n"
@@ -1056,13 +1056,13 @@ class MoltbotHandlers:
 
             history = None
             if message.chat.type in ('group', 'supergroup'):
-                history = self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
+                history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
             try:
                 reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 if reply and reply.strip():
                     sent = await message.reply(reply)
-                    self._store_bot_reply(reply, sent.message_id)
+                    await self._store_bot_reply(reply, sent.message_id)
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
@@ -1099,7 +1099,7 @@ class MoltbotHandlers:
 
             history = None
             if message.chat.type in ('group', 'supergroup'):
-                history = self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
+                history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
             try:
                 file = await self.bot.get_file(message.photo[-1].file_id)
@@ -1122,7 +1122,7 @@ class MoltbotHandlers:
                 reply = await self._ask_moltbot(sender_name, combined_text, chat_context, user_key, history)
                 if reply and reply.strip():
                     sent = await message.reply(reply)
-                    self._store_bot_reply(reply, sent.message_id)
+                    await self._store_bot_reply(reply, sent.message_id)
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
