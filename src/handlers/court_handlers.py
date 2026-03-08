@@ -1,8 +1,15 @@
+import asyncio
 import logging
-import threading
-import time
-from telebot import types
+from aiogram import Router, F, Bot
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.base import StorageKey
+from aiogram.types import (
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+)
 from services.court_service import CourtService
+from states.court import CourtStates
 
 logger = logging.getLogger(__name__)
 
@@ -39,176 +46,202 @@ class CourtHandlers:
         self.bot = bot
         self.db = db_manager
         self.court_service = CourtService(db_manager)
-        # Состояния ожидания по чату: chat_id → {'state': str, 'game_id': int, ...}
+        # Group-scoped setup state: chat_id → {'state': str, 'game_id': int, ...}
+        # Kept as dict because any group member can respond (FSMContext is per user).
         self._wait: dict[int, dict] = {}
         self._bot_username: str | None = None
         self._bot_id: int | None = None
-        # Финальное слово: user_id → {game_id, role, chat_id}
-        self._pending_final_word: dict[int, dict] = {}
         # Сбор финальных слов по игре: game_id → {statements: {role: text}, needed: set, chat_id}
         self._final_word_state: dict[int, dict] = {}
         # Test mode: game_ids where user is prosecutor and AI plays defense
         self._test_games: set[int] = set()
-        # Private DM wait states: user_id → state dict
-        self._private_wait: dict[int, dict] = {}
         # Pending speech input: chat_id → {game_id, user_id, role, card, round_num, prompt_msg_id}
         self._pending_speech: dict[int, dict] = {}
-        # Fallback timers: game_id → threading.Timer
-        self._fallback_timers: dict[int, threading.Timer] = {}
+        # Fallback timers: game_id → asyncio.Task
+        self._fallback_timers: dict[int, asyncio.Task] = {}
         # AI role IDs (fake, never sent DMs)
         self.AI_LAWYER_ID = 0
         self.AI_WITNESS_ID = -1
         # Per-game locks to prevent simultaneous card plays
-        self._game_locks: dict[int, threading.Lock] = {}
+        self._game_locks: dict[int, asyncio.Lock] = {}
+        # Track chats with active court games (for filter efficiency)
+        self._active_game_chats: set[int] = set()
 
-    def setup_handlers(self):
+        self.router = Router()
+        self._register()
 
-        @self.bot.message_handler(commands=['court', 'sud'])
-        def cmd_court(message):
+    def _register(self):
+
+        # ── Group commands ────────────────────────────────────────────────────
+
+        @self.router.message(Command('court', 'sud'))
+        async def cmd_court(message: Message):
             if message.chat.type == 'private':
-                self.bot.reply_to(message, "Эта команда работает только в групповом чате.")
+                await message.reply("Эта команда работает только в групповом чате.")
                 return
             chat_id = message.chat.id
-            existing = self.court_service.get_active_game(chat_id)
+            existing = await asyncio.to_thread(self.court_service.get_active_game, chat_id)
             if existing:
-                self.bot.reply_to(message, "⚖️ Заседание уже идёт! Используй /court_stop чтобы завершить.")
+                await message.reply("⚖️ Заседание уже идёт! Используй /court_stop чтобы завершить.")
                 return
             # Чистим зависший _wait если вдруг остался без активной игры
             self._wait.pop(chat_id, None)
 
-            self.bot.send_message(chat_id, RULES_TEXT, parse_mode='HTML')
-            self.bot.send_message(chat_id, "👤 Кого обвиняем? Напишите имя или описание подсудимого (например: «Кот Леопольд», «Юра с 3-го этажа», «ChatGPT»):\n\n<i>Ответьте реплаем на это сообщение.</i>", parse_mode='HTML')
+            await self.bot.send_message(chat_id, RULES_TEXT, parse_mode='HTML')
+            await self.bot.send_message(
+                chat_id,
+                "👤 Кого обвиняем? Напишите имя или описание подсудимого (например: «Кот Леопольд», «Юра с 3-го этажа», «ChatGPT»):\n\n<i>Ответьте реплаем на это сообщение.</i>",
+                parse_mode='HTML',
+            )
             self._wait[chat_id] = {'state': 'waiting_defendant', 'initiator': message.from_user.id}
 
-        @self.bot.message_handler(commands=['court_stop', 'sud_stop'])
-        def cmd_court_stop(message):
+        @self.router.message(Command('court_stop', 'sud_stop'))
+        async def cmd_court_stop(message: Message):
             chat_id = message.chat.id
-            game = self.court_service.get_active_game(chat_id)
+            game = await asyncio.to_thread(self.court_service.get_active_game, chat_id)
             if not game:
-                self.bot.reply_to(message, "Активного заседания нет.")
+                await message.reply("Активного заседания нет.")
                 return
-            self.court_service.set_status(game['id'], 'aborted')
+            await asyncio.to_thread(self.court_service.set_status, game['id'], 'aborted')
             self._game_locks.pop(game['id'], None)
-            old_timer = self._fallback_timers.pop(game['id'], None)
-            if old_timer:
-                old_timer.cancel()
+            self._active_game_chats.discard(chat_id)
+            old_task = self._fallback_timers.pop(game['id'], None)
+            if old_task:
+                old_task.cancel()
             self._wait.pop(chat_id, None)
-            self.bot.send_message(chat_id, "⚖️ Заседание досрочно прекращено.")
+            await self.bot.send_message(chat_id, "⚖️ Заседание досрочно прекращено.")
 
-        @self.bot.message_handler(commands=['court_test'])
-        def cmd_court_test(message):
+        @self.router.message(Command('deliver_verdict'))
+        async def cmd_deliver_verdict(message: Message):
+            chat_id = message.chat.id
+            game = await asyncio.to_thread(self.court_service.get_active_game, chat_id)
+            if not game:
+                await message.reply("Активного заседания нет.")
+                return
+            await message.reply("⚖️ Повторяю вынесение приговора...")
+            asyncio.create_task(self._deliver_verdict(game['id'], chat_id))
+
+        # ── Private test mode (FSMContext-based) ──────────────────────────────
+
+        @self.router.message(Command('court_test'))
+        async def cmd_court_test(message: Message, state: FSMContext):
             if message.chat.type != 'private':
-                self.bot.reply_to(message, "Тест-режим работает только в личке с ботом.")
+                await message.reply("Тест-режим работает только в личке с ботом.")
                 return
-            user_id = message.from_user.id
-            self._private_wait[user_id] = {'state': 'waiting_defendant', 'initiator': user_id}
-            self.bot.send_message(user_id, "⚖️ <b>Тест-режим суда</b>\n\nТы — Прокурор. AI играет за защиту.\n\nКого обвиняем?", parse_mode='HTML')
+            await state.set_state(CourtStates.private_waiting_defendant)
+            await state.update_data(initiator=message.from_user.id)
+            await self.bot.send_message(
+                message.from_user.id,
+                "⚖️ <b>Тест-режим суда</b>\n\nТы — Прокурор. AI играет за защиту.\n\nКого обвиняем?",
+                parse_mode='HTML',
+            )
 
-        @self.bot.message_handler(func=lambda m: m.chat.type == 'private' and m.from_user.id in self._private_wait)
-        def handle_private_wait(message):
+        @self.router.message(CourtStates.private_waiting_defendant)
+        async def handle_private_waiting_defendant(message: Message, state: FSMContext):
             user_id = message.from_user.id
-            state_data = self._private_wait.get(user_id)
-            if not state_data:
+            defendant = (message.text or "").strip()
+            if not defendant or len(defendant) > 200:
+                await self.bot.send_message(user_id, "Введите имя подсудимого (до 200 символов).")
                 return
-            state = state_data['state']
+            await state.update_data(defendant=defendant)
+            await state.set_state(CourtStates.private_waiting_crime)
+            await self.bot.send_message(
+                user_id,
+                f"📋 Подсудимый: <b>{defendant}</b>\n\nОпишите преступление:",
+                parse_mode='HTML',
+            )
 
-            if state == 'waiting_defendant':
-                defendant = message.text.strip()
-                if not defendant or len(defendant) > 200:
-                    self.bot.send_message(user_id, "Введите имя подсудимого (до 200 символов).")
-                    return
-                state_data['defendant'] = defendant
-                state_data['state'] = 'waiting_crime'
-                self.bot.send_message(user_id, f"📋 Подсудимый: <b>{defendant}</b>\n\nОпишите преступление:", parse_mode='HTML')
-
-            elif state == 'waiting_crime':
-                crime = message.text.strip()
-                if not crime or len(crime) > 500:
-                    self.bot.send_message(user_id, "Опишите преступление (до 500 символов).")
-                    return
-                defendant = state_data['defendant']
-                self._private_wait.pop(user_id, None)
-                self.bot.send_message(user_id, "⚖️ Генерирую карты дела...")
-                threading.Thread(
-                    target=self._start_game_test,
-                    args=(user_id, defendant, crime),
-                    daemon=True
-                ).start()
-
-        @self.bot.message_handler(func=lambda m: m.chat.type == 'private' and m.from_user.id in self._pending_final_word)
-        def handle_final_word(message):
+        @self.router.message(CourtStates.private_waiting_crime)
+        async def handle_private_waiting_crime(message: Message, state: FSMContext):
             user_id = message.from_user.id
-            pending = self._pending_final_word.pop(user_id, None)
-            if not pending:
+            crime = (message.text or "").strip()
+            if not crime or len(crime) > 500:
+                await self.bot.send_message(user_id, "Опишите преступление (до 500 символов).")
                 return
-            game_id = pending['game_id']
-            role = pending['role']
-            chat_id = pending['chat_id']
-            statement = message.text.strip()[:500]
+            data = await state.get_data()
+            defendant = data['defendant']
+            await state.clear()
+            await self.bot.send_message(user_id, "⚖️ Генерирую карты дела...")
+            asyncio.create_task(self._start_game_test(user_id, defendant, crime))
+
+        # ── Private final word (FSMContext-based) ────────────────────────────
+
+        @self.router.message(CourtStates.waiting_final_word)
+        async def handle_final_word(message: Message, state: FSMContext):
+            user_id = message.from_user.id
+            data = await state.get_data()
+            await state.clear()
+
+            game_id = data['game_id']
+            role = data['role']
+            chat_id = data['chat_id']
+            statement = (message.text or "").strip()[:500]
             logger.info(f"[COURT] handle_final_word: game={game_id} role={role} user={user_id} statement='{statement[:60]}'")
 
-            self.court_service.log_message(game_id, f'final_{role}', statement)
-            self.bot.reply_to(message, "✅ Ваше финальное слово принято судом.")
+            await asyncio.to_thread(self.court_service.log_message, game_id, f'final_{role}', statement)
+            await message.reply("✅ Ваше финальное слово принято судом.")
             role_ru = ROLE_NAMES.get(role, role)
             try:
-                self.bot.send_message(chat_id, f"✅ {role_ru} предоставил финальное слово.")
+                await self.bot.send_message(chat_id, f"✅ {role_ru} предоставил финальное слово.")
             except Exception:
                 pass
 
-            state = self._final_word_state.get(game_id)
-            if not state:
+            fw_state = self._final_word_state.get(game_id)
+            if not fw_state:
                 return
-            state['statements'][role] = statement
-            state['needed'].discard(role)
+            fw_state['statements'][role] = statement
+            fw_state['needed'].discard(role)
 
-            if not state['needed']:
+            if not fw_state['needed']:
                 self._final_word_state.pop(game_id, None)
-                threading.Thread(
-                    target=self._deliver_verdict,
-                    args=(game_id, chat_id, state['statements']),
-                    daemon=True
-                ).start()
+                asyncio.create_task(self._deliver_verdict(game_id, chat_id, fw_state['statements']))
 
-        @self.bot.message_handler(func=lambda m: (
-            m.chat.type != 'private'
-            and m.chat.id in self._pending_speech
-            and m.reply_to_message is not None
-            and m.reply_to_message.from_user.id == self._get_bot_id()
-            and m.from_user.id == self._pending_speech[m.chat.id]['user_id']
-        ))
-        def handle_speech_input(message):
+        # ── Group reply handler: speech input OR judge reply (merged to avoid aiogram routing conflict) ──
+
+        @self.router.message(
+            F.chat.type.in_({'group', 'supergroup'}),
+            F.reply_to_message.as_('reply'),
+            F.func(lambda m, self=self: (
+                self._bot_id is not None
+                and m.reply_to_message is not None
+                and m.reply_to_message.from_user is not None
+                and m.reply_to_message.from_user.id == self._bot_id
+                and (m.chat.id in self._pending_speech
+                     or m.chat.id in self._active_game_chats)
+            )),
+        )
+        async def handle_group_reply(message: Message, reply: Message):
             chat_id = message.chat.id
-            pending = self._pending_speech.pop(chat_id, None)
-            if not pending:
+
+            # Path 1: speech input (player arguing after playing a card)
+            pending = self._pending_speech.get(chat_id)
+            if pending and message.from_user.id == pending['user_id']:
+                self._pending_speech.pop(chat_id, None)
+                speech = (message.text or "").strip()[:500]
+                logger.info(
+                    f"[COURT] speech_input: game={pending['game_id']} chat={chat_id} "
+                    f"role={pending['role']} user={message.from_user.id} speech='{speech[:60]}'"
+                )
+                asyncio.create_task(
+                    self._after_speech_received(
+                        pending['game_id'], chat_id, pending['role'],
+                        pending['card'], pending['round_num'], speech,
+                    )
+                )
                 return
-            speech = message.text.strip()[:500]
-            logger.info(f"[COURT] speech_input: game={pending['game_id']} chat={chat_id} role={pending['role']} user={message.from_user.id} speech='{speech[:60]}'")
-            threading.Thread(
-                target=self._after_speech_received,
-                args=(pending['game_id'], chat_id, pending['role'], pending['card'], pending['round_num'], speech),
-                daemon=True
-            ).start()
 
-        @self.bot.message_handler(func=lambda m: (
-            m.chat.type != 'private'
-            and m.reply_to_message is not None
-            and m.reply_to_message.from_user is not None
-            and m.reply_to_message.from_user.id == self._get_bot_id()
-            and m.chat.id not in self._pending_speech  # Don't conflict with speech handler
-            and bool(self.court_service.get_active_game(m.chat.id))  # Only when game active
-        ))
-        def handle_judge_reply(message):
-            chat_id = message.chat.id
-            game = self.court_service.get_active_game(chat_id)
+            # Path 2: judge reply (player answering a judge question)
+            if chat_id in self._pending_speech:
+                return  # speech pending for another user — don't interfere
+            game = await asyncio.to_thread(self.court_service.get_active_game, chat_id)
             if not game or game['status'] != 'in_progress':
                 return
 
             # Only trigger if replying to the last judge message
-            if message.reply_to_message.message_id != game.get('last_judge_msg_id'):
+            if reply.message_id != game.get('last_judge_msg_id'):
                 return
 
             user_id = message.from_user.id
-            # Identify the player's role
             role = None
             if user_id == game['prosecutor_id']:
                 role = 'prosecutor'
@@ -226,22 +259,24 @@ class CourtHandlers:
 
             logger.info(f"[COURT] handle_judge_reply: game={game['id']} role={role} user={user_id} text='{reply_text[:60]}'")
 
-            # Cancel fallback timer — player is responding
-            old_timer = self._fallback_timers.pop(game['id'], None)
-            if old_timer:
-                old_timer.cancel()
+            old_task = self._fallback_timers.pop(game['id'], None)
+            if old_task:
+                old_task.cancel()
 
-            threading.Thread(
-                target=self._process_judge_reply,
-                args=(game['id'], chat_id, role, reply_text, game['current_round']),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                self._process_judge_reply(game['id'], chat_id, role, reply_text, game['current_round'])
+            )
 
-        @self.bot.message_handler(func=lambda m: m.chat.type != 'private' and m.chat.id in self._wait)
-        def handle_wait_state(message):
-            # Игнорируем команды
-            if message.text and message.text.startswith('/'):
-                return
+        # ── Group wait state (defendant/crime input, dict-based) ──────────────
+
+        @self.router.message(
+            F.chat.type.in_({'group', 'supergroup'}),
+            F.func(lambda m, self=self: (
+                m.chat.id in self._wait
+                and not (m.text and m.text.startswith('/'))
+            )),
+        )
+        async def handle_wait_state(message: Message):
             chat_id = message.chat.id
             state_data = self._wait.get(chat_id)
             if not state_data:
@@ -249,113 +284,48 @@ class CourtHandlers:
 
             state = state_data['state']
 
-            # Требуем реплай на сообщение бота
-            if not message.reply_to_message or message.reply_to_message.from_user.id != self._get_bot_id():
+            # Require reply to bot's message
+            bot_id = await self._get_bot_id()
+            if (
+                not message.reply_to_message
+                or message.reply_to_message.from_user is None
+                or message.reply_to_message.from_user.id != bot_id
+            ):
                 return
 
             if state == 'waiting_defendant':
-                defendant = message.text.strip()
+                defendant = (message.text or "").strip()
                 if not defendant or len(defendant) > 200:
-                    self.bot.reply_to(message, "Введите имя подсудимого (до 200 символов).")
+                    await message.reply("Введите имя подсудимого (до 200 символов).")
                     return
                 state_data['defendant'] = defendant
                 state_data['state'] = 'waiting_crime'
-                self.bot.send_message(chat_id, f"📋 Подсудимый: <b>{defendant}</b>\n\nТеперь опишите преступление:\n\n<i>Ответьте реплаем на это сообщение.</i>", parse_mode='HTML')
+                await self.bot.send_message(
+                    chat_id,
+                    f"📋 Подсудимый: <b>{defendant}</b>\n\nТеперь опишите преступление:\n\n<i>Ответьте реплаем на это сообщение.</i>",
+                    parse_mode='HTML',
+                )
 
             elif state == 'waiting_crime':
-                crime = message.text.strip()
+                crime = (message.text or "").strip()
                 if not crime or len(crime) > 500:
-                    self.bot.reply_to(message, "Опишите преступление (до 500 символов).")
+                    await message.reply("Опишите преступление (до 500 символов).")
                     return
                 defendant = state_data['defendant']
-                game_id = self.court_service.create_game(chat_id, defendant, crime)
+                game_id = await asyncio.to_thread(
+                    self.court_service.create_game, chat_id, defendant, crime
+                )
                 state_data['game_id'] = game_id
                 state_data['state'] = 'role_selection'
                 state_data['roles_taken'] = {}
                 state_data.pop('prompt_msg_id', None)
                 self._wait[chat_id] = state_data
-                self._send_role_keyboard(chat_id, game_id)
+                await self._send_role_keyboard(chat_id, game_id)
 
-    def _start_game_test(self, user_id: int, defendant: str, crime: str):
-        """Запустить тест-игру: пользователь — прокурор, AI — защита."""
-        try:
-            game_id = self.court_service.create_game(user_id, defendant, crime)
-            self.court_service.assign_role(game_id, 'prosecutor', user_id)
-            self.court_service.assign_role(game_id, 'lawyer', self.AI_LAWYER_ID)
-            self.court_service.assign_role(game_id, 'witness', self.AI_WITNESS_ID)
+        # ── Callback handlers ─────────────────────────────────────────────────
 
-            prosecutor_cards, lawyer_cards, witness_cards = self.court_service.generate_cards(defendant, crime)
-            if not prosecutor_cards:
-                self.bot.send_message(user_id, "❌ Ошибка генерации карт. Попробуй /court_test ещё раз.")
-                return
-
-            self.court_service.save_cards(game_id, prosecutor_cards, lawyer_cards, witness_cards)
-            self.court_service.set_status(game_id, 'in_progress')
-            self.court_service.advance_round(game_id, 1)
-            self.court_service.set_phase(game_id, 'prosecution')
-            self.court_service.log_message(game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
-            self._test_games.add(game_id)
-
-            self._send_cards_dm(user_id, game_id, 'prosecutor', prosecutor_cards)
-            self.bot.send_message(
-                user_id,
-                f"⚖️ <b>Раунд 1 из 4</b>\n\nТвой ход, Прокурор. Сыграй карту:",
-                parse_mode='HTML'
-            )
-        except Exception as e:
-            logger.error(f"_start_game_test: ошибка: {e}")
-            try:
-                self.bot.send_message(user_id, "❌ Ошибка запуска тест-игры. Попробуй /court_test ещё раз.")
-            except Exception:
-                pass
-
-    def _ai_play_defense_test(self, game_id: int, chat_id: int, prosecutor_card: str, round_num: int):
-        """AI автоматически разыгрывает карту защиты в тест-режиме."""
-        logger.info(f"[COURT] _ai_play_defense_test: game={game_id} chat={chat_id} round={round_num}")
-        try:
-            logger.info(f"[COURT] _ai_play_defense_test: generating AI defense card")
-            card = self.court_service.ai_defense_card(game_id, prosecutor_card, round_num)
-            logger.info(f"[COURT] _ai_play_defense_test: AI card='{card[:60]}'")
-
-            self.bot.send_message(chat_id, f"🃏 <b>🛡️ Адвокат (AI)</b> играет карту:\n\n«{card}»", parse_mode='HTML')
-            self.court_service.record_played_card(game_id, 'lawyer', card, round_num)
-            self.court_service.log_message(game_id, 'lawyer', card, round_num)
-            self.court_service.set_phase(game_id, 'defense_speech')
-
-            speech = self.court_service.player_argue(game_id, 'lawyer', card, round_num)
-            if speech:
-                self.bot.send_message(chat_id, f"🛡️ <i>{speech}</i>", parse_mode='HTML')
-
-            reaction, signal = self.court_service.judge_react(game_id, 'lawyer', card, round_num)
-            if reaction:
-                judge_msg = self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
-                self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
-
-            # In test mode, AI doesn't answer follow-up questions — auto-advance
-            if signal in ("ВОПРОС", None):
-                signal = "ПРОКУРОР_ВАШ_ХОД" if round_num < 4 else "ФИНАЛ"
-
-            self._handle_judge_signal(game_id, chat_id, signal, round_num)
-
-        except Exception as e:
-            logger.error(f"_ai_play_defense_test: ошибка: {e}", exc_info=True)
-
-    def _send_role_keyboard(self, chat_id: int, game_id: int):
-        markup = types.InlineKeyboardMarkup()
-        markup.row(types.InlineKeyboardButton("⚔️ Прокурор", callback_data=f"court_role:prosecutor:{game_id}"))
-        markup.row(types.InlineKeyboardButton("🛡️ Адвокат", callback_data=f"court_role:lawyer:{game_id}"))
-        markup.row(types.InlineKeyboardButton("👁️ Свидетель защиты", callback_data=f"court_role:witness:{game_id}"))
-        markup.row(types.InlineKeyboardButton("🤖 Соло-тест (я Прокурор, AI защита)", callback_data=f"court_solo:{game_id}"))
-        self.bot.send_message(
-            chat_id,
-            "⚖️ Выберите роль для участия в заседании:",
-            reply_markup=markup,
-        )
-
-    def setup_callback_handlers(self):
-
-        @self.bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("court_role:"))
-        def handle_role_selection(call):
+        @self.router.callback_query(F.data.startswith("court_role:"))
+        async def handle_role_selection(call: CallbackQuery):
             _, role, game_id_str = call.data.split(":")
             game_id = int(game_id_str)
             chat_id = call.message.chat.id
@@ -365,40 +335,37 @@ class CourtHandlers:
             state_data = self._wait.get(chat_id, {})
             roles_taken = state_data.get('roles_taken', {})
 
-            # Проверяем не занята ли роль
             if role in roles_taken:
-                self.bot.answer_callback_query(call.id, "Эта роль уже занята!", show_alert=True)
+                await call.answer("Эта роль уже занята!", show_alert=True)
                 return
-            # Проверяем что у юзера ещё нет роли
             if user_id in roles_taken.values():
-                self.bot.answer_callback_query(call.id, "Ты уже выбрал роль!", show_alert=True)
+                await call.answer("Ты уже выбрал роль!", show_alert=True)
                 return
 
             roles_taken[role] = user_id
             state_data['roles_taken'] = roles_taken
-            self.court_service.assign_role(game_id, role, user_id)
+            await asyncio.to_thread(self.court_service.assign_role, game_id, role, user_id)
 
-            # Убираем занятую кнопку из клавиатуры
             remaining_roles = [r for r in ("prosecutor", "lawyer", "witness") if r not in roles_taken]
             if remaining_roles:
-                markup = types.InlineKeyboardMarkup()
-                for r in remaining_roles:
-                    markup.row(types.InlineKeyboardButton(ROLE_NAMES[r], callback_data=f"court_role:{r}:{game_id}"))
-                self.bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=markup)
+                markup = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=ROLE_NAMES[r], callback_data=f"court_role:{r}:{game_id}")]
+                    for r in remaining_roles
+                ])
+                await call.message.edit_reply_markup(reply_markup=markup)
             else:
-                self.bot.delete_message(chat_id, call.message.message_id)
+                await call.message.delete()
 
             role_ru = ROLE_NAMES[role]
-            self.bot.send_message(chat_id, f"✅ <b>{user_name}</b> берёт роль {role_ru}", parse_mode='HTML')
-            self.bot.answer_callback_query(call.id, f"Ты {role_ru}!")
+            await self.bot.send_message(chat_id, f"✅ <b>{user_name}</b> берёт роль {role_ru}", parse_mode='HTML')
+            await call.answer(f"Ты {role_ru}!")
 
-            # Все роли заняты → начинаем игру
             if len(roles_taken) == 3:
                 self._wait.pop(chat_id, None)
-                threading.Thread(target=self._start_game, args=(chat_id, game_id, roles_taken), daemon=True).start()
+                asyncio.create_task(self._start_game(chat_id, game_id, roles_taken))
 
-        @self.bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("court_solo:"))
-        def handle_solo_test(call):
+        @self.router.callback_query(F.data.startswith("court_solo:"))
+        async def handle_solo_test(call: CallbackQuery):
             game_id = int(call.data.split(":")[1])
             chat_id = call.message.chat.id
             user_id = call.from_user.id
@@ -406,121 +373,195 @@ class CourtHandlers:
             logger.info(f"[COURT] solo_test: game={game_id} chat={chat_id} user={user_id} ({user_name})")
 
             self._wait.pop(chat_id, None)
-            self.bot.delete_message(chat_id, call.message.message_id)
-            self.bot.answer_callback_query(call.id, "Ты — Прокурор, AI играет защиту!")
-            self.bot.send_message(chat_id, f"🤖 <b>Соло-тест:</b> {user_name} — Прокурор, AI — Адвокат и Свидетель.", parse_mode='HTML')
+            await call.message.delete()
+            await call.answer("Ты — Прокурор, AI играет защиту!")
+            await self.bot.send_message(
+                chat_id,
+                f"🤖 <b>Соло-тест:</b> {user_name} — Прокурор, AI — Адвокат и Свидетель.",
+                parse_mode='HTML',
+            )
 
-            self.court_service.assign_role(game_id, 'prosecutor', user_id)
-            self.court_service.assign_role(game_id, 'lawyer', self.AI_LAWYER_ID)
-            self.court_service.assign_role(game_id, 'witness', self.AI_WITNESS_ID)
+            await asyncio.to_thread(self.court_service.assign_role, game_id, 'prosecutor', user_id)
+            await asyncio.to_thread(self.court_service.assign_role, game_id, 'lawyer', self.AI_LAWYER_ID)
+            await asyncio.to_thread(self.court_service.assign_role, game_id, 'witness', self.AI_WITNESS_ID)
             self._test_games.add(game_id)
 
             roles_taken = {'prosecutor': user_id, 'lawyer': self.AI_LAWYER_ID, 'witness': self.AI_WITNESS_ID}
-            threading.Thread(target=self._start_game, args=(chat_id, game_id, roles_taken), daemon=True).start()
+            asyncio.create_task(self._start_game(chat_id, game_id, roles_taken))
 
-        @self.bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("court_play:"))
-        def handle_play_card(call):
-            # Формат: court_play:{game_id}:{role}:{card_index}
+        @self.router.callback_query(F.data.startswith("court_play:"))
+        async def handle_play_card(call: CallbackQuery):
             parts = call.data.split(":", 3)
             game_id, role, card_index = int(parts[1]), parts[2], int(parts[3])
             user_id = call.from_user.id
 
-            game = self.court_service.get_active_game_by_id(game_id)
+            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
             if not game:
-                self.bot.answer_callback_query(call.id, "Игра не найдена.", show_alert=True)
+                await call.answer("Игра не найдена.", show_alert=True)
                 return
 
             if game['status'] != 'in_progress':
-                self.bot.answer_callback_query(call.id, "Игра уже завершена.", show_alert=True)
+                await call.answer("Игра уже завершена.", show_alert=True)
                 return
 
-            lock = self._game_locks.setdefault(game_id, threading.Lock())
-            with lock:
-                # Re-fetch game inside lock for freshness
-                game = self.court_service.get_active_game_by_id(game_id)
+            lock = self._game_locks.setdefault(game_id, asyncio.Lock())
+            async with lock:
+                game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
                 if not game or game['status'] != 'in_progress':
-                    self.bot.answer_callback_query(call.id, "Игра уже завершена.", show_alert=True)
+                    await call.answer("Игра уже завершена.", show_alert=True)
                     return
 
-                # Check it's the player's turn
                 current_phase = game.get('current_phase', 'prosecution')
                 if role == 'prosecutor' and current_phase != 'prosecution':
-                    self.bot.answer_callback_query(
-                        call.id,
+                    await call.answer(
                         "⚖️ Не ваша очередь — суд ещё не передал вам слово!",
-                        show_alert=True
+                        show_alert=True,
                     )
                     return
                 if role in ('lawyer', 'witness') and current_phase != 'defense':
-                    self.bot.answer_callback_query(
-                        call.id,
+                    await call.answer(
                         "⚖️ Не ваша очередь — суд ещё не передал вам слово!",
-                        show_alert=True
+                        show_alert=True,
                     )
                     return
 
-                # Проверяем что это карта этого игрока
                 expected_role_id = game[f"{role}_id"]
                 if user_id != expected_role_id:
-                    self.bot.answer_callback_query(call.id, "Сейчас не твой ход!", show_alert=True)
+                    await call.answer("Сейчас не твой ход!", show_alert=True)
                     return
 
                 cards_left_key = f"{role}_cards_left"
                 if game[cards_left_key] <= 0:
-                    self.bot.answer_callback_query(call.id, "Ты уже сыграл все свои карты!", show_alert=True)
+                    await call.answer("Ты уже сыграл все свои карты!", show_alert=True)
                     return
 
-                # Защита может сыграть только одну карту за раунд
                 if role in ('lawyer', 'witness'):
                     current_round = game['current_round']
                     played_defense_role = next(
                         (p['role'] for p in game['played_cards']
                          if p['role'] in ('lawyer', 'witness') and p['round'] == current_round),
-                        None
+                        None,
                     )
                     if played_defense_role is not None:
                         who = "🛡️ Адвокат" if played_defense_role == 'lawyer' else "👁️ Свидетель"
-                        self.bot.answer_callback_query(
-                            call.id,
-                            f"{who} уже ответил в этом раунде!",
-                            show_alert=True
-                        )
+                        await call.answer(f"{who} уже ответил в этом раунде!", show_alert=True)
                         return
 
                 cards_key = f"{role}_cards"
                 try:
                     card_text = game[cards_key][card_index]
                 except (KeyError, IndexError):
-                    self.bot.answer_callback_query(call.id, "Карта не найдена (устаревшая кнопка).", show_alert=True)
+                    await call.answer("Карта не найдена (устаревшая кнопка).", show_alert=True)
                     return
 
-                logger.info(f"[COURT] handle_play_card: game={game_id} role={role} card_index={card_index} user={user_id} card='{card_text[:60]}'")
+                logger.info(
+                    f"[COURT] handle_play_card: game={game_id} role={role} "
+                    f"card_index={card_index} user={user_id} card='{card_text[:60]}'"
+                )
 
-                # Advance phase to speech-waiting (blocks other cards while speech is pending)
                 if role == 'prosecutor':
-                    self.court_service.set_phase(game_id, 'prosecution_speech')
+                    await asyncio.to_thread(self.court_service.set_phase, game_id, 'prosecution_speech')
                 elif role in ('lawyer', 'witness'):
-                    self.court_service.set_phase(game_id, 'defense_speech')
+                    await asyncio.to_thread(self.court_service.set_phase, game_id, 'defense_speech')
 
-            # UI updates and thread spawn are outside the lock
-            self.bot.answer_callback_query(call.id, "Карта сыграна!")
+            # UI updates outside the lock
+            await call.answer("Карта сыграна!")
             try:
-                new_markup = types.InlineKeyboardMarkup()
-                for row in (call.message.reply_markup.keyboard or []):
-                    for btn in row:
-                        if btn.callback_data != call.data:
-                            new_markup.row(types.InlineKeyboardButton(btn.text, callback_data=btn.callback_data))
-                self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=new_markup)
+                existing_keyboard = call.message.reply_markup.inline_keyboard if call.message.reply_markup else []
+                new_rows = [
+                    row for row in existing_keyboard
+                    if not any(btn.callback_data == call.data for btn in row)
+                ]
+                new_markup = InlineKeyboardMarkup(inline_keyboard=new_rows) if new_rows else None
+                await call.message.edit_reply_markup(reply_markup=new_markup)
             except Exception as e:
                 logger.warning(f"handle_play_card: не удалось обновить разметку: {e}")
 
-            threading.Thread(
-                target=self._process_played_card,
-                args=(game_id, game['chat_id'], role, card_text, game['current_round']),
-                daemon=True
-            ).start()
+            asyncio.create_task(
+                self._process_played_card(game_id, game['chat_id'], role, card_text, game['current_round'])
+            )
 
-    def _start_game(self, chat_id: int, game_id: int, roles_taken: dict):
+    # ── Internal game logic (all async) ──────────────────────────────────────
+
+    async def _send_role_keyboard(self, chat_id: int, game_id: int):
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⚔️ Прокурор", callback_data=f"court_role:prosecutor:{game_id}")],
+            [InlineKeyboardButton(text="🛡️ Адвокат", callback_data=f"court_role:lawyer:{game_id}")],
+            [InlineKeyboardButton(text="👁️ Свидетель защиты", callback_data=f"court_role:witness:{game_id}")],
+            [InlineKeyboardButton(text="🤖 Соло-тест (я Прокурор, AI защита)", callback_data=f"court_solo:{game_id}")],
+        ])
+        await self.bot.send_message(
+            chat_id,
+            "⚖️ Выберите роль для участия в заседании:",
+            reply_markup=markup,
+        )
+
+    async def _start_game_test(self, user_id: int, defendant: str, crime: str):
+        """Запустить тест-игру: пользователь — прокурор, AI — защита."""
+        try:
+            game_id = await asyncio.to_thread(self.court_service.create_game, user_id, defendant, crime)
+            await asyncio.to_thread(self.court_service.assign_role, game_id, 'prosecutor', user_id)
+            await asyncio.to_thread(self.court_service.assign_role, game_id, 'lawyer', self.AI_LAWYER_ID)
+            await asyncio.to_thread(self.court_service.assign_role, game_id, 'witness', self.AI_WITNESS_ID)
+
+            prosecutor_cards, lawyer_cards, witness_cards = await asyncio.to_thread(
+                self.court_service.generate_cards, defendant, crime
+            )
+            if not prosecutor_cards:
+                await self.bot.send_message(user_id, "❌ Ошибка генерации карт. Попробуй /court_test ещё раз.")
+                return
+
+            await asyncio.to_thread(self.court_service.save_cards, game_id, prosecutor_cards, lawyer_cards, witness_cards)
+            await asyncio.to_thread(self.court_service.set_status, game_id, 'in_progress')
+            await asyncio.to_thread(self.court_service.advance_round, game_id, 1)
+            await asyncio.to_thread(self.court_service.set_phase, game_id, 'prosecution')
+            await asyncio.to_thread(self.court_service.log_message, game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
+            self._test_games.add(game_id)
+
+            await self._send_cards_dm(user_id, game_id, 'prosecutor', prosecutor_cards)
+            await self.bot.send_message(
+                user_id,
+                f"⚖️ <b>Раунд 1 из 4</b>\n\nТвой ход, Прокурор. Сыграй карту:",
+                parse_mode='HTML',
+            )
+        except Exception as e:
+            logger.error(f"_start_game_test: ошибка: {e}")
+            try:
+                await self.bot.send_message(user_id, "❌ Ошибка запуска тест-игры. Попробуй /court_test ещё раз.")
+            except Exception:
+                pass
+
+    async def _ai_play_defense_test(self, game_id: int, chat_id: int, prosecutor_card: str, round_num: int):
+        """AI автоматически разыгрывает карту защиты в тест-режиме."""
+        logger.info(f"[COURT] _ai_play_defense_test: game={game_id} chat={chat_id} round={round_num}")
+        try:
+            logger.info(f"[COURT] _ai_play_defense_test: generating AI defense card")
+            card = await asyncio.to_thread(self.court_service.ai_defense_card, game_id, prosecutor_card, round_num)
+            logger.info(f"[COURT] _ai_play_defense_test: AI card='{card[:60]}'")
+
+            await self.bot.send_message(chat_id, f"🃏 <b>🛡️ Адвокат (AI)</b> играет карту:\n\n«{card}»", parse_mode='HTML')
+            await asyncio.to_thread(self.court_service.record_played_card, game_id, 'lawyer', card, round_num)
+            await asyncio.to_thread(self.court_service.log_message, game_id, 'lawyer', card, round_num)
+            await asyncio.to_thread(self.court_service.set_phase, game_id, 'defense_speech')
+
+            speech = await asyncio.to_thread(self.court_service.player_argue, game_id, 'lawyer', card, round_num)
+            if speech:
+                await self.bot.send_message(chat_id, f"🛡️ <i>{speech}</i>", parse_mode='HTML')
+
+            reaction, signal = await asyncio.to_thread(self.court_service.judge_react, game_id, 'lawyer', card, round_num)
+            if reaction:
+                judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
+                await asyncio.to_thread(self.court_service.set_last_judge_msg, game_id, judge_msg.message_id)
+
+            if signal in ("ВОПРОС", None):
+                signal = "ПРОКУРОР_ВАШ_ХОД" if round_num < 4 else "ФИНАЛ"
+
+            await self._handle_judge_signal(game_id, chat_id, signal, round_num)
+
+        except Exception as e:
+            logger.error(f"_ai_play_defense_test: ошибка: {e}", exc_info=True)
+
+    async def _start_game(self, chat_id: int, game_id: int, roles_taken: dict):
         """Сгенерировать карты, отправить в личку, начать раунд 1."""
         required = {'prosecutor', 'lawyer', 'witness'}
         if not required.issubset(roles_taken.keys()):
@@ -528,51 +569,62 @@ class CourtHandlers:
             return
         logger.info(f"[COURT] _start_game: game={game_id} chat={chat_id} roles={roles_taken}")
         try:
-            game = self.court_service.get_active_game_by_id(game_id)
+            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
             defendant = game['defendant']
             crime = game['crime']
 
-            self.bot.send_message(chat_id, "⚖️ <b>Состав суда сформирован. Генерирую материалы дела...</b>", parse_mode='HTML')
+            await self.bot.send_message(chat_id, "⚖️ <b>Состав суда сформирован. Генерирую материалы дела...</b>", parse_mode='HTML')
 
             logger.info(f"[COURT] _start_game: generating cards for '{defendant}' / '{crime}'")
-            prosecutor_cards, lawyer_cards, witness_cards = self.court_service.generate_cards(defendant, crime)
-            logger.info(f"[COURT] _start_game: cards generated — prosecutor={len(prosecutor_cards)} lawyer={len(lawyer_cards)} witness={len(witness_cards)}")
+            prosecutor_cards, lawyer_cards, witness_cards = await asyncio.to_thread(
+                self.court_service.generate_cards, defendant, crime
+            )
+            logger.info(
+                f"[COURT] _start_game: cards generated — "
+                f"prosecutor={len(prosecutor_cards)} lawyer={len(lawyer_cards)} witness={len(witness_cards)}"
+            )
 
             if not prosecutor_cards:
-                self.bot.send_message(chat_id, "❌ Ошибка генерации карт. Попробуйте /court ещё раз.")
-                self.court_service.set_status(game_id, 'aborted')
+                await self.bot.send_message(chat_id, "❌ Ошибка генерации карт. Попробуйте /court ещё раз.")
+                await asyncio.to_thread(self.court_service.set_status, game_id, 'aborted')
                 return
 
-            self.court_service.save_cards(game_id, prosecutor_cards, lawyer_cards, witness_cards)
-            self.court_service.set_status(game_id, 'in_progress')
-            self.court_service.advance_round(game_id, 1)
-            self.court_service.log_message(game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
+            await asyncio.to_thread(self.court_service.save_cards, game_id, prosecutor_cards, lawyer_cards, witness_cards)
+            await asyncio.to_thread(self.court_service.set_status, game_id, 'in_progress')
+            self._active_game_chats.add(chat_id)
+            await asyncio.to_thread(self.court_service.advance_round, game_id, 1)
+            await asyncio.to_thread(self.court_service.log_message, game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
             logger.info(f"[COURT] _start_game: game status=in_progress round=1")
 
-            # Отправляем карты в личку (AI-роли пропускаем)
-            self._send_cards_dm(roles_taken['prosecutor'], game_id, 'prosecutor', prosecutor_cards)
+            await self._send_cards_dm(roles_taken['prosecutor'], game_id, 'prosecutor', prosecutor_cards)
             if roles_taken['lawyer'] not in (self.AI_LAWYER_ID, self.AI_WITNESS_ID):
-                self._send_cards_dm(roles_taken['lawyer'], game_id, 'lawyer', lawyer_cards, partner_cards=witness_cards, partner_role='witness')
+                await self._send_cards_dm(
+                    roles_taken['lawyer'], game_id, 'lawyer', lawyer_cards,
+                    partner_cards=witness_cards, partner_role='witness',
+                )
             if roles_taken['witness'] not in (self.AI_LAWYER_ID, self.AI_WITNESS_ID):
-                self._send_cards_dm(roles_taken['witness'], game_id, 'witness', witness_cards, partner_cards=lawyer_cards, partner_role='lawyer')
+                await self._send_cards_dm(
+                    roles_taken['witness'], game_id, 'witness', witness_cards,
+                    partner_cards=lawyer_cards, partner_role='lawyer',
+                )
 
-            self.bot.send_message(
+            await self.bot.send_message(
                 chat_id,
                 f"📬 <b>Карты отправлены в личные сообщения.</b>\n\n"
                 f"⚖️ <b>Раунд 1 из 4</b>\n"
                 f"Слово предоставляется ⚔️ Прокурору. Сыграйте карту в личном чате с ботом.",
-                parse_mode='HTML'
+                parse_mode='HTML',
             )
         except Exception as e:
             logger.error(f"_start_game: ошибка для game {game_id}: {e}")
-            self.court_service.set_status(game_id, 'aborted')
+            await asyncio.to_thread(self.court_service.set_status, game_id, 'aborted')
             try:
-                self.bot.send_message(chat_id, "❌ Ошибка запуска игры. Попробуйте /court ещё раз.")
+                await self.bot.send_message(chat_id, "❌ Ошибка запуска игры. Попробуйте /court ещё раз.")
             except Exception:
                 pass
 
-    def _send_cards_dm(self, user_id: int, game_id: int, role: str, cards: list,
-                       partner_cards: list = None, partner_role: str = None):
+    async def _send_cards_dm(self, user_id: int, game_id: int, role: str, cards: list,
+                              partner_cards: list = None, partner_role: str = None):
         """Отправить игроку его руку в личку с inline-кнопками."""
         role_ru = ROLE_NAMES[role]
         plays = 4 if role == 'prosecutor' else 2
@@ -586,48 +638,48 @@ class CourtHandlers:
             for i, card in enumerate(partner_cards, 1):
                 text += f"{i}. {card}\n"
 
-        markup = types.InlineKeyboardMarkup()
-        for i, card in enumerate(cards):
-            markup.row(types.InlineKeyboardButton(
-                f"🃏 {card[:40]}{'…' if len(card) > 40 else ''}",
-                callback_data=f"court_play:{game_id}:{role}:{i}"
-            ))
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text=f"🃏 {card[:40]}{'…' if len(card) > 40 else ''}",
+                callback_data=f"court_play:{game_id}:{role}:{i}",
+            )]
+            for i, card in enumerate(cards)
+        ])
 
         try:
-            self.bot.send_message(user_id, text, parse_mode='HTML', reply_markup=markup)
+            await self.bot.send_message(user_id, text, parse_mode='HTML', reply_markup=markup)
         except Exception as e:
             logger.error(f"CourtHandlers: не удалось отправить личку {user_id}: {e}")
-            game = self.court_service.get_active_game_by_id(game_id)
+            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
             if game:
-                self.bot.send_message(
+                await self.bot.send_message(
                     game['chat_id'],
                     f"⚠️ Не удалось отправить карты игроку. "
-                    f"Пожалуйста, напишите боту в личку (@{self._get_bot_username()}) и повторите /court."
+                    f"Пожалуйста, напишите боту в личку (@{await self._get_bot_username()}) и повторите /court.",
                 )
 
-    def _process_played_card(self, game_id: int, chat_id: int, role: str, card: str, round_num: int):
+    async def _process_played_card(self, game_id: int, chat_id: int, role: str, card: str, round_num: int):
         """Объявляем сыгранную карту, судья реагирует, двигаем состояние."""
         logger.info(f"[COURT] _process_played_card: game={game_id} chat={chat_id} role={role} round={round_num} card='{card[:60]}'")
         try:
             role_ru = ROLE_NAMES[role]
-            self.bot.send_message(chat_id, f"🃏 <b>{role_ru}</b> играет карту:\n\n«{card}»", parse_mode='HTML')
+            await self.bot.send_message(chat_id, f"🃏 <b>{role_ru}</b> играет карту:\n\n«{card}»", parse_mode='HTML')
             logger.info(f"[COURT] _process_played_card: card announced in group")
 
-            self.court_service.record_played_card(game_id, role, card, round_num)
+            await asyncio.to_thread(self.court_service.record_played_card, game_id, role, card, round_num)
             logger.info(f"[COURT] _process_played_card: card recorded in DB")
 
-            game = self.court_service.get_active_game_by_id(game_id)
+            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
             if not game:
                 logger.error(f"[COURT] _process_played_card: game {game_id} not found after record")
                 return
             player_user_id = game[f'{role}_id']
             logger.info(f"[COURT] _process_played_card: player user_id={player_user_id}")
 
-            # Ask player to type their speech
-            speech_prompt = self.bot.send_message(
+            speech_prompt = await self.bot.send_message(
                 chat_id,
                 f"💬 <b>{role_ru}</b>, опиши свой аргумент — ответь реплаем на это сообщение:",
-                parse_mode='HTML'
+                parse_mode='HTML',
             )
             logger.info(f"[COURT] _process_played_card: speech prompt sent msg_id={speech_prompt.message_id}")
             self._pending_speech[chat_id] = {
@@ -642,169 +694,165 @@ class CourtHandlers:
         except Exception as e:
             logger.error(f"[COURT] _process_played_card: ошибка для game {game_id}: {e}", exc_info=True)
             try:
-                self.bot.send_message(chat_id, "⚠️ Ошибка при обработке карты. Попробуйте сыграть карту ещё раз.")
+                await self.bot.send_message(chat_id, "⚠️ Ошибка при обработке карты. Попробуйте сыграть карту ещё раз.")
             except Exception:
                 pass
 
-    def _after_speech_received(self, game_id: int, chat_id: int, role: str, card: str, round_num: int, speech: str):
+    async def _after_speech_received(self, game_id: int, chat_id: int, role: str, card: str, round_num: int, speech: str):
         """Обработать речь игрока: залогировать, показать, запустить реакцию судьи, продвинуть состояние."""
         logger.info(f"[COURT] _after_speech_received: game={game_id} chat={chat_id} role={role} round={round_num} speech='{speech[:60]}'")
         try:
-            self.court_service.log_message(game_id, role, speech, round_num)
+            await asyncio.to_thread(self.court_service.log_message, game_id, role, speech, round_num)
             role_icon = "⚔️" if role == "prosecutor" else ("🛡️" if role == "lawyer" else "👁️")
-            self.bot.send_message(chat_id, f"{role_icon} <i>{speech}</i>", parse_mode='HTML')
+            await self.bot.send_message(chat_id, f"{role_icon} <i>{speech}</i>", parse_mode='HTML')
 
-            self.bot.send_chat_action(chat_id, 'typing')
+            await self.bot.send_chat_action(chat_id, 'typing')
 
             logger.info(f"[COURT] _after_speech_received: calling judge_react")
-            reaction, signal = self.court_service.judge_react(game_id, role, card, round_num)
+            reaction, signal = await asyncio.to_thread(self.court_service.judge_react, game_id, role, card, round_num)
             logger.info(f"[COURT] _after_speech_received: judge reaction='{str(reaction)[:80]}' signal={signal}")
 
             if reaction:
-                judge_msg = self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
-                self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
+                judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
+                await asyncio.to_thread(self.court_service.set_last_judge_msg, game_id, judge_msg.message_id)
 
-            self._handle_judge_signal(game_id, chat_id, signal, round_num)
+            await self._handle_judge_signal(game_id, chat_id, signal, round_num)
 
         except Exception as e:
             logger.error(f"[COURT] _after_speech_received: ошибка для game {game_id}: {e}", exc_info=True)
 
-    def _handle_judge_signal(self, game_id: int, chat_id: int, signal: str | None, round_num: int):
+    async def _handle_judge_signal(self, game_id: int, chat_id: int, signal: str | None, round_num: int):
         """Двигает игровой стейт по сигналу судьи."""
         if signal == "ВОПРОС":
-            self.court_service.set_phase(game_id, 'judge')
-            self._start_fallback_timer(game_id, chat_id, round_num)
+            await asyncio.to_thread(self.court_service.set_phase, game_id, 'judge')
+            await self._start_fallback_timer(game_id, chat_id, round_num)
 
         elif signal == "ЗАЩИТА_ВАШ_ХОД":
-            self.court_service.set_phase(game_id, 'defense')
+            await asyncio.to_thread(self.court_service.set_phase, game_id, 'defense')
             if game_id in self._test_games:
-                # Auto-play AI defense in test mode
-                threading.Thread(
-                    target=self._ai_play_defense_test,
-                    args=(game_id, chat_id, "", round_num),
-                    daemon=True
-                ).start()
+                asyncio.create_task(self._ai_play_defense_test(game_id, chat_id, "", round_num))
             else:
-                game = self.court_service.get_active_game_by_id(game_id)
+                game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
                 if game:
-                    self.bot.send_message(
+                    await self.bot.send_message(
                         chat_id,
                         f"🛡️ <b>Защита, ваш ответ!</b>\n"
                         f"(Адвокат осталось: {game['lawyer_cards_left']}, Свидетель: {game['witness_cards_left']})",
-                        parse_mode='HTML'
+                        parse_mode='HTML',
                     )
 
         elif signal == "ПРОКУРОР_ВАШ_ХОД":
             next_round = round_num + 1
-            self.court_service.advance_round(game_id, next_round)
-            self.court_service.set_phase(game_id, 'prosecution')
-            self.bot.send_message(
+            await asyncio.to_thread(self.court_service.advance_round, game_id, next_round)
+            await asyncio.to_thread(self.court_service.set_phase, game_id, 'prosecution')
+            await self.bot.send_message(
                 chat_id,
                 f"⚖️ <b>Раунд {next_round} из 4</b>\n⚔️ Прокурор, ваш ход. Сыграйте карту в личке.",
-                parse_mode='HTML'
+                parse_mode='HTML',
             )
 
         elif signal == "ФИНАЛ":
-            self.court_service.set_phase(game_id, 'final')
-            self.bot.send_message(
+            await asyncio.to_thread(self.court_service.set_phase, game_id, 'final')
+            await self.bot.send_message(
                 chat_id,
                 "⚖️ <b>Все раунды завершены.</b>\n\nСуд предоставляет каждой из сторон <b>последнее слово</b>. Напишите ваше финальное заявление боту в личку.",
-                parse_mode='HTML'
+                parse_mode='HTML',
             )
-            self._request_final_words(game_id, chat_id)
+            await self._request_final_words(game_id, chat_id)
 
         else:
-            # LLM did not return a tag — log warning and start fallback timer
             logger.warning(f"[COURT] _handle_judge_signal: no signal for game={game_id} round={round_num}, starting fallback")
-            self._start_fallback_timer(game_id, chat_id, round_num)
+            await self._start_fallback_timer(game_id, chat_id, round_num)
 
-    def _start_fallback_timer(self, game_id: int, chat_id: int, round_num: int):
+    async def _start_fallback_timer(self, game_id: int, chat_id: int, round_num: int):
         """Start 5-minute fallback: if no player reply, auto-advance the game."""
-        # Cancel any existing timer for this game
         old = self._fallback_timers.pop(game_id, None)
         if old:
             old.cancel()
 
-        def on_timeout():
+        async def on_timeout():
             self._fallback_timers.pop(game_id, None)
-            game = self.court_service.get_active_game_by_id(game_id)
+            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
             if not game or game['status'] != 'in_progress':
                 return
             if game.get('current_phase') != 'judge':
-                return  # Player already replied, phase already advanced
+                return
 
             logger.info(f"[COURT] fallback_timer: game={game_id} — сторона не ответила на вопрос суда")
-            self.court_service.log_message(game_id, 'system', 'Сторона не ответила на вопрос суда.', round_num)
+            await asyncio.to_thread(
+                self.court_service.log_message, game_id, 'system',
+                'Сторона не ответила на вопрос суда.', round_num,
+            )
             try:
-                self.bot.send_message(
+                await self.bot.send_message(
                     chat_id,
                     "⚖️ <i>Сторона не ответила на вопрос суда. Заседание продолжается.</i>",
-                    parse_mode='HTML'
+                    parse_mode='HTML',
                 )
             except Exception:
                 pass
 
-            # Determine next step based on what's been played this round
             played = game.get('played_cards', [])
             has_defense = any(p['role'] in ('lawyer', 'witness') and p['round'] == round_num for p in played)
 
             if not has_defense:
-                # Prosecution spoke but defense hasn't — give defense their turn
-                self.court_service.set_phase(game_id, 'defense')
+                await asyncio.to_thread(self.court_service.set_phase, game_id, 'defense')
                 try:
-                    self.bot.send_message(chat_id, "🛡️ <b>Защита, ваш ответ!</b>", parse_mode='HTML')
+                    await self.bot.send_message(chat_id, "🛡️ <b>Защита, ваш ответ!</b>", parse_mode='HTML')
                 except Exception:
                     pass
             else:
-                # Defense also answered — advance to next round
                 if round_num >= 4:
-                    self.court_service.set_phase(game_id, 'final')
-                    self._request_final_words(game_id, chat_id)
+                    await asyncio.to_thread(self.court_service.set_phase, game_id, 'final')
+                    await self._request_final_words(game_id, chat_id)
                 else:
                     next_round = round_num + 1
-                    self.court_service.advance_round(game_id, next_round)
-                    self.court_service.set_phase(game_id, 'prosecution')
+                    await asyncio.to_thread(self.court_service.advance_round, game_id, next_round)
+                    await asyncio.to_thread(self.court_service.set_phase, game_id, 'prosecution')
                     try:
-                        self.bot.send_message(
+                        await self.bot.send_message(
                             chat_id,
                             f"⚖️ <b>Раунд {next_round} из 4</b>\n⚔️ Прокурор, ваш ход.",
-                            parse_mode='HTML'
+                            parse_mode='HTML',
                         )
                     except Exception:
                         pass
 
-        timer = threading.Timer(300, on_timeout)  # 5 minutes
-        timer.daemon = True
-        self._fallback_timers[game_id] = timer
-        timer.start()
+        async def _timer_wrapper():
+            await asyncio.sleep(300)  # 5 minutes
+            await on_timeout()
+
+        task = asyncio.create_task(_timer_wrapper())
+        self._fallback_timers[game_id] = task
         logger.info(f"[COURT] fallback_timer started: game={game_id} round={round_num} (300s)")
 
-    def _process_judge_reply(self, game_id: int, chat_id: int, role: str, reply_text: str, round_num: int):
+    async def _process_judge_reply(self, game_id: int, chat_id: int, role: str, reply_text: str, round_num: int):
         """Process a player's reply to a judge question."""
         try:
-            # Guard: if fallback already fired and moved the phase on, discard this reply
-            game = self.court_service.get_active_game_by_id(game_id)
+            game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
             if not game or game.get('current_phase') != 'judge':
                 logger.info(f"[COURT] _process_judge_reply: phase already advanced, discarding reply game={game_id}")
                 return
 
-            self.bot.send_chat_action(chat_id, 'typing')
-            reaction, signal = self.court_service.judge_react_to_reply(game_id, role, reply_text, round_num)
+            await self.bot.send_chat_action(chat_id, 'typing')
+            reaction, signal = await asyncio.to_thread(
+                self.court_service.judge_react_to_reply, game_id, role, reply_text, round_num
+            )
             logger.info(f"[COURT] _process_judge_reply: game={game_id} role={role} signal={signal} reaction='{str(reaction)[:60]}'")
 
             if reaction:
-                judge_msg = self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
-                self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
+                judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
+                await asyncio.to_thread(self.court_service.set_last_judge_msg, game_id, judge_msg.message_id)
 
-            self._handle_judge_signal(game_id, chat_id, signal, round_num)
+            await self._handle_judge_signal(game_id, chat_id, signal, round_num)
 
         except Exception as e:
             logger.error(f"[COURT] _process_judge_reply: ошибка: {e}", exc_info=True)
 
-    def _request_final_words(self, game_id: int, chat_id: int):
-        """Запросить финальное слово у каждого игрока в личку."""
+    async def _request_final_words(self, game_id: int, chat_id: int):
+        """Запросить финальное слово у каждого игрока в личку через FSMContext."""
         logger.info(f"[COURT] _request_final_words: game={game_id} chat={chat_id}")
-        game = self.court_service.get_active_game_by_id(game_id)
+        game = await asyncio.to_thread(self.court_service.get_active_game_by_id, game_id)
         if not game:
             logger.error(f"[COURT] _request_final_words: game {game_id} not found")
             return
@@ -823,38 +871,56 @@ class CourtHandlers:
 
         for role, user_id in role_user_map.items():
             role_ru = ROLE_NAMES[role]
-            self._pending_final_word[user_id] = {'game_id': game_id, 'role': role, 'chat_id': chat_id}
             try:
-                self.bot.send_message(
+                await self._set_final_word_state(user_id, game_id, role, chat_id)
+                await self.bot.send_message(
                     user_id,
                     f"⚖️ <b>Финальное слово</b>\n\nСуд предоставляет вам, {role_ru}, последнее слово.\n"
                     f"Напишите ваше финальное заявление (до 500 символов):",
-                    parse_mode='HTML'
+                    parse_mode='HTML',
                 )
-                self.bot.send_message(chat_id, f"⏳ Ожидаем финальное слово от {role_ru}...", parse_mode='HTML')
+                await self.bot.send_message(chat_id, f"⏳ Ожидаем финальное слово от {role_ru}...", parse_mode='HTML')
             except Exception as e:
                 logger.error(f"_request_final_words: не удалось отправить {user_id}: {e}")
-                self._pending_final_word.pop(user_id, None)
-                self._final_word_state[game_id]['statements'][role] = ''
-                self._final_word_state[game_id]['needed'].discard(role)
+                fw_state = self._final_word_state.get(game_id)
+                if fw_state:
+                    fw_state['statements'][role] = ''
+                    fw_state['needed'].discard(role)
 
-        # Если все DM упали — сразу к приговору
-        state = self._final_word_state.get(game_id)
-        if state and not state['needed']:
+        fw_state = self._final_word_state.get(game_id)
+        if fw_state and not fw_state['needed']:
             self._final_word_state.pop(game_id, None)
-            threading.Thread(target=self._deliver_verdict, args=(game_id, chat_id, {}), daemon=True).start()
+            asyncio.create_task(self._deliver_verdict(game_id, chat_id, {}))
 
-    def _deliver_verdict(self, game_id: int, chat_id: int, final_statements: dict = None):
+    async def _set_final_word_state(self, user_id: int, game_id: int, role: str, chat_id: int):
+        """Set FSMContext waiting_final_word state for a user's private chat."""
+        storage = self._get_storage()
+        if storage is None:
+            logger.warning(f"[COURT] _set_final_word_state: no storage available")
+            return
+        key = StorageKey(bot_id=self.bot.id, chat_id=user_id, user_id=user_id)
+        ctx = FSMContext(storage=storage, key=key)
+        await ctx.set_state(CourtStates.waiting_final_word)
+        await ctx.update_data(game_id=game_id, role=role, chat_id=chat_id)
+
+    def set_storage(self, storage):
+        """Called from main.py after dispatcher is created to wire FSM storage."""
+        self._storage = storage
+
+    def _get_storage(self):
+        return getattr(self, '_storage', None)
+
+    async def _deliver_verdict(self, game_id: int, chat_id: int, final_statements: dict = None):
         """Доставить драматичный многосообщный приговор."""
         logger.info(f"[COURT] _deliver_verdict: game={game_id} chat={chat_id} statements={list((final_statements or {}).keys())}")
         try:
-            self.bot.send_message(chat_id, "⚖️ Судья удаляется на совещание... 🤔", parse_mode='HTML')
-            # Clean up per-game lock
+            await self.bot.send_message(chat_id, "⚖️ Судья удаляется на совещание... 🤔", parse_mode='HTML')
             self._game_locks.pop(game_id, None)
             logger.info(f"[COURT] _deliver_verdict: generating verdict via LLM")
-            parts = self.court_service.generate_verdict(game_id, final_statements or {})
+            parts = await asyncio.to_thread(self.court_service.generate_verdict, game_id, final_statements or {})
             logger.info(f"[COURT] _deliver_verdict: verdict generated, {len(parts)} parts")
-            self.court_service.save_verdict(game_id, "\n---\n".join(parts))
+            await asyncio.to_thread(self.court_service.save_verdict, game_id, "\n---\n".join(parts))
+            self._active_game_chats.discard(chat_id)
 
             prefixes = [
                 "⚖️ <b>Позиция обвинения:</b>",
@@ -864,28 +930,31 @@ class CourtHandlers:
             ]
             for prefix, part in zip(prefixes, parts + [""] * 4):
                 if part:
-                    self.bot.send_message(chat_id, f"{prefix}\n\n{part}", parse_mode='HTML')
-                    time.sleep(2)
+                    await self.bot.send_message(chat_id, f"{prefix}\n\n{part}", parse_mode='HTML')
+                    await asyncio.sleep(2)
         except Exception as e:
             logger.error(f"_deliver_verdict: ошибка для game {game_id}: {e}")
-            self.court_service.set_status(game_id, 'finished')
+            self._active_game_chats.discard(chat_id)
+            await asyncio.to_thread(self.court_service.set_status, game_id, 'finished')
             try:
-                self.bot.send_message(chat_id, "⚠️ Ошибка при вынесении приговора. Заседание завершено.")
+                await self.bot.send_message(chat_id, "⚠️ Ошибка при вынесении приговора. Заседание завершено.")
             except Exception:
                 pass
 
-    def _get_bot_id(self) -> int:
+    async def _get_bot_id(self) -> int:
         if not self._bot_id:
             try:
-                self._bot_id = self.bot.get_me().id
+                me = await self.bot.get_me()
+                self._bot_id = me.id
+                self._bot_username = me.username
             except Exception:
                 return -1
         return self._bot_id
 
-    def _get_bot_username(self) -> str:
+    async def _get_bot_username(self) -> str:
         if not self._bot_username:
             try:
-                me = self.bot.get_me()
+                me = await self.bot.get_me()
                 self._bot_username = me.username
                 self._bot_id = me.id
             except Exception:

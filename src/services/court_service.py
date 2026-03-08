@@ -179,17 +179,25 @@ class CourtService:
     )
 
     def _call_llm(self, system_prompt: str | None, user_prompt: str) -> str:
-        """Вызов Gemini с опциональным системным промптом."""
+        """Вызов Ollama (Qwen) с опциональным системным промптом."""
+        import httpx
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
         try:
-            genai.configure(api_key=Settings.GEMINI_API_KEY)
-            model = genai.GenerativeModel(
-                'gemini-2.5-flash-lite',
-                system_instruction=system_prompt if system_prompt else None,
+            r = httpx.post(
+                f"{Settings.LOCAL_LLM_URL}/api/chat",
+                json={"model": Settings.LOCAL_LLM_MODEL,
+                      "think": False,
+                      "stream": False,
+                      "messages": messages},
+                timeout=180,
             )
-            response = model.generate_content(user_prompt)
-            return response.text.strip()
+            r.raise_for_status()
+            return r.json()["message"]["content"].strip()
         except Exception as e:
-            logger.error(f"CourtService: Gemini error: {e}")
+            logger.error(f"CourtService: Ollama error: {e}")
             return ""
 
     def _call_judge_llm(self, prompt: str, use_judge_persona: bool = True) -> str:

@@ -6,8 +6,11 @@ Handles interactive button callbacks from health monitoring alerts
 import json
 import time
 import os
+import asyncio
 import logging
 from datetime import datetime
+from aiogram import Router, F, Bot
+from aiogram.types import CallbackQuery
 
 logger = logging.getLogger(__name__)
 
@@ -17,18 +20,21 @@ class HealthAlertHandlers:
         self.bot = bot
         self.alert_history_file = '/home/spedymax/scripts/health_alerts/alert_history.json'
 
-    def setup_handlers(self):
+        self.router = Router()
+        self._register()
+
+    def _register(self):
         """Set up health alert callback handlers"""
 
-        @self.bot.callback_query_handler(func=lambda call: call.data.startswith("health_"))
-        def health_alert_callback(call):
+        @self.router.callback_query(F.data.startswith("health_"))
+        async def health_alert_callback(call: CallbackQuery):
             """Handle interactive button callbacks from health monitoring alerts"""
 
             # Parse callback data: health_action_botname_issuetype
             # Example: health_snooze_main-bot_process_down
             parts = call.data.split('_', 3)
             if len(parts) < 4:
-                self.bot.answer_callback_query(call.id, "Invalid button data")
+                await call.answer("Invalid button data")
                 return
 
             action = parts[1]  # snooze, maintenance, resolved
@@ -57,7 +63,7 @@ class HealthAlertHandlers:
                 alert['dismiss_until'] = timestamp + (24 * 3600)  # 24 hours
                 alert['snoozed_by'] = user_name
                 alert['snoozed_at'] = timestamp
-                self.bot.answer_callback_query(call.id, "🔕 Snoozed for 24 hours")
+                await call.answer("🔕 Snoozed for 24 hours")
                 updated_text = f"{call.message.text}\n\n🔕 <b>Snoozed</b> by {user_name} for 24 hours"
 
             elif action == 'maintenance':
@@ -65,7 +71,7 @@ class HealthAlertHandlers:
                 alert['marked_maintenance_at'] = timestamp
                 alert['marked_maintenance_by'] = user_name
                 alert['dismiss_until'] = timestamp + (30 * 24 * 3600)  # 30 days
-                self.bot.answer_callback_query(call.id, "⏸️ Maintenance mode (30 days)")
+                await call.answer("⏸️ Maintenance mode (30 days)")
                 updated_text = f"{call.message.text}\n\n⏸️ <b>Maintenance Mode</b> by {user_name}\n🔕 Suppressed for 30 days"
 
             elif action == 'resolved':
@@ -79,11 +85,11 @@ class HealthAlertHandlers:
                 alert.pop('dismissed', None)
                 alert.pop('acknowledged', None)
                 alert.pop('dismiss_until', None)
-                self.bot.answer_callback_query(call.id, "✓ Marked as resolved")
+                await call.answer("✓ Marked as resolved")
                 updated_text = f"{call.message.text}\n\n✓ <b>Resolved</b> by {user_name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
             else:
-                self.bot.answer_callback_query(call.id, "Unknown action")
+                await call.answer("Unknown action")
                 return
 
             # Save updated history
@@ -97,10 +103,8 @@ class HealthAlertHandlers:
 
             # Edit message to show status (remove buttons after interaction)
             try:
-                self.bot.edit_message_text(
+                await call.message.edit_text(
                     text=updated_text,
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
                     parse_mode='HTML'
                 )
             except Exception as e:
