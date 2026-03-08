@@ -62,6 +62,8 @@ class CircuitBreaker:
         if self._failure_count >= self.failure_threshold:
             if self._state != CircuitState.OPEN:
                 logger.warning(f"CircuitBreaker [{self.name}]: → OPEN (failures={self._failure_count})")
+                from services.metrics import metrics
+                metrics.record_circuit_trip(self.name)
             self._state = CircuitState.OPEN
         elif self._state == CircuitState.HALF_OPEN:
             logger.warning(f"CircuitBreaker [{self.name}]: HALF_OPEN → OPEN (failed during recovery)")

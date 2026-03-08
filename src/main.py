@@ -16,11 +16,14 @@ from aiogram.types import BotCommand, ErrorEvent
 from redis.asyncio import Redis
 
 from config.settings import Settings
+from utils.json_logger import JSONFormatter
+from middleware.logging_middleware import LoggingMiddleware
 from database.db_manager import DatabaseManager
 from database.player_service import PlayerService
 from services.game_service import GameService
 from services.quiz_scheduler import QuizScheduler
 from services.ollama_wake_manager import OllamaWakeManager
+from services.health_monitor import HealthMonitor
 
 from handlers.game_handlers import GameHandlers
 from handlers.admin_handlers import AdminHandlers
@@ -33,11 +36,14 @@ from handlers.moltbot_handlers import MoltbotHandlers
 from handlers.pet_handlers import PetHandlers
 from handlers.court_handlers import CourtHandlers
 
+json_handler = RotatingFileHandler('bot.log', maxBytes=10 * 1024 * 1024, backupCount=3)
+json_handler.setFormatter(JSONFormatter())
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        RotatingFileHandler('bot.log', maxBytes=10 * 1024 * 1024, backupCount=3),
+        json_handler,
         logging.StreamHandler(),
     ]
 )
@@ -61,6 +67,10 @@ async def main():
     )
     storage = RedisStorage(redis=redis)
     dp = Dispatcher(storage=storage)
+
+    # ── Logging middleware (structured JSON correlation) ────────────────────
+    dp.message.middleware(LoggingMiddleware())
+    dp.callback_query.middleware(LoggingMiddleware())
 
     # ── Handler instances (each exposes .router) ─────────────────────────────
     game_h = GameHandlers(bot, player_service, game_service)
@@ -114,6 +124,10 @@ async def main():
     # ── Background services ───────────────────────────────────────────────────
     quiz_scheduler.start(bot)
     OllamaWakeManager().start(bot)
+
+    # ── Health monitor ──────────────────────────────────────────────────────
+    health_monitor = HealthMonitor(bot, db_manager, player_service)
+    health_monitor.start()
 
     # ── Proactive MoltBot scheduler ───────────────────────────────────────────
     moltbot_h.start_proactive_scheduler(Settings.CHAT_IDS['main'])
