@@ -111,6 +111,16 @@ class CourtHandlers:
             self._wait.pop(chat_id, None)
             await self.bot.send_message(chat_id, "⚖️ Заседание досрочно прекращено.")
 
+        @self.router.message(Command('deliver_verdict'))
+        async def cmd_deliver_verdict(message: Message):
+            chat_id = message.chat.id
+            game = await asyncio.to_thread(self.court_service.get_active_game, chat_id)
+            if not game:
+                await message.reply("Активного заседания нет.")
+                return
+            await message.reply("⚖️ Повторяю вынесение приговора...")
+            asyncio.create_task(self._deliver_verdict(game['id'], chat_id))
+
         # ── Private test mode (FSMContext-based) ──────────────────────────────
 
         @self.router.message(Command('court_test'))
