@@ -64,6 +64,8 @@ class CourtHandlers:
         self.AI_WITNESS_ID = -1
         # Per-game locks to prevent simultaneous card plays
         self._game_locks: dict[int, asyncio.Lock] = {}
+        # Track chats with active court games (for filter efficiency)
+        self._active_game_chats: set[int] = set()
 
         self.router = Router()
         self._register()
@@ -102,6 +104,7 @@ class CourtHandlers:
                 return
             await asyncio.to_thread(self.court_service.set_status, game['id'], 'aborted')
             self._game_locks.pop(game['id'], None)
+            self._active_game_chats.discard(chat_id)
             old_task = self._fallback_timers.pop(game['id'], None)
             if old_task:
                 old_task.cancel()
@@ -188,12 +191,17 @@ class CourtHandlers:
         @self.router.message(
             F.chat.type.in_({'group', 'supergroup'}),
             F.reply_to_message.as_('reply'),
+            F.func(lambda m, self=self: (
+                self._bot_id is not None
+                and m.reply_to_message is not None
+                and m.reply_to_message.from_user is not None
+                and m.reply_to_message.from_user.id == self._bot_id
+                and (m.chat.id in self._pending_speech
+                     or m.chat.id in self._active_game_chats)
+            )),
         )
         async def handle_group_reply(message: Message, reply: Message):
             chat_id = message.chat.id
-            bot_id = await self._get_bot_id()
-            if not reply or reply.from_user is None or reply.from_user.id != bot_id:
-                return
 
             # Path 1: speech input (player arguing after playing a card)
             pending = self._pending_speech.get(chat_id)
@@ -251,11 +259,14 @@ class CourtHandlers:
 
         # ── Group wait state (defendant/crime input, dict-based) ──────────────
 
-        @self.router.message(F.chat.type.in_({'group', 'supergroup'}))
+        @self.router.message(
+            F.chat.type.in_({'group', 'supergroup'}),
+            F.func(lambda m, self=self: (
+                m.chat.id in self._wait
+                and not (m.text and m.text.startswith('/'))
+            )),
+        )
         async def handle_wait_state(message: Message):
-            # Skip commands
-            if message.text and message.text.startswith('/'):
-                return
             chat_id = message.chat.id
             state_data = self._wait.get(chat_id)
             if not state_data:
@@ -570,6 +581,7 @@ class CourtHandlers:
 
             await asyncio.to_thread(self.court_service.save_cards, game_id, prosecutor_cards, lawyer_cards, witness_cards)
             await asyncio.to_thread(self.court_service.set_status, game_id, 'in_progress')
+            self._active_game_chats.add(chat_id)
             await asyncio.to_thread(self.court_service.advance_round, game_id, 1)
             await asyncio.to_thread(self.court_service.log_message, game_id, 'system', f'Дело: {defendant} обвиняется в «{crime}»')
             logger.info(f"[COURT] _start_game: game status=in_progress round=1")
@@ -898,6 +910,7 @@ class CourtHandlers:
             parts = await asyncio.to_thread(self.court_service.generate_verdict, game_id, final_statements or {})
             logger.info(f"[COURT] _deliver_verdict: verdict generated, {len(parts)} parts")
             await asyncio.to_thread(self.court_service.save_verdict, game_id, "\n---\n".join(parts))
+            self._active_game_chats.discard(chat_id)
 
             prefixes = [
                 "⚖️ <b>Позиция обвинения:</b>",
@@ -911,6 +924,7 @@ class CourtHandlers:
                     await asyncio.sleep(2)
         except Exception as e:
             logger.error(f"_deliver_verdict: ошибка для game {game_id}: {e}")
+            self._active_game_chats.discard(chat_id)
             await asyncio.to_thread(self.court_service.set_status, game_id, 'finished')
             try:
                 await self.bot.send_message(chat_id, "⚠️ Ошибка при вынесении приговора. Заседание завершено.")

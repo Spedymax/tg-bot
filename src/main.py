@@ -71,6 +71,9 @@ async def main():
     pet_h = PetHandlers(bot, player_service, game_service)
     court_h = CourtHandlers(bot, db_manager)
     court_h.set_storage(storage)
+    # Pre-populate bot_id so court filters work from first message
+    me = await bot.get_me()
+    court_h._bot_id = me.id
 
     # ── Load shop data (JSON assets) ──────────────────────────────────────────
     _assets = os.path.join(os.path.dirname(__file__), '..', 'assets', 'data')
