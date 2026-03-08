@@ -1,13 +1,17 @@
+import asyncio
 import json
 import logging
 import os
 import random
 import re
-import threading
-import time
 import httpx
 import google.generativeai as genai
 from datetime import datetime, timezone, timedelta
+
+from aiogram import Router, F, Bot
+from aiogram.filters import Command, StateFilter
+from aiogram.types import Message
+
 from config.settings import Settings
 
 CHAT_SUMMARY_PATH = os.path.expanduser("~/.openclaw/workspace/memory/chat-summary.md")
@@ -62,9 +66,10 @@ SUMMARY_FETCH_LIMIT = 600     # messages to analyze when updating
 
 
 class MoltbotHandlers:
-    def __init__(self, bot, db_manager):
+    def __init__(self, bot: Bot, db_manager):
         self.bot = bot
         self.db = db_manager
+        self.router = Router()
         self._bot_username = None  # lazily cached
         self._history_reset_time: dict[int, datetime] = {}  # chat_id → reset timestamp
         self._user_key_suffix: dict[int, str] = {}  # chat_id → suffix added after reset
@@ -78,6 +83,7 @@ class MoltbotHandlers:
         self._load_state()
         self._init_gemini()
         self._ensure_danetki_table()
+        self._register()
 
     # ── Persistence ──────────────────────────────────────────────────────────
 
@@ -114,9 +120,10 @@ class MoltbotHandlers:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _get_bot_username(self) -> str:
+    async def _get_bot_username(self) -> str:
         if not self._bot_username:
-            self._bot_username = self.bot.get_me().username
+            me = await self.bot.get_me()
+            self._bot_username = me.username
         return self._bot_username
 
     def _resolve_sender_name(self, user) -> str:
@@ -145,11 +152,11 @@ class MoltbotHandlers:
             return f"Telegram, групповой чат «{title}»"
         return ""
 
-    def _is_bot_mentioned(self, message) -> bool:
+    async def _is_bot_mentioned(self, message) -> bool:
         """Return True if @ggallmute2_bot appears in message entities."""
         if not message.entities or not message.text:
             return False
-        bot_username = self._get_bot_username().lower()
+        bot_username = (await self._get_bot_username()).lower()
         for entity in message.entities:
             if entity.type == 'mention':
                 name = message.text[entity.offset:entity.offset + entity.length].lstrip('@').lower()
@@ -157,11 +164,11 @@ class MoltbotHandlers:
                     return True
         return False
 
-    def _is_bot_mentioned_in_caption(self, message) -> bool:
+    async def _is_bot_mentioned_in_caption(self, message) -> bool:
         """Return True if @botname appears in photo/video caption entities."""
         if not message.caption_entities or not message.caption:
             return False
-        bot_username = self._get_bot_username().lower()
+        bot_username = (await self._get_bot_username()).lower()
         for entity in message.caption_entities:
             if entity.type == 'mention':
                 name = message.caption[entity.offset:entity.offset + entity.length].lstrip('@').lower()
@@ -169,10 +176,10 @@ class MoltbotHandlers:
                     return True
         return False
 
-    def _extract_user_text(self, message) -> str:
+    async def _extract_user_text(self, message) -> str:
         """Strip @botname mention(s) from message text."""
         text = message.text or ""
-        bot_username = self._get_bot_username().lower()
+        bot_username = (await self._get_bot_username()).lower()
         parts = []
         last = 0
         for entity in sorted(message.entities or [], key=lambda e: e.offset):
@@ -184,10 +191,10 @@ class MoltbotHandlers:
         parts.append(text[last:])
         return "".join(parts).strip()
 
-    def _extract_caption_text(self, message) -> str:
+    async def _extract_caption_text(self, message) -> str:
         """Strip @botname mention(s) from photo caption."""
         text = message.caption or ""
-        bot_username = self._get_bot_username().lower()
+        bot_username = (await self._get_bot_username()).lower()
         parts = []
         last = 0
         for entity in sorted(message.caption_entities or [], key=lambda e: e.offset):
@@ -265,7 +272,7 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: error fetching chat history: {e}")
             return []
 
-    def _call_openclaw(self, content: str, user_key: str, model: str = "openclaw:main") -> str:
+    async def _call_openclaw(self, content: str, user_key: str, model: str = "openclaw:main") -> str:
         """Raw API call to OpenClaw. Returns response text or empty string on error.
         Only retries on connection errors — NOT on timeouts, because OpenClaw is stateful
         (tracks history per user_key) and a timeout means the message was already received."""
@@ -273,8 +280,8 @@ class MoltbotHandlers:
         for attempt in range(3):
             try:
                 logger.info(f"MoltBot: OpenClaw request model={model} user={user_key} attempt={attempt + 1} prompt_len={len(content)}")
-                with httpx.Client() as client:
-                    r = client.post(
+                async with httpx.AsyncClient() as client:
+                    r = await client.post(
                         Settings.JARVIS_URL,
                         headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
                         json={
@@ -310,12 +317,13 @@ class MoltbotHandlers:
                 last_exc = e
                 if attempt < 2:
                     logger.warning(f"MoltBot: OpenClaw attempt {attempt + 1} failed: {e}, retrying...")
-                    import time; time.sleep(2)
+                    await asyncio.sleep(2)
         logger.error(f"MoltBot: OpenClaw all retries failed: {last_exc}")
         raise _AIConnectionError(str(last_exc))
 
     def _call_ollama_direct(self, content: str, bot=None, message=None) -> str:
-        """Call Ollama directly. Routes through OllamaWakeManager for auto-wake."""
+        """Call Ollama directly. Routes through OllamaWakeManager for auto-wake.
+        This is a sync method — wrap with asyncio.to_thread when calling from async context."""
         from services.ollama_wake_manager import OllamaWakeManager, WakeState
         manager = OllamaWakeManager()
 
@@ -341,11 +349,11 @@ class MoltbotHandlers:
             manager._trigger_wake()
             return ""
 
-    def _ask_moltbot(self, sender_name: str, user_text: str,
-                     chat_context: str, user_key: str,
-                     history: list[str] | None = None,
-                     model: str = "openclaw:main") -> str:
-        """Call the local MoltBot/OpenClaw API synchronously."""
+    async def _ask_moltbot(self, sender_name: str, user_text: str,
+                           chat_context: str, user_key: str,
+                           history: list[str] | None = None,
+                           model: str = "openclaw:main") -> str:
+        """Call the local MoltBot/OpenClaw API asynchronously."""
         context_prefix = f"[Сообщение отправлено из: {chat_context}]\n" if chat_context else ""
 
         summary = _load_chat_summary()
@@ -362,7 +370,7 @@ class MoltbotHandlers:
             f"{context_prefix}{sender_name}: Привет!"
         )
 
-        return self._call_openclaw(user_content, user_key, model=model)
+        return await self._call_openclaw(user_content, user_key, model=model)
 
     def _count_recent_messages(self, minutes: int) -> int:
         """Count messages in DB written in the last `minutes` minutes."""
@@ -376,7 +384,7 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: error counting recent messages: {e}")
             return 0
 
-    def _send_proactive_message(self, chat_id: int):
+    async def _send_proactive_message(self, chat_id: int):
         """Build context and send a proactive (unprompted) message to the chat."""
         try:
             history = self._get_recent_group_messages(30, chat_id)
@@ -389,7 +397,7 @@ class MoltbotHandlers:
                 history_block = "\n".join(history)
                 context_prefix += f"[История чата (последние {len(history)} сообщений):\n{history_block}\n]\n"
 
-            topic = self._get_current_topic(history) if history else ""
+            topic = await asyncio.to_thread(self._get_current_topic, history) if history else ""
             topic_hint = f"[Текущая тема разговора: {topic}]\n" if topic else ""
 
             user_content = (
@@ -400,7 +408,7 @@ class MoltbotHandlers:
             )
 
             user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
-            reply = self._call_openclaw(user_content, user_key)
+            reply = await self._call_openclaw(user_content, user_key)
 
             # Reply to the most recent stored message if we have its Telegram message_id
             reply_to = None
@@ -413,13 +421,13 @@ class MoltbotHandlers:
             except Exception:
                 pass
 
-            self.bot.send_message(chat_id, reply, reply_to_message_id=reply_to)
+            await self.bot.send_message(chat_id, reply, reply_to_message_id=reply_to)
             self._last_proactive_sent[chat_id] = datetime.now(timezone.utc)
             logger.info(f"MoltBot: proactive message sent to chat {chat_id}")
         except Exception as e:
             logger.error(f"MoltBot: failed to send proactive message to {chat_id}: {e}")
 
-    def _check_activity_spike(self, chat_id: int):
+    async def _check_activity_spike(self, chat_id: int):
         """Queue a proactive message if chat activity is high and cooldown has passed."""
         if chat_id in self._proactive_queued:
             return
@@ -431,17 +439,18 @@ class MoltbotHandlers:
             self._proactive_queued.add(chat_id)
             delay = random.randint(SPIKE_DELAY_MIN, SPIKE_DELAY_MAX)
             logger.info(f"MoltBot: activity spike ({count} msgs), queuing proactive in {delay}s")
-            threading.Timer(delay, self._fire_spike_proactive, args=[chat_id]).start()
+            asyncio.create_task(self._fire_spike_proactive(chat_id, delay))
 
-    def _fire_spike_proactive(self, chat_id: int):
-        """Called after spike delay — send proactive message and clear queue flag."""
+    async def _fire_spike_proactive(self, chat_id: int, delay: int):
+        """Wait for spike delay then send proactive message and clear queue flag."""
+        await asyncio.sleep(delay)
         self._proactive_queued.discard(chat_id)
-        self._send_proactive_message(chat_id)
+        await self._send_proactive_message(chat_id)
 
     # ── Smart summary ─────────────────────────────────────────────────────────
 
     def _update_summary_via_qwen(self):
-        """Fetch recent messages and ask Qwen to rewrite chat-summary.md."""
+        """Fetch recent messages and ask Qwen to rewrite chat-summary.md. Sync — run in thread."""
         try:
             rows = self.db.execute_query(
                 "SELECT name, message_text FROM messages ORDER BY timestamp DESC LIMIT %s",
@@ -491,14 +500,13 @@ class MoltbotHandlers:
         self._messages_since_summary += 1
         if self._messages_since_summary >= SUMMARY_UPDATE_INTERVAL:
             self._messages_since_summary = 0
-            threading.Thread(target=self._update_summary_via_qwen, daemon=True,
-                             name="moltbot-summary").start()
+            asyncio.create_task(asyncio.to_thread(self._update_summary_via_qwen))
             logger.info("MoltBot: triggered background summary update")
 
     # ── Topic detection ───────────────────────────────────────────────────────
 
     def _get_current_topic(self, history: list[str]) -> str:
-        """Ask Qwen to summarise the current chat topic in a few words."""
+        """Ask Qwen to summarise the current chat topic in a few words. Sync."""
         if not history:
             return ""
         snippet = "\n".join(history[-15:])
@@ -516,7 +524,7 @@ class MoltbotHandlers:
             return ""
 
     def _classify_complexity(self, user_text: str, history: list[str] | None = None) -> str:
-        """Ask Qwen if the question is simple or complex. Returns 'simple' or 'complex'."""
+        """Ask Qwen if the question is simple or complex. Returns 'simple' or 'complex'. Sync."""
         history_block = "\n".join(history[-5:]) if history else ""
         context_part = f"Контекст разговора:\n{history_block}\n\n" if history_block else ""
         prompt = (
@@ -551,30 +559,30 @@ class MoltbotHandlers:
         lower = text.lower()
         return any(p in lower for p in self._DISSATISFIED_PATTERNS)
 
-    def _ask_moltbot_routed(self, sender_name: str, user_text: str,
-                            chat_context: str, user_key: str,
-                            history: list[str] | None = None) -> str:
+    async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
+                                  chat_context: str, user_key: str,
+                                  history: list[str] | None = None) -> str:
         """Classify complexity, then route to Qwen (simple) or Claude (complex)."""
         # Fast pre-check: dissatisfaction / follow-up → always Claude
         if self._is_dissatisfied_or_followup(user_text):
             logger.info(f"MoltBot: dissatisfied/followup → claude for: {user_text[:60]}")
-            return self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
+            return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
 
-        complexity = self._classify_complexity(user_text, history)
+        complexity = await asyncio.to_thread(self._classify_complexity, user_text, history)
         logger.info(f"MoltBot: complexity={complexity} for: {user_text[:60]}")
         if complexity == "simple":
             try:
-                reply = self._ask_moltbot(sender_name, user_text, chat_context,
-                                          user_key, history, model="ollama/qwen3.5:9b")
+                reply = await self._ask_moltbot(sender_name, user_text, chat_context,
+                                                user_key, history, model="ollama/qwen3.5:9b")
                 if reply and reply.strip():
                     return reply
             except (_AIConnectionError, _AIRefusalError) as e:
                 logger.info(f"MoltBot: Qwen failed ({e}), falling back to Claude")
             else:
                 logger.info("MoltBot: Qwen returned empty, falling back to Claude")
-        return self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
+        return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
 
-    def _maybe_reply_probabilistic(self, message) -> bool:
+    async def _maybe_reply_probabilistic(self, message) -> bool:
         """Ask local LLM if the bot should reply to this message. Returns True if replied."""
         # Cooldown: max once per 15 minutes per chat
         chat_id = message.chat.id
@@ -606,11 +614,11 @@ class MoltbotHandlers:
 
         user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
         try:
-            reply = self._call_openclaw(prompt, user_key, model="ollama/qwen3.5:9b")
+            reply = await self._call_openclaw(prompt, user_key, model="ollama/qwen3.5:9b")
             reply = reply.strip()
             if not reply:
                 return False
-            self.bot.reply_to(message, reply)
+            await message.reply(reply)
             self._last_probabilistic_sent[chat_id] = datetime.now(timezone.utc)
             logger.info(f"MoltBot: probabilistic reply sent in chat {chat_id}")
             return True
@@ -635,7 +643,7 @@ class MoltbotHandlers:
     # Minimum seconds between reactions in the same chat
     _REACTION_COOLDOWN_SECS = 300
 
-    def _maybe_react(self, message) -> None:
+    async def _maybe_react(self, message) -> None:
         """Probabilistically ask Qwen to pick a reaction; enforces per-chat cooldown."""
         chat_id = message.chat.id
         text = message.text or ""
@@ -677,15 +685,15 @@ class MoltbotHandlers:
         )
 
         try:
-            result = self._call_ollama_direct(prompt)
+            result = await asyncio.to_thread(self._call_ollama_direct, prompt)
             result = result.strip()
             result = result.split()[0] if result else ""
             if result not in self._REACTION_EMOJIS:
                 logger.debug(f"MoltBot: no reaction (got {repr(result)}) for msg {message.message_id}")
                 return
             token = Settings.TELEGRAM_BOT_TOKEN
-            with httpx.Client() as client:
-                client.post(
+            async with httpx.AsyncClient() as client:
+                await client.post(
                     f"https://api.telegram.org/bot{token}/setMessageReaction",
                     json={
                         "chat_id": chat_id,
@@ -728,7 +736,7 @@ class MoltbotHandlers:
         except Exception:
             return []
 
-    def _generate_danetka(self) -> dict | None:
+    async def _generate_danetka(self) -> dict | None:
         used = self._get_used_situations()
         used_text = "\n".join(f"- {s[:80]}" for s in used) if used else "(нет)"
         prompt = (
@@ -744,9 +752,13 @@ class MoltbotHandlers:
             f"- Не повторяй эти уже использованные ситуации:\n{used_text}"
         )
         try:
-            raw = self._call_ollama_direct(prompt)
-            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            raw = await asyncio.to_thread(self._call_ollama_direct, prompt)
+            clean = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+            # If nothing outside think tags, search the full raw text
+            search_in = clean if clean else raw
+            match = re.search(r'\{.*\}', search_in, re.DOTALL)
             if not match:
+                logger.warning(f"MoltBot: danetka no JSON found in: {search_in[:300]!r}")
                 return None
             data = json.loads(match.group())
             if 'situation' in data and 'answer' in data:
@@ -764,21 +776,28 @@ class MoltbotHandlers:
         except Exception as e:
             logger.error(f"MoltBot: failed to save danetka: {e}")
 
-    def _judge_danetka(self, question: str, answer: str) -> str:
+    async def _judge_danetka(self, question: str, answer: str) -> str:
+        is_question = "?" in question
+        hint = (
+            "Это ВОПРОС (есть знак ?). Отвечай Да/Нет/Не важно."
+            if is_question else
+            "Это УТВЕРЖДЕНИЕ (нет знака ?). Если суть верная - отвечай УГАДАЛ."
+        )
         prompt = (
             f"Ты ведущий игры «данетка».\n"
             f"Правильный ответ (только ты знаешь): {answer}\n\n"
-            f"Игрок написал: {question}\n\n"
-            "Выбери ОДИН вариант:\n"
-            "- «Да» — если утверждение верное\n"
-            "- «Нет» — если неверное\n"
-            "- «Не важно» — если не относится к ситуации\n"
-            "- «Близко! 🔥» — если очень близко к разгадке\n"
-            "- «УГАДАЛ! 🎉» — ТОЛЬКО если игрок полностью раскрыл суть\n\n"
-            "Верни только один из этих вариантов, ничего больше."
+            f"Игрок написал: {question}\n"
+            f"{hint}\n\n"
+            "Варианты ответа:\n"
+            "- Да — ответ на вопрос, если факт верный\n"
+            "- Нет — ответ на вопрос, если факт неверный\n"
+            "- Не важно — вопрос не связан с разгадкой\n"
+            "- Близко! 🔥 — игрок близок к разгадке но не назвал главное\n"
+            "- УГАДАЛ! 🎉 — игрок назвал ключевую суть разгадки\n\n"
+            "Верни только один вариант."
         )
         try:
-            result = self._call_ollama_direct(prompt).strip()
+            result = (await asyncio.to_thread(self._call_ollama_direct, prompt)).strip()
             for v in ["УГАДАЛ! 🎉", "Близко! 🔥", "Да", "Нет", "Не важно"]:
                 if v.lower() in result.lower():
                     return v
@@ -787,7 +806,7 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: danetka judge error: {e}")
             return "Не важно"
 
-    def _handle_danetka_reply(self, message):
+    async def _handle_danetka_reply(self, message):
         chat_id = message.chat.id
         active = self._active_danetka.get(chat_id)
         if not active:
@@ -796,11 +815,11 @@ class MoltbotHandlers:
         if not question:
             return
         active['questions_count'] = active.get('questions_count', 0) + 1
-        judgment = self._judge_danetka(question, active['answer'])
-        self.bot.reply_to(message, judgment)
+        judgment = await self._judge_danetka(question, active['answer'])
+        await message.reply(judgment)
         if "УГАДАЛ" in judgment:
             del self._active_danetka[chat_id]
-            self.bot.send_message(
+            await self.bot.send_message(
                 chat_id,
                 f"🎉 Правильно! Вот полный ответ:\n\n{active['answer']}\n\n"
                 f"Вопросов задано: {active['questions_count']}"
@@ -808,7 +827,7 @@ class MoltbotHandlers:
 
     # ── Недельная аналитика ───────────────────────────────────────────────────
 
-    def _send_weekly_analytics(self, chat_id: int):
+    async def _send_weekly_analytics(self, chat_id: int):
         try:
             total_rows = self.db.execute_query(
                 "SELECT COUNT(*) FROM messages WHERE timestamp > NOW() - INTERVAL '7 days'",
@@ -816,7 +835,7 @@ class MoltbotHandlers:
             )
             total = total_rows[0][0] if total_rows else 0
             if total == 0:
-                self.bot.send_message(chat_id, "📊 За эту неделю сообщений не было.")
+                await self.bot.send_message(chat_id, "📊 За эту неделю сообщений не было.")
                 return
 
             per_person = self.db.execute_query(
@@ -838,7 +857,8 @@ class MoltbotHandlers:
             if recent:
                 snippet = "\n".join(recent[-200:])
                 try:
-                    raw_topics = self._call_ollama_direct(
+                    raw_topics = await asyncio.to_thread(
+                        self._call_ollama_direct,
                         f"Вот сообщения из чата за неделю:\n{snippet}\n\n"
                         "Выдели 3-5 главных тем этой недели. "
                         "Каждую тему — одной строкой с подходящим emoji. "
@@ -868,61 +888,66 @@ class MoltbotHandlers:
                 lines.append("💬 *Темы недели:*")
                 lines.append(topics)
 
-            self.bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+            await self.bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
             logger.info(f"MoltBot: weekly analytics sent to {chat_id}")
         except Exception as e:
             logger.error(f"MoltBot: weekly analytics error: {e}")
 
     def start_proactive_scheduler(self, chat_id: int):
-        """Start scheduled (2x/day) and activity-spike proactive messaging."""
-        def _scheduled_loop():
-            """Fire proactive messages at fixed times using a simple polling loop."""
-            sent_today: set[str] = set()
-            while True:
-                now = datetime.now()
-                day_key = now.strftime("%Y-%m-%d")
-                hhmm = now.strftime("%H:%M")
-                for t in PROACTIVE_SCHEDULE_TIMES:
-                    job_key = f"{day_key}-{t}"
-                    if hhmm == t and job_key not in sent_today:
-                        sent_today.add(job_key)
-                        # Only send if chat was active recently
-                        if self._count_recent_messages(8 * 60) >= 5:
-                            self._send_proactive_message(chat_id)
-                        else:
-                            logger.info(f"MoltBot: skipping {t} proactive — chat inactive")
-                # Weekly analytics: Sunday 21:00
-                weekly_key = f"{day_key}-weekly"
-                if now.weekday() == 6 and hhmm == "21:00" and weekly_key not in sent_today:
-                    sent_today.add(weekly_key)
-                    threading.Thread(target=self._send_weekly_analytics, args=(chat_id,),
-                                     daemon=True, name="moltbot-analytics").start()
-                # Purge old day keys to avoid unbounded growth
-                if len(sent_today) > 20:
-                    sent_today = {k for k in sent_today if k.startswith(day_key)}
-                time.sleep(30)
-
-        def _monitor_loop():
-            while True:
-                time.sleep(600)
-                try:
-                    self._check_activity_spike(chat_id)
-                except Exception as e:
-                    logger.error(f"MoltBot: proactive monitor error: {e}")
-
-        threading.Thread(target=_scheduled_loop, daemon=True, name="moltbot-scheduler").start()
-        threading.Thread(target=_monitor_loop, daemon=True, name="moltbot-monitor").start()
+        """Start scheduled (2x/day) and activity-spike proactive messaging via asyncio tasks."""
+        asyncio.create_task(self._proactive_scheduled_loop(chat_id))
+        asyncio.create_task(self._proactive_monitor_loop(chat_id))
         logger.info(f"MoltBot: proactive scheduler started for chat {chat_id}")
+
+    async def _proactive_scheduled_loop(self, chat_id: int):
+        """Fire proactive messages at fixed times using an async polling loop."""
+        sent_today: set[str] = set()
+        while True:
+            now = datetime.now()
+            day_key = now.strftime("%Y-%m-%d")
+            hhmm = now.strftime("%H:%M")
+            for t in PROACTIVE_SCHEDULE_TIMES:
+                job_key = f"{day_key}-{t}"
+                if hhmm == t and job_key not in sent_today:
+                    sent_today.add(job_key)
+                    # Only send if chat was active recently
+                    if self._count_recent_messages(8 * 60) >= 5:
+                        await self._send_proactive_message(chat_id)
+                    else:
+                        logger.info(f"MoltBot: skipping {t} proactive — chat inactive")
+            # Weekly analytics: Sunday 21:00
+            weekly_key = f"{day_key}-weekly"
+            if now.weekday() == 6 and hhmm == "21:00" and weekly_key not in sent_today:
+                sent_today.add(weekly_key)
+                asyncio.create_task(self._send_weekly_analytics(chat_id))
+            # Purge old day keys to avoid unbounded growth
+            if len(sent_today) > 20:
+                sent_today = {k for k in sent_today if k.startswith(day_key)}
+            await asyncio.sleep(30)
+
+    async def _proactive_monitor_loop(self, chat_id: int):
+        """Periodically check for activity spikes."""
+        while True:
+            await asyncio.sleep(600)
+            try:
+                await self._check_activity_spike(chat_id)
+            except Exception as e:
+                logger.error(f"MoltBot: proactive monitor error: {e}")
 
     # ── Handlers ──────────────────────────────────────────────────────────────
 
-    def setup_handlers(self):
-        bot_id = self.bot.get_me().id
+    def _register(self):
+        router = self.router
 
-        @self.bot.message_handler(func=lambda m: self._is_bot_mentioned(m))
-        def handle_mention(message):
+        @router.message(StateFilter(None), F.func(lambda m: bool(
+            m.entities and m.text and any(e.type == 'mention' for e in m.entities)
+        )))
+        async def handle_mention(message: Message):
+            # Check actual bot mention asynchronously
+            if not await self._is_bot_mentioned(message):
+                return
             sender_name = self._resolve_sender_name(message.from_user)
-            user_text = self._extract_user_text(message)
+            user_text = await self._extract_user_text(message)
             chat_context = self._get_chat_context(message)
             user_key = self._resolve_user_key(message)
 
@@ -931,42 +956,40 @@ class MoltbotHandlers:
             if message.chat.type in ('group', 'supergroup'):
                 history = self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
-            # threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
             try:
-                reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
+                reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 if reply and reply.strip():
-                    sent = self.bot.reply_to(message, reply)
+                    sent = await message.reply(reply)
                     self._store_bot_reply(reply, sent.message_id)
                 else:
-                    self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
+                    await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
-                self.bot.reply_to(message, "⚠️ Не могу подключиться к AI, попробуй позже")
+                await message.reply("⚠️ Не могу подключиться к AI, попробуй позже")
             except Exception as e:
                 logger.error(f"MoltBot API error: {e}")
-                self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
+                await message.reply("Не могу связаться с AI. Попробуй позже.")
 
-        @self.bot.message_handler(commands=['данетка', 'danetka'])
-        def handle_danetka_start(message):
+        @router.message(Command(commands=['данетка', 'danetka']))
+        async def handle_danetka_start(message: Message):
             chat_id = message.chat.id
             if chat_id in self._active_danetka:
-                self.bot.reply_to(message, "⚠️ Игра уже идёт! Используй /сдаюсь чтобы сдаться.")
+                await message.reply("⚠️ Игра уже идёт! Используй /сдаюсь чтобы сдаться.")
                 return
-            waiting = self.bot.reply_to(message, "🎲 Придумываю данетку...")
+            waiting = await message.reply("🎲 Придумываю данетку...")
 
-            def generate_and_post():
-                danetka = self._generate_danetka()
+            async def generate_and_post():
+                danetka = await self._generate_danetka()
                 if not danetka:
-                    self.bot.edit_message_text("❌ Не смог придумать, попробуй ещё раз.",
-                                               chat_id, waiting.message_id)
+                    await self.bot.edit_message_text("❌ Не смог придумать, попробуй ещё раз.",
+                                                     chat_id=chat_id, message_id=waiting.message_id)
                     return
                 self._save_danetka(danetka['situation'], danetka['answer'])
-                self.bot.edit_message_text(
+                await self.bot.edit_message_text(
                     f"🎲 *Данетка!*\n\n{danetka['situation']}\n\n"
                     "_Задавайте вопросы — отвечаю только Да / Нет / Не важно_\n"
                     "Используй /сдаюсь чтобы узнать ответ",
-                    chat_id, waiting.message_id, parse_mode="Markdown"
+                    chat_id=chat_id, message_id=waiting.message_id, parse_mode="Markdown"
                 )
-                # waiting.message_id == edited message_id (editing doesn't change it)
                 self._active_danetka[chat_id] = {
                     'situation': danetka['situation'],
                     'answer': danetka['answer'],
@@ -975,42 +998,55 @@ class MoltbotHandlers:
                     'questions_count': 0,
                 }
 
-            threading.Thread(target=generate_and_post, daemon=True).start()
+            asyncio.create_task(generate_and_post())
 
-        @self.bot.message_handler(commands=['сдаюсь', 'sdayus'])
-        def handle_danetka_surrender(message):
+        @router.message(Command(commands=['сдаюсь', 'sdayus']))
+        async def handle_danetka_surrender(message: Message):
             chat_id = message.chat.id
             active = self._active_danetka.pop(chat_id, None)
             if not active:
-                self.bot.reply_to(message, "Нет активной игры.")
+                await message.reply("Нет активной игры.")
                 return
-            self.bot.reply_to(
-                message,
+            await message.reply(
                 f"🏳️ Сдаётесь! Вот ответ:\n\n{active['answer']}\n\n"
                 f"Вопросов было задано: {active.get('questions_count', 0)}"
             )
 
-        @self.bot.message_handler(commands=['аналитика', 'analitika'])
-        def handle_analytics_command(message):
+        @router.message(Command(commands=['аналитика', 'analitika']))
+        async def handle_analytics_command(message: Message):
             if message.from_user.id not in Settings.ADMIN_IDS:
-                self.bot.reply_to(message, "У вас нет доступа.")
+                await message.reply("У вас нет доступа.")
                 return
-            self.bot.reply_to(message, "📊 Собираю статистику...")
-            threading.Thread(target=self._send_weekly_analytics, args=(message.chat.id,),
-                             daemon=True).start()
+            await message.reply("📊 Собираю статистику...")
+            asyncio.create_task(self._send_weekly_analytics(message.chat.id))
 
-        @self.bot.message_handler(func=lambda m: (
+        @router.message(Command(commands=['мут_сброс', 'mut_reset']))
+        async def handle_reset(message: Message):
+            """Reset chat history context and OpenClaw thread. Survives bot restarts."""
+            now = datetime.now(timezone.utc)
+            self._history_reset_time[message.chat.id] = now
+            self._user_key_suffix[message.chat.id] = f"-{int(now.timestamp())}"
+            self._save_state()
+            logger.info(f"MoltBot: history reset for chat {message.chat.id} by {message.from_user.id}")
+            await message.reply("⚙️ Контекст сброшен. Начинаю с чистого листа.")
+
+        @router.message(StateFilter(None), F.func(lambda m: (
             m.reply_to_message is not None
             and m.reply_to_message.from_user is not None
-            and m.reply_to_message.from_user.id == bot_id
-            and not self._is_bot_mentioned(m)
-        ))
-        def handle_reply_to_bot(message):
+            and m.reply_to_message.from_user.is_bot
+        )))
+        async def handle_reply_to_bot(message: Message):
             chat_id = message.chat.id
             # Route to danetka: any reply to bot while game is active
             if chat_id in self._active_danetka:
-                threading.Thread(target=self._handle_danetka_reply, args=(message,),
-                                 daemon=True).start()
+                asyncio.create_task(self._handle_danetka_reply(message))
+                return
+
+            # Only handle replies to THIS bot
+            bot_info = await self.bot.get_me()
+            if message.reply_to_message.from_user.id != bot_info.id:
+                return
+            if await self._is_bot_mentioned(message):
                 return
 
             sender_name = self._resolve_sender_name(message.from_user)
@@ -1022,75 +1058,42 @@ class MoltbotHandlers:
             if message.chat.type in ('group', 'supergroup'):
                 history = self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
-            # threading.Thread(target=self._maybe_react, args=(message,), daemon=True).start()
             try:
-                reply = self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
+                reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 if reply and reply.strip():
-                    sent = self.bot.reply_to(message, reply)
+                    sent = await message.reply(reply)
                     self._store_bot_reply(reply, sent.message_id)
                 else:
-                    self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
+                    await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
-                self.bot.reply_to(message, "⚠️ Не могу подключиться к AI, попробуй позже")
+                await message.reply("⚠️ Не могу подключиться к AI, попробуй позже")
             except Exception as e:
                 logger.error(f"MoltBot API error (reply): {e}")
-                self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
+                await message.reply("Не могу связаться с AI. Попробуй позже.")
 
-        def _has_other_mention(m) -> bool:
-            """True if message mentions any user that is NOT the bot."""
-            if not m.entities or not m.text:
-                return False
-            bot_username = self._get_bot_username().lower()
-            return any(
-                e.type == 'mention'
-                and m.text[e.offset:e.offset + e.length].lstrip('@').lower() != bot_username
-                for e in m.entities
-            )
-
-        @self.bot.message_handler(func=lambda m: (
+        @router.message(StateFilter(None), F.func(lambda m: (
             m.chat.type in ('group', 'supergroup')
-            and m.text
+            and bool(m.text)
             and not m.text.startswith('/')
+            and m.from_user is not None
             and not m.from_user.is_bot
-            and not self._is_bot_mentioned(m)
-            and not _has_other_mention(m)
             and not (m.reply_to_message and m.reply_to_message.from_user
-                     and m.reply_to_message.from_user.id == bot_id)
-        ))
-        def handle_probabilistic(message):
+                     and m.reply_to_message.from_user.is_bot)
+            and not (m.entities and any(e.type == 'mention' for e in m.entities))
+        )))
+        async def handle_probabilistic(message: Message):
             self._maybe_update_summary()
-            threading.Thread(
-                target=self._maybe_reply_probabilistic,
-                args=(message,),
-                daemon=True,
-            ).start()
-            # threading.Thread(
-            #     target=self._maybe_react,
-            #     args=(message,),
-            #     daemon=True,
-            # ).start()
+            asyncio.create_task(self._maybe_reply_probabilistic(message))
 
-        @self.bot.message_handler(func=lambda m: (
-            m.chat.type == 'private'
-            and m.text
-            and not m.text.startswith('/')
-            and not m.from_user.is_bot
-        ))
-        def handle_dm_reaction(message):
-            pass
-            # threading.Thread(
-            #     target=self._maybe_react,
-            #     args=(message,),
-            #     daemon=True,
-            # ).start()
-
-        @self.bot.message_handler(
-            content_types=['photo'],
-            func=lambda m: self._is_bot_mentioned_in_caption(m),
-        )
-        def handle_photo_mention(message):
+        @router.message(StateFilter(None), F.content_types(['photo']), F.func(lambda m: (
+            m.caption_entities is not None
+            and any(e.type == 'mention' for e in m.caption_entities)
+        )))
+        async def handle_photo_mention(message: Message):
+            if not await self._is_bot_mentioned_in_caption(message):
+                return
             sender_name = self._resolve_sender_name(message.from_user)
-            user_question = self._extract_caption_text(message)
+            user_question = await self._extract_caption_text(message)
             chat_context = self._get_chat_context(message)
             user_key = self._resolve_user_key(message)
 
@@ -1099,14 +1102,16 @@ class MoltbotHandlers:
                 history = self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
             try:
-                file_info = self.bot.get_file(message.photo[-1].file_id)
-                image_bytes = self.bot.download_file(file_info.file_path)
+                file = await self.bot.get_file(message.photo[-1].file_id)
+                image_bytes = await self.bot.download_file(file.file_path)
             except Exception as e:
                 logger.error(f"MoltBot: failed to download photo: {e}")
-                self.bot.reply_to(message, "Не могу загрузить картинку. Попробуй ещё раз.")
+                await message.reply("Не могу загрузить картинку. Попробуй ещё раз.")
                 return
 
-            image_analysis = self._analyze_image_with_gemini(image_bytes, user_question)
+            image_analysis = await asyncio.to_thread(
+                self._analyze_image_with_gemini, image_bytes, user_question
+            )
 
             if user_question:
                 combined_text = f"[Картинка: {image_analysis}]\n{user_question}"
@@ -1114,24 +1119,14 @@ class MoltbotHandlers:
                 combined_text = f"[Картинка: {image_analysis}]"
 
             try:
-                reply = self._ask_moltbot(sender_name, combined_text, chat_context, user_key, history)
+                reply = await self._ask_moltbot(sender_name, combined_text, chat_context, user_key, history)
                 if reply and reply.strip():
-                    sent = self.bot.reply_to(message, reply)
+                    sent = await message.reply(reply)
                     self._store_bot_reply(reply, sent.message_id)
                 else:
-                    self.bot.reply_to(message, "🤐 AI отказался отвечать на это сообщение")
+                    await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
-                self.bot.reply_to(message, "⚠️ Не могу подключиться к AI, попробуй позже")
+                await message.reply("⚠️ Не могу подключиться к AI, попробуй позже")
             except Exception as e:
                 logger.error(f"MoltBot API error (photo): {e}")
-                self.bot.reply_to(message, "Не могу связаться с AI. Попробуй позже.")
-
-        @self.bot.message_handler(commands=['мут_сброс', 'mut_reset'])
-        def handle_reset(message):
-            """Reset chat history context and OpenClaw thread. Survives bot restarts."""
-            now = datetime.now(timezone.utc)
-            self._history_reset_time[message.chat.id] = now
-            self._user_key_suffix[message.chat.id] = f"-{int(now.timestamp())}"
-            self._save_state()
-            logger.info(f"MoltBot: history reset for chat {message.chat.id} by {message.from_user.id}")
-            self.bot.reply_to(message, "⚙️ Контекст сброшен. Начинаю с чистого листа.")
+                await message.reply("Не могу связаться с AI. Попробуй позже.")

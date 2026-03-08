@@ -35,6 +35,10 @@ class Settings:
     
     # Database connection string
     DB_CONN_STRING = os.getenv('DB_CONN_STRING', f"postgresql://{os.getenv('DB_USER', 'postgres')}:{os.getenv('DB_PASSWORD', '')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', 5432)}/{os.getenv('DB_NAME', 'server-tg-pisunchik')}")
+
+    # Alias used by aiogram v3 entry point
+    DATABASE_URL = os.getenv('DATABASE_URL', f"postgresql://{os.getenv('DB_USER', 'postgres')}:{os.getenv('DB_PASSWORD', '')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', 5432)}/{os.getenv('DB_NAME', 'server-tg-pisunchik')}")
+    REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
     
     # File paths
     DOWNLOAD_DIR = os.getenv('DOWNLOAD_DIR', './downloads')
