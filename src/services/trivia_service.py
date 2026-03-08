@@ -7,6 +7,8 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 import google.generativeai as genai
 
+from services.circuit_breaker import gemini_breaker
+
 logger = logging.getLogger(__name__)
 
 
@@ -79,11 +81,16 @@ class TriviaService:
         if not self.ai_client:
             logger.error("AI client not available for batch question generation")
             return []
+        if not gemini_breaker.allow_request():
+            logger.warning("TriviaService: Gemini circuit open, skipping batch generation")
+            return []
         try:
             prompt = self._build_batch_question_prompt(count)
             response = self.ai_client.generate_content(prompt)
+            gemini_breaker.record_success()
             return self._parse_batch_ai_response(response.text)
         except Exception as e:
+            gemini_breaker.record_failure()
             logger.error(f"Error generating question batch with AI: {str(e)}")
             return []
 
@@ -129,15 +136,20 @@ class TriviaService:
         if not self.ai_client:
             logger.error("AI client not available for question generation")
             return None
+        if not gemini_breaker.allow_request():
+            logger.warning("TriviaService: Gemini circuit open, skipping question generation")
+            return None
 
         try:
             prompt = self._build_question_prompt()
 
             response = self.ai_client.generate_content(prompt)
             response_text = response.text
+            gemini_breaker.record_success()
             return self._parse_ai_response(response_text)
 
         except Exception as e:
+            gemini_breaker.record_failure()
             logger.error(f"Error generating question with AI: {str(e)}")
             return None
 

@@ -13,6 +13,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import Message
 
 from config.settings import Settings
+from services.circuit_breaker import openclaw_breaker, ollama_breaker
 
 CHAT_SUMMARY_PATH = os.path.expanduser("~/.openclaw/workspace/memory/chat-summary.md")
 STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "moltbot_state.json")
@@ -276,6 +277,9 @@ class MoltbotHandlers:
         """Raw API call to OpenClaw. Returns response text or empty string on error.
         Only retries on connection errors — NOT on timeouts, because OpenClaw is stateful
         (tracks history per user_key) and a timeout means the message was already received."""
+        if not openclaw_breaker.allow_request():
+            logger.warning("MoltBot: OpenClaw circuit open, skipping call")
+            raise _AIConnectionError("circuit breaker open")
         last_exc = None
         for attempt in range(3):
             try:
@@ -307,29 +311,40 @@ class MoltbotHandlers:
                     text = '\n'.join(lines).strip()
                     if "no response" in text.lower() and "openclaw" in text.lower():
                         logger.info("MoltBot: OpenClaw returned NO_REPLY signal, skipping response")
+                        openclaw_breaker.record_success()
                         return ""
+                    openclaw_breaker.record_success()
                     return text
             except httpx.TimeoutException as e:
                 # Timeout = OpenClaw already received the message, don't retry (would cause duplicates)
                 logger.warning(f"MoltBot: OpenClaw timed out (attempt {attempt + 1}), not retrying to avoid duplicate context")
+                openclaw_breaker.record_failure()
                 raise _AIConnectionError("timed out") from e
             except Exception as e:
                 last_exc = e
                 if attempt < 2:
                     logger.warning(f"MoltBot: OpenClaw attempt {attempt + 1} failed: {e}, retrying...")
                     await asyncio.sleep(2)
+        openclaw_breaker.record_failure()
         logger.error(f"MoltBot: OpenClaw all retries failed: {last_exc}")
         raise _AIConnectionError(str(last_exc))
 
     def _call_ollama_direct(self, content: str, bot=None, message=None) -> str:
         """Call Ollama directly. Routes through OllamaWakeManager for auto-wake.
         This is a sync method — wrap with asyncio.to_thread when calling from async context."""
+        if not ollama_breaker.allow_request():
+            logger.warning("MoltBot: Ollama circuit open, skipping direct call")
+            return ""
         from services.ollama_wake_manager import OllamaWakeManager, WakeState
         manager = OllamaWakeManager()
 
         # Future use: if message context provided, use async wake flow
         if bot is not None and message is not None:
             result = manager.call(content, bot=bot, message=message)
+            if result:
+                ollama_breaker.record_success()
+            else:
+                ollama_breaker.record_failure()
             return result if result is not None else ""
 
         # Synchronous path (internal calls — no user waiting for this specific response)
@@ -342,8 +357,11 @@ class MoltbotHandlers:
             return ""
 
         try:
-            return manager._call_ollama_raw(content)
+            result = manager._call_ollama_raw(content)
+            ollama_breaker.record_success()
+            return result
         except Exception as e:
+            ollama_breaker.record_failure()
             logger.warning(f"MoltBot: Ollama call failed: {e}, triggering wake")
             manager._set_state(WakeState.OFFLINE)
             manager._trigger_wake()

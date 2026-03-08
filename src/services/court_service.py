@@ -5,6 +5,7 @@ import httpx
 import google.generativeai as genai
 
 from config.settings import Settings
+from services.circuit_breaker import ollama_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,9 @@ class CourtService:
 
     async def _call_llm(self, system_prompt: str | None, user_prompt: str) -> str:
         """Вызов Ollama (Qwen) с опциональным системным промптом."""
+        if not ollama_breaker.allow_request():
+            logger.warning("CourtService: Ollama circuit open, skipping LLM call")
+            return ""
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -196,8 +200,11 @@ class CourtService:
                     timeout=180,
                 )
             r.raise_for_status()
-            return r.json()["message"]["content"].strip()
+            result = r.json()["message"]["content"].strip()
+            ollama_breaker.record_success()
+            return result
         except Exception as e:
+            ollama_breaker.record_failure()
             logger.error(f"CourtService: Ollama error: {e}")
             return ""
 

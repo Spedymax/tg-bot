@@ -22,38 +22,115 @@ ALLOWED_PLAYER_FIELDS = {
     'pet_death_pending_notify',
 }
 
+# All datetime fields on the Player model (for serialization)
+_DATETIME_FIELDS = {
+    'last_used', 'last_vor', 'last_prezervativ', 'last_joke',
+    'casino_last_used', 'miniapp_last_spin_date',
+    'pet_revives_reset_date', 'last_trivia_date',
+    'pet_hunger_last_decay', 'pet_happiness_last_activity',
+    'pet_ulta_used_date',
+}
+
+# Fields stored as JSON (lists/dicts) in the database
+_JSON_FIELDS = {
+    'items', 'characteristics', 'player_stocks', 'statuetki',
+    'chat_id', 'correct_answers', 'nnn_checkins',
+    'pet', 'pet_titles', 'pet_ulta_oracle_preview',
+}
+
+_REDIS_KEY_PREFIX = "player:"
+
+
 class PlayerService:
-    def __init__(self, db_manager: DatabaseManager):
+    def __init__(self, db_manager: DatabaseManager, redis=None):
         self.db = db_manager
-        self._cache: Dict[int, dict] = {}  # {player_id: {"player": Player, "cached_at": datetime}}
-        self._cache_expiry_seconds = 300  # 5 minutes cache expiry
+        self._redis = redis
+        self._cache_expiry_seconds = 300  # 5 minutes
 
-    def _is_cache_valid(self, player_id: int) -> bool:
-        """Check if cache entry is still valid."""
-        if player_id not in self._cache:
-            return False
-        cached_at = self._cache[player_id].get("cached_at")
-        if not cached_at:
-            return False
-        age = (datetime.now(timezone.utc) - cached_at).total_seconds()
-        return age < self._cache_expiry_seconds
+    # ── Redis serialization helpers ────────────────────────────────────────
 
-    def _cache_player(self, player: Player):
-        """Cache a player with timestamp."""
-        self._cache[player.player_id] = {
-            "player": player,
-            "cached_at": datetime.now(timezone.utc)
-        }
+    @staticmethod
+    def _serialize_player(player: Player) -> str:
+        """Serialize a Player to a JSON string for Redis storage."""
+        data = {}
+        for attr_name in player.__dataclass_fields__:
+            val = getattr(player, attr_name)
+            if isinstance(val, datetime):
+                data[attr_name] = val.isoformat()
+            else:
+                # lists, dicts, ints, floats, bools, None — all JSON-native
+                data[attr_name] = val
+        return json.dumps(data, ensure_ascii=False)
 
-    def _get_cached_player(self, player_id: int) -> Optional[Player]:
-        """Get player from cache if valid."""
-        if self._is_cache_valid(player_id):
-            return self._cache[player_id]["player"]
-        return None
+    @staticmethod
+    def _deserialize_player(raw: str) -> Player:
+        """Deserialize a JSON string from Redis back into a Player."""
+        data: dict = json.loads(raw)
+        for field_name in _DATETIME_FIELDS:
+            val = data.get(field_name)
+            if val is not None and isinstance(val, str):
+                try:
+                    data[field_name] = datetime.fromisoformat(val)
+                except (ValueError, TypeError):
+                    data[field_name] = None
+        return Player(**data)
+
+    # ── Cache operations (async, Redis-backed) ─────────────────────────────
+
+    async def _cache_player(self, player: Player):
+        """Cache a player in Redis with TTL."""
+        if self._redis is None:
+            return
+        try:
+            key = f"{_REDIS_KEY_PREFIX}{player.player_id}"
+            await self._redis.set(key, self._serialize_player(player), ex=self._cache_expiry_seconds)
+        except Exception as e:
+            logger.warning(f"Redis cache SET failed for player {player.player_id}: {e}")
+
+    async def _get_cached_player(self, player_id: int) -> Optional[Player]:
+        """Get player from Redis cache (returns None on miss or error)."""
+        if self._redis is None:
+            return None
+        try:
+            key = f"{_REDIS_KEY_PREFIX}{player_id}"
+            raw = await self._redis.get(key)
+            if raw is None:
+                return None
+            return self._deserialize_player(raw)
+        except Exception as e:
+            logger.warning(f"Redis cache GET failed for player {player_id}: {e}")
+            return None
+
+    async def remove_from_cache(self, player_id: int):
+        """Remove a specific player from Redis cache."""
+        if self._redis is None:
+            return
+        try:
+            key = f"{_REDIS_KEY_PREFIX}{player_id}"
+            await self._redis.delete(key)
+        except Exception as e:
+            logger.warning(f"Redis cache DEL failed for player {player_id}: {e}")
+
+    async def clear_cache(self):
+        """Delete all player cache keys from Redis."""
+        if self._redis is None:
+            return
+        try:
+            cursor = 0
+            while True:
+                cursor, keys = await self._redis.scan(cursor, match=f"{_REDIS_KEY_PREFIX}*", count=100)
+                if keys:
+                    await self._redis.delete(*keys)
+                if cursor == 0:
+                    break
+        except Exception as e:
+            logger.warning(f"Redis cache CLEAR failed: {e}")
+
+    # ── Data access methods ────────────────────────────────────────────────
 
     async def get_player(self, player_id: int) -> Optional[Player]:
         """Get a player by ID, first checking cache, then database"""
-        cached_player = self._get_cached_player(player_id)
+        cached_player = await self._get_cached_player(player_id)
         if cached_player:
             return cached_player
 
@@ -67,7 +144,7 @@ class PlayerService:
                 if row:
                     column_names = [desc[0] for desc in cursor.description]
                     player = Player.from_db_row(row, column_names)
-                    self._cache_player(player)
+                    await self._cache_player(player)
                     return player
                 return None
         except Exception as e:
@@ -180,7 +257,7 @@ class PlayerService:
                             getattr(player, 'pet_death_pending_notify', False),
                         ))
 
-                self._cache_player(player)
+                await self._cache_player(player)
                 return True
 
         except Exception as e:
@@ -233,7 +310,7 @@ class PlayerService:
                 for row in rows:
                     player = Player.from_db_row(row, column_names)
                     players[player.player_id] = player
-                    self._cache_player(player)
+                    await self._cache_player(player)
 
                 return players
         except Exception as e:
@@ -254,7 +331,7 @@ class PlayerService:
                 await conn.execute(query, (value, player_id))
 
                 # Invalidate cache to force reload on next access
-                self.remove_from_cache(player_id)
+                await self.remove_from_cache(player_id)
 
                 return True
         except Exception as e:
@@ -277,12 +354,3 @@ class PlayerService:
         except Exception as e:
             logger.error(f"Error getting leaderboard: {e}")
             return []
-
-    def clear_cache(self):
-        """Clear the player cache"""
-        self._cache.clear()
-
-    def remove_from_cache(self, player_id: int):
-        """Remove a specific player from cache"""
-        if player_id in self._cache:
-            del self._cache[player_id]
