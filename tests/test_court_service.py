@@ -1,29 +1,33 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from unittest.mock import MagicMock
+import pytest
+from unittest.mock import MagicMock, AsyncMock
 from services.court_service import CourtService
 
 def make_service():
     db = MagicMock()
-    db.execute_query.return_value = None
+    db.execute_query = AsyncMock(return_value=None)
     return CourtService(db)
 
-def test_create_game_returns_id():
+@pytest.mark.asyncio
+async def test_create_game_returns_id():
     svc = make_service()
-    svc.db.execute_query.return_value = [(42,)]
-    game_id = svc.create_game(chat_id=-100123, defendant="Кот Леопольд", crime="украл колбасу")
+    svc.db.execute_query = AsyncMock(return_value=[(42,)])
+    game_id = await svc.create_game(chat_id=-100123, defendant="Кот Леопольд", crime="украл колбасу")
     assert game_id == 42
 
-def test_get_game_by_chat_returns_none_when_no_game():
+@pytest.mark.asyncio
+async def test_get_game_by_chat_returns_none_when_no_game():
     svc = make_service()
-    svc.db.execute_query.return_value = []
-    result = svc.get_active_game(chat_id=-100123)
+    svc.db.execute_query = AsyncMock(return_value=[])
+    result = await svc.get_active_game(chat_id=-100123)
     assert result is None
 
-def test_generate_cards_returns_three_lists():
+@pytest.mark.asyncio
+async def test_generate_cards_returns_three_lists():
     svc = make_service()
-    svc._call_llm = MagicMock(return_value="""ПРОКУРОР:
+    svc._call_llm = AsyncMock(return_value="""ПРОКУРОР:
 1. Зафиксирован нестандартный запрос в 3:17 ночи
 2. Версия модели была понижена без объяснений
 3. Токены расходовались аномально быстро
@@ -43,15 +47,16 @@ def test_generate_cards_returns_three_lists():
 3. Другие модели давали схожие ответы
 4. Фильтр безопасности в той версии имел известный баг
 """)
-    prosecutor, lawyer, witness = svc.generate_cards(defendant="ChatGPT", crime="рассказывал как делать бомбы")
+    prosecutor, lawyer, witness = await svc.generate_cards(defendant="ChatGPT", crime="рассказывал как делать бомбы")
     assert len(prosecutor) == 8
     assert len(lawyer) == 4
     assert len(witness) == 4
 
-def test_generate_cards_handles_parse_error():
+@pytest.mark.asyncio
+async def test_generate_cards_handles_parse_error():
     svc = make_service()
-    svc._call_llm = MagicMock(return_value="сломанный ответ")
-    prosecutor, lawyer, witness = svc.generate_cards(defendant="Кот", crime="украл чипсы")
+    svc._call_llm = AsyncMock(return_value="сломанный ответ")
+    prosecutor, lawyer, witness = await svc.generate_cards(defendant="Кот", crime="украл чипсы")
     assert isinstance(prosecutor, list)
     assert isinstance(lawyer, list)
     assert isinstance(witness, list)
@@ -85,9 +90,10 @@ def test_parse_judge_signal_final():
     assert signal == "ФИНАЛ"
     assert "[ФИНАЛ]" not in clean
 
-def test_set_phase_calls_db():
+@pytest.mark.asyncio
+async def test_set_phase_calls_db():
     svc = make_service()
-    svc.set_phase(1, "defense")
+    await svc.set_phase(1, "defense")
     svc.db.execute_query.assert_called_with(
         "UPDATE court_games SET current_phase = %s WHERE id = %s",
         ("defense", 1)

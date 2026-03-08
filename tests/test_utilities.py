@@ -189,16 +189,12 @@ class TestDatabaseManager(unittest.TestCase):
         """Test database manager initialization"""
         try:
             from database.db_manager import DatabaseManager
-            
+
             # This test may fail if no database connection is available
             # but it tests the class can be instantiated
-            with patch('database.db_manager.psycopg2') as mock_psycopg2:
-                mock_pool = Mock()
-                mock_psycopg2.pool.ThreadedConnectionPool.return_value = mock_pool
-                
-                db_manager = DatabaseManager()
-                self.assertIsNotNone(db_manager)
-                
+            db_manager = DatabaseManager()
+            self.assertIsNotNone(db_manager)
+
         except ImportError:
             self.skipTest("Cannot import DatabaseManager")
 
