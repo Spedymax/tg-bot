@@ -376,7 +376,7 @@ class MoltbotHandlers:
         """Count messages in DB written in the last `minutes` minutes."""
         try:
             rows = await self.db.execute_query(
-                "SELECT COUNT(*) FROM messages WHERE timestamp > NOW() - INTERVAL '%s minutes'",
+                "SELECT COUNT(*) FROM messages WHERE timestamp > NOW() - INTERVAL '1 minute' * %s",
                 (minutes,)
             )
             return rows[0][0] if rows else 0

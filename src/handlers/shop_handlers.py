@@ -85,32 +85,6 @@ class ShopHandlers:
 
             await self.bot.send_message(message.chat.id, shop_message, reply_markup=markup)
 
-        @self.router.message(Command('items'))
-        async def show_items(message: Message):
-            """Handle /items command"""
-            player_id = message.from_user.id
-            player = await self.player_service.get_player(player_id)
-
-            if not player:
-                await message.reply("Вы не зарегистрированы как игрок")
-                return
-
-            if not player.items:
-                await message.reply("У вас нету предметов(")
-                return
-
-            item_descriptions = []
-            for item in player.items:
-                if item in self.shop_data['description']:
-                    display_name = self.shop_data.get('names', {}).get(item, item)
-                    item_descriptions.append(f"{display_name}: {self.shop_data['description'][item]}")
-
-            if item_descriptions:
-                items_text = "\n\n".join(item_descriptions)
-                await message.reply(f"Ваши предметы:\n\n{items_text}")
-            else:
-                await message.reply("Нету описания предметов (Странно)")
-
         @self.router.message(Command('statuetki'))
         async def show_statuetki(message: Message):
             """Handle /statuetki command"""

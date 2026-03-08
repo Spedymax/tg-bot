@@ -1,8 +1,12 @@
 import os
+import sys
+import logging
 from dotenv import load_dotenv
 
 # Load environment variables from a .env file
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 class Settings:
     DB_CONFIG = {
@@ -77,3 +81,15 @@ class Settings:
     PC_SSH_KEY = os.getenv('PC_SSH_KEY', os.path.expanduser('~/.ssh/id_ed25519'))
     OLLAMA_IDLE_SLEEP_MINUTES = int(os.getenv('OLLAMA_IDLE_SLEEP_MINUTES') or '15')
     ADMIN_TELEGRAM_ID = int(os.getenv('ADMIN_TELEGRAM_ID') or '0')
+
+    @classmethod
+    def validate(cls):
+        """Validate required settings at startup. Call before bot starts."""
+        missing = []
+        if not cls.TELEGRAM_BOT_TOKEN:
+            missing.append('TELEGRAM_BOT_TOKEN')
+        if not cls.DB_CONFIG.get('password'):
+            missing.append('DB_PASSWORD')
+        if missing:
+            logger.critical(f"Missing required environment variables: {', '.join(missing)}")
+            sys.exit(1)
