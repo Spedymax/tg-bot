@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from typing import Optional, List, Dict, Any, Callable
 from functools import wraps
 import pytz
+import bcrypt
 
 # Load environment variables
 load_dotenv()
@@ -40,6 +41,25 @@ logger = logging.getLogger(__name__)
 
 # Пароли пользователей и их состояния ввода пароля
 user_passwords = {}
+
+
+def verify_password(password: str, stored_password: str, user_id: int = None) -> bool:
+    """Verify password against stored hash. Handles legacy plaintext passwords
+    by auto-upgrading them to bcrypt on successful match."""
+    try:
+        return bcrypt.checkpw(password.encode('utf-8'), stored_password.encode('utf-8'))
+    except (ValueError, TypeError):
+        # Legacy plaintext password — compare directly, then upgrade
+        if password == stored_password:
+            if user_id:
+                hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                try:
+                    memory_bot.register_user(user_id, password=hashed)
+                    logger.info(f"Auto-upgraded plaintext password to bcrypt for user {user_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to auto-upgrade password for user {user_id}: {e}")
+            return True
+        return False
 user_auth_states = {}
 
 # Константы
@@ -716,14 +736,15 @@ def handle_set_password(message):
     bot.delete_message(message.chat.id, message.message_id)
 
     # Сохраняем пароль в БД и в кэш
+    hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     memory_bot.register_user(
         user_id,
         message.from_user.username,
         message.from_user.first_name,
         message.from_user.last_name,
-        password
+        hashed
     )
-    user_passwords[user_id] = password
+    user_passwords[user_id] = hashed
 
     # Удаляем состояние ввода пароля
     user_auth_states.pop(user_id, None)
@@ -782,7 +803,7 @@ def check_password_for_weekly(message):
 
     stored_password = memory_bot.get_user_password(user_id)
 
-    if password != stored_password:
+    if not verify_password(password, stored_password, user_id):
         msg = bot.send_message(message.chat.id,
                                "❌ <b>Неверный пароль.</b> Попробуйте снова. Это сообщение будет удалено через 5 секунд",
                                parse_mode='HTML')
@@ -870,7 +891,7 @@ def check_password_for_extra(message):
 
     stored_password = memory_bot.get_user_password(user_id)
 
-    if password != stored_password:
+    if not verify_password(password, stored_password, user_id):
         msg = bot.send_message(message.chat.id,
                                "❌ <b>Неверный пароль.</b> Попробуйте команду /weekly снова. Это сообщение будет удалено через 5 секунд",
                                parse_mode='HTML')
@@ -1340,7 +1361,7 @@ def process_backup_password(message):
     bot.delete_message(message.chat.id, message.message_id)
 
     stored_password = memory_bot.get_user_password(user_id)
-    if password != stored_password:
+    if not verify_password(password, stored_password, user_id):
         msg = bot.send_message(message.chat.id,
             "❌ <b>Неверный пароль.</b> Попробуйте команду /backup снова.",
             parse_mode='HTML')

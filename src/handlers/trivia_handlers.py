@@ -143,10 +143,10 @@ class TriviaHandlers:
                     "wrong_answers": [opt for opt in result["question"]["options"] if opt != result["question"]["correct_answer"]]
                 }
             else:
-                print(f"Error: {result['message']}")
+                logger.error(f"Error: {result['message']}")
                 return None
         except Exception as e:
-            print(f"Error generating question: {e}")
+            logger.error(f"Error generating question: {e}")
             return None
 
     async def send_trivia_question(self, chat_id):
@@ -350,7 +350,7 @@ class TriviaHandlers:
                     await self.player_service.save_player(player)
 
         except Exception as e:
-            print(f"Error in answer callback: {e}")
+            logger.error(f"Error in answer callback: {e}")
             await call.answer("Произошла ошибка")
 
 
@@ -378,7 +378,7 @@ class TriviaHandlers:
                 parse_mode='html'
             )
         except Exception as e:
-            print(f"Error updating question message: {e}")
+            logger.error(f"Error updating question message: {e}")
 
     async def save_question_state(self, message_id, question, players_responses, answer_options=None):
         """Save question state to database"""
@@ -410,7 +410,7 @@ class TriviaHandlers:
                         (message_id, question, json.dumps(data_to_save))
                     )
         except Exception as e:
-            print(f"Error saving question state: {e}")
+            logger.error(f"Error saving question state: {e}")
 
     async def load_question_state_from_db(self, message_id):
         """Load question state from database"""
@@ -455,7 +455,7 @@ class TriviaHandlers:
                                 "options": []
                             }
                     except (json.JSONDecodeError, TypeError) as e:
-                        print(f"Error parsing question state JSON: {e}")
+                        logger.warning(f"Error parsing question state JSON: {e}")
                         # Return empty structure instead of None
                         return {
                             "text": question_text,
@@ -465,7 +465,7 @@ class TriviaHandlers:
 
                 return None
         except Exception as e:
-            print(f"Error loading question state: {e}")
+            logger.error(f"Error loading question state: {e}")
             return None
 
     async def get_correct_answers(self, message: Message):
@@ -537,7 +537,7 @@ class TriviaHandlers:
                 await message.reply(response_text, parse_mode='HTML')
 
         except Exception as e:
-            print(f"Error getting correct answers: {e}")
+            logger.error(f"Error getting correct answers: {e}")
             await message.reply("❌ Произошла ошибка при получении вопросов")
 
     def load_trivia_data(self):
@@ -588,5 +588,5 @@ class TriviaHandlers:
                 return "Пока никто не набрал очков в этом чате."
 
         except Exception as e:
-            print(f"Error getting player scores: {e}")
+            logger.error(f"Error getting player scores: {e}")
             return "Ошибка при получении очков."

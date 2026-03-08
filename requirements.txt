@@ -62,3 +62,4 @@ pytest-mock==3.11.1
 eventlet==0.40.4
 gunicorn==25.1.0
 wakeonlan==2.1.0
+bcrypt>=4.0.0

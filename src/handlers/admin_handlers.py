@@ -94,7 +94,7 @@ class AdminHandlers:
             query = """
                 SELECT name, message_text, timestamp
                 FROM messages
-                WHERE timestamp > NOW() - INTERVAL '%s hours'
+                WHERE timestamp > NOW() - INTERVAL '1 hour' * %s
                 ORDER BY timestamp DESC
                 LIMIT %s
             """
@@ -204,7 +204,7 @@ class AdminHandlers:
 
             return True
         except Exception as e:
-            print(f"Wake-on-LAN error: {e}")
+            logger.error(f"Wake-on-LAN error: {e}")
             return False
 
     def _register(self):

@@ -81,8 +81,8 @@ def vote_for_player(message):
         voter_id = parts[1]
         vote_value = parts[2]
         
-        message, success = tournament_manager.handle_admin_vote(voter_id, vote_value)
-        bot.reply_to(message, message)
+        reply_text, success = tournament_manager.handle_admin_vote(voter_id, vote_value)
+        bot.reply_to(message, reply_text)
     except Exception as e:
         bot.reply_to(message, f"❌ Error: {str(e)}")
 

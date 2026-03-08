@@ -45,6 +45,8 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
+    Settings.validate()
+
     # ── Core services (async database pool) ──────────────────────────────────
     db_manager = DatabaseManager()
     await db_manager.init_pool()
