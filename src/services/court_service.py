@@ -183,7 +183,7 @@ class CourtService:
         try:
             genai.configure(api_key=Settings.GEMINI_API_KEY)
             model = genai.GenerativeModel(
-                'gemini-2.5-flash-lite',
+                'gemini-2.0-flash',
                 system_instruction=system_prompt if system_prompt else None,
             )
             response = model.generate_content(user_prompt)
