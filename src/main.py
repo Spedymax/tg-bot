@@ -47,10 +47,11 @@ logger = logging.getLogger(__name__)
 async def main():
     Settings.validate()
 
-    # ── Core services (async database pool) ──────────────────────────────────
+    # ── Core services (async database pool + Redis) ──────────────────────────
     db_manager = DatabaseManager()
     await db_manager.init_pool()
-    player_service = PlayerService(db_manager)
+    redis = Redis.from_url(Settings.REDIS_URL)
+    player_service = PlayerService(db_manager, redis=redis)
     game_service = GameService(player_service)
 
     # ── aiogram v3 Bot + Dispatcher with Redis FSM storage ───────────────────
@@ -58,7 +59,6 @@ async def main():
         token=Settings.TELEGRAM_BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    redis = Redis.from_url(Settings.REDIS_URL)
     storage = RedisStorage(redis=redis)
     dp = Dispatcher(storage=storage)
 
