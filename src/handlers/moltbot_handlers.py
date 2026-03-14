@@ -7,6 +7,7 @@ import re
 import httpx
 import google.generativeai as genai
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 from aiogram import Router, F, Bot
 from aiogram.filters import Command, StateFilter
@@ -64,6 +65,7 @@ SPIKE_DELAY_MIN, SPIKE_DELAY_MAX = 5 * 60, 20 * 60  # seconds
 # Smart summary config
 SUMMARY_UPDATE_INTERVAL = 40  # update chat-summary.md every N group messages
 SUMMARY_FETCH_LIMIT = 600     # messages to analyze when updating
+CPH_TZ = ZoneInfo("Europe/Copenhagen")
 
 
 class MoltbotHandlers:
@@ -152,6 +154,16 @@ class MoltbotHandlers:
             title = chat.title or "групповой чат"
             return f"Telegram, групповой чат «{title}»"
         return ""
+
+    @staticmethod
+    def _format_ts(dt: datetime | None) -> str:
+        """Format a DB timestamp as [HH:MM DD.MM] in Copenhagen timezone."""
+        if dt is None:
+            return ""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        local = dt.astimezone(CPH_TZ)
+        return local.strftime("[%H:%M %d.%m]")
 
     async def _is_bot_mentioned(self, message) -> bool:
         """Return True if @ggallmute2_bot appears in message entities."""
@@ -250,7 +262,7 @@ class MoltbotHandlers:
             reset_time = self._history_reset_time.get(chat_id) if chat_id else None
             if reset_time:
                 query = """
-                    SELECT name, message_text
+                    SELECT name, message_text, timestamp
                     FROM messages
                     WHERE timestamp >= %s
                     ORDER BY timestamp DESC
@@ -259,7 +271,7 @@ class MoltbotHandlers:
                 rows = await self.db.execute_query(query, (reset_time, limit))
             else:
                 query = """
-                    SELECT name, message_text
+                    SELECT name, message_text, timestamp
                     FROM messages
                     ORDER BY timestamp DESC
                     LIMIT %s
@@ -268,7 +280,10 @@ class MoltbotHandlers:
             if not rows:
                 return []
             # Rows come newest-first; reverse to get chronological order
-            return [f"{row[0] or 'Аноним'}: {row[1]}" for row in reversed(rows)]
+            return [
+                f"{self._format_ts(row[2])} {row[0] or 'Аноним'}: {row[1]}"
+                for row in reversed(rows)
+            ]
         except Exception as e:
             logger.error(f"MoltBot: error fetching chat history: {e}")
             return []
