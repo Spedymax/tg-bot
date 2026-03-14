@@ -84,6 +84,7 @@ class MoltbotHandlers:
         self._messages_since_summary: int = 0
         self._active_danetka: dict[int, dict] = {}
         self._photo_context: dict[int, str] = {}  # bot_reply_msg_id → original photo file_id
+        self._prob_session_start: dict[int, datetime] = {}  # chat_id → when probabilistic session started
         self._load_state()
         self._init_gemini()
         asyncio.ensure_future(self._ensure_danetki_table())
@@ -707,44 +708,106 @@ class MoltbotHandlers:
                 logger.info("MoltBot: Qwen returned empty, falling back to Claude")
         return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
 
-    async def _maybe_reply_probabilistic(self, message) -> bool:
-        """Ask local LLM if the bot should reply to this message. Returns True if replied."""
-        # Cooldown: max once per 15 minutes per chat
-        chat_id = message.chat.id
-        last = self._last_probabilistic_sent.get(chat_id)
-        if last and (datetime.now(timezone.utc) - last) < timedelta(minutes=15):
+    async def _qwen_should_reply(self, sender_name: str, user_text: str,
+                                history: list[str]) -> bool:
+        """Ask Qwen if the bot should reply. Returns True/False. Fast filter."""
+        snippet = "\n".join(history[-10:]) if history else "(нет истории)"
+        prompt = (
+            f"Вот последние сообщения из группового чата:\n{snippet}\n\n"
+            f"Новое сообщение от {sender_name}: {user_text}\n\n"
+            "Ты Джарвис — участник чата. Реши: стоит ли тебе вмешаться?\n"
+            "Отвечай YES только если:\n"
+            "- Тема тебя касается (дота, философия, жизнь, шансон, зона)\n"
+            "- Кто-то сказал явную глупость и это смешно прокомментировать\n"
+            "- Разговор сам просится на твой комментарий\n"
+            "Отвечай NO если:\n"
+            "- Это просто болтовня между людьми\n"
+            "- Сообщение короткое и бессмысленное\n"
+            "- Вопрос адресован конкретному человеку\n"
+            "- При любых сомнениях — NO\n"
+            "Ответь одним словом: YES или NO"
+        )
+        try:
+            result = await asyncio.to_thread(self._call_ollama_direct, prompt)
+            answer = result.strip().upper()
+            logger.info(f"MoltBot: Qwen filter says {answer} for: {user_text[:60]}")
+            return "YES" in answer
+        except Exception as e:
+            logger.warning(f"MoltBot: Qwen filter error: {e}")
             return False
 
-        sender_name = self._resolve_sender_name(message.from_user)
+    async def _maybe_reply_probabilistic(self, message) -> bool:
+        """Two-stage probabilistic reply: activity gate → Qwen filter → Claude response."""
+        chat_id = message.chat.id
         user_text = message.text or ""
+        now = datetime.now(timezone.utc)
 
-        history = await self._get_recent_group_messages(limit=30, chat_id=chat_id)
-        history_block = "\n".join(history) if history else "(нет истории)"
-        summary = _load_chat_summary()
-        summary_block = f"[Долгосрочная память о чате:\n{summary}\n]\n" if summary else ""
+        # Gate 1: minimum message length
+        if len(user_text) < 10:
+            return False
 
-        prompt = (
-            f"{summary_block}"
-            f"[История чата (последние {len(history)} сообщений):\n{history_block}\n]\n\n"
-            f"Новое сообщение от {sender_name}: {user_text}\n\n"
-            "[Ты участник этого группового чата. Реши: стоит ли тебе вмешаться в разговор?\n"
-            "- Если разговор между людьми и тебя не касается — НЕ отвечай\n"
-            "- Если вопрос адресован другому участнику — НЕ отвечай\n"
-            "- НЕ самоидентифицируйся со словами из разговора (игрушка, лиса, бот и т.п.) если тебя прямо не имеют в виду\n"
-            "- При сомнении — НЕ отвечай, лучше промолчать чем встрять невпопад\n"
-            "- Отвечай только если тебе есть что добавить уместно и по делу (1-2 предложения)\n"
-            "- Если не стоит отвечать — верни ровно пустую строку без пробелов\n"
-            "Ответ (только текст сообщения или пустая строка):]"
-        )
+        # Gate 2: activity threshold — 6+ messages in last 10 minutes
+        recent_count = await self._count_recent_messages(10)
+        if recent_count < 6:
+            return False
 
+        # Gate 3: session cooldown — 20 minutes between replies
+        last = self._last_probabilistic_sent.get(chat_id)
+        if last and (now - last) < timedelta(minutes=20):
+            return False
+
+        # Determine cold start vs warm session
+        session_start = self._prob_session_start.get(chat_id)
+        is_cold_start = session_start is None or (now - session_start) > timedelta(hours=2)
+
+        sender_name = self._resolve_sender_name(message.from_user)
         user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
+
         try:
-            reply = await self._call_openclaw(prompt, user_key, model="ollama/qwen3.5:9b")
+            if is_cold_start:
+                # Cold start: Claude picks from last 6 messages
+                history = await self._get_recent_group_messages(limit=6, chat_id=chat_id)
+                if not history:
+                    return False
+                history_block = "\n".join(history)
+                prompt = (
+                    f"[Последние 6 сообщений из чата]\n{history_block}\n\n"
+                    "Ты участник чата и хочешь вмешаться. Выбери одно сообщение "
+                    "на которое стоит ответить и напиши короткий комментарий.\n"
+                    "Подъёбка, шутка, или полезный коммент если тема серьёзная.\n"
+                    "1-2 предложения максимум. Не представляйся, не начинай с обращения.\n"
+                    "Если ни одно сообщение не стоит ответа — верни пустую строку."
+                )
+                reply = await self._call_openclaw(prompt, user_key)
+                logger.info(f"MoltBot: cold start probabilistic for chat {chat_id}")
+            else:
+                # Warm session: Qwen filter → Claude response
+                history = await self._get_recent_group_messages(limit=30, chat_id=chat_id)
+                should = await self._qwen_should_reply(sender_name, user_text, history)
+                if not should:
+                    return False
+
+                history_block = "\n".join(history) if history else "(нет истории)"
+                prompt = (
+                    f"[История чата — последние {len(history)} сообщений]\n{history_block}\n\n"
+                    f"Новое сообщение от {sender_name}: {user_text}\n\n"
+                    "[Ты решил вмешаться в разговор. Напиши короткий комментарий "
+                    "как участник чата — подъёбка, шутка, или полезный коммент если тема серьёзная.\n"
+                    "1-2 предложения максимум. Не представляйся, не начинай с обращения.\n"
+                    "Если передумал — верни пустую строку.]"
+                )
+                reply = await self._call_openclaw(prompt, user_key)
+                logger.info(f"MoltBot: warm session probabilistic for chat {chat_id}")
+
             reply = reply.strip()
             if not reply:
                 return False
-            await message.reply(reply)
-            self._last_probabilistic_sent[chat_id] = datetime.now(timezone.utc)
+
+            sent = await message.reply(reply)
+            await self._store_bot_reply(reply, sent.message_id)
+            self._last_probabilistic_sent[chat_id] = now
+            if is_cold_start:
+                self._prob_session_start[chat_id] = now
             logger.info(f"MoltBot: probabilistic reply sent in chat {chat_id}")
             return True
         except Exception as e:
