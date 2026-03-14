@@ -83,6 +83,7 @@ class MoltbotHandlers:
         self._last_reaction_time: dict[int, datetime] = {}
         self._messages_since_summary: int = 0
         self._active_danetka: dict[int, dict] = {}
+        self._photo_context: dict[int, str] = {}  # bot_reply_msg_id → original photo file_id
         self._load_state()
         self._init_gemini()
         asyncio.ensure_future(self._ensure_danetki_table())
@@ -1182,6 +1183,22 @@ class MoltbotHandlers:
 
             sender_name = self._resolve_sender_name(message.from_user)
             user_text = message.text or ""
+
+            # Check if the bot's message was about a photo — re-analyze if needed
+            replied_msg_id = message.reply_to_message.message_id
+            photo_file_id = self._photo_context.get(replied_msg_id)
+            if photo_file_id and user_text:
+                try:
+                    file = await self.bot.get_file(photo_file_id)
+                    bio = await self.bot.download_file(file.file_path)
+                    image_bytes = bio.read()
+                    reanalysis = await asyncio.to_thread(
+                        self._analyze_image_with_gemini, image_bytes, user_text
+                    )
+                    user_text = f"[Повторный анализ картинки с вопросом \"{user_text}\": {reanalysis}]\n{user_text}"
+                except Exception as e:
+                    logger.warning(f"MoltBot: photo re-analysis failed: {e}")
+
             reply_ctx = await self._build_reply_context(message)
             if reply_ctx:
                 user_text = f"{reply_ctx}\n{user_text}" if user_text else reply_ctx
@@ -1197,6 +1214,9 @@ class MoltbotHandlers:
                 if reply and reply.strip():
                     sent = await message.reply(reply)
                     await self._store_bot_reply(reply, sent.message_id)
+                    # Propagate photo context to follow-up replies too
+                    if photo_file_id:
+                        self._photo_context[sent.message_id] = photo_file_id
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
@@ -1262,6 +1282,7 @@ class MoltbotHandlers:
                 if reply and reply.strip():
                     sent = await message.reply(reply)
                     await self._store_bot_reply(reply, sent.message_id)
+                    self._photo_context[sent.message_id] = message.photo[-1].file_id
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
