@@ -45,7 +45,7 @@ class TriviaService:
         self.db_manager = db_manager
 
         genai.configure(api_key=gemini_api_key)
-        self.ai_client = genai.GenerativeModel('gemini-2.5-flash-lite')
+        self.ai_client = genai.GenerativeModel('gemini-3-flash')
 
         self.difficulty = 'medium'
         self.active_questions: Dict[int, QuestionState] = {}
