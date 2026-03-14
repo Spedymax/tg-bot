@@ -165,6 +165,75 @@ class MoltbotHandlers:
         local = dt.astimezone(CPH_TZ)
         return local.strftime("[%H:%M %d.%m]")
 
+    async def _build_reply_context(self, message) -> str:
+        """Extract reply-to message info for AI context.
+
+        Returns formatted string like:
+        [Юра отвечает на сообщение Богдана [16:30 14.03]: "текст"]
+        Or empty string if message is not a reply.
+        """
+        reply = message.reply_to_message
+        if reply is None:
+            return ""
+
+        # Author name (who wrote the replied-to message)
+        if reply.from_user is None:
+            author = "Аноним"
+        elif reply.from_user.is_bot:
+            author = reply.from_user.first_name or "Jarvis"
+        else:
+            author = self._resolve_sender_name(reply.from_user)
+
+        # Sender name (who is replying)
+        sender = self._resolve_sender_name(message.from_user) if message.from_user else "Аноним"
+
+        # Timestamp
+        ts = self._format_ts(reply.date) if reply.date else ""
+
+        # Content extraction
+        parts = []
+
+        # Photo in reply
+        if reply.photo:
+            try:
+                file = await self.bot.get_file(reply.photo[-1].file_id)
+                bio = await self.bot.download_file(file.file_path)
+                image_bytes = bio.read()
+                desc = await asyncio.to_thread(
+                    self._analyze_image_with_gemini, image_bytes, ""
+                )
+                parts.append(f"[Картинка: {desc}]")
+            except Exception as e:
+                logger.warning(f"MoltBot: failed to analyze reply photo: {e}")
+                parts.append("[Картинка]")
+
+        # Text or caption
+        text = reply.text or reply.caption or ""
+        if text:
+            parts.append(f'"{text}"')
+
+        # Fallback content types (no text, no photo)
+        if not parts:
+            if reply.sticker:
+                emoji = reply.sticker.emoji or ""
+                parts.append(f"[Стикер: {emoji}]")
+            elif reply.voice:
+                parts.append("[Голосовое сообщение]")
+            elif reply.video_note:
+                parts.append("[Видеосообщение]")
+            elif reply.animation:
+                parts.append("[GIF]")
+            elif reply.document:
+                fname = reply.document.file_name or "файл"
+                parts.append(f"[Документ: {fname}]")
+            elif reply.video:
+                parts.append("[Видео]")
+            else:
+                parts.append("[Сообщение без текста]")
+
+        content = " ".join(parts)
+        return f"[{sender} отвечает на сообщение {author} {ts}: {content}]"
+
     async def _is_bot_mentioned(self, message) -> bool:
         """Return True if @ggallmute2_bot appears in message entities."""
         if not message.entities or not message.text:
