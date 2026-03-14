@@ -245,3 +245,22 @@ class TestBuildReplyContext:
 
             assert "мем с котом" in result
             assert "ну вот" in result
+
+
+class TestEmptyTagGreeting:
+    def test_empty_tag_no_reply_returns_greeting(self):
+        result = MoltbotHandlers._should_greet(user_text="", reply_to=None)
+        assert result == "Чё надо?"
+
+    def test_empty_tag_with_reply_returns_none(self):
+        reply_msg = _make_message(text="some text")
+        result = MoltbotHandlers._should_greet(user_text="", reply_to=reply_msg)
+        assert result is None
+
+    def test_tag_with_text_returns_none(self):
+        result = MoltbotHandlers._should_greet(user_text="что думаешь?", reply_to=None)
+        assert result is None
+
+    def test_whitespace_only_tag_returns_greeting(self):
+        result = MoltbotHandlers._should_greet(user_text="  ", reply_to=None)
+        assert result == "Чё надо?"

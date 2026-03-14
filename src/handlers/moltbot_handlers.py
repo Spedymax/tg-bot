@@ -165,6 +165,13 @@ class MoltbotHandlers:
         local = dt.astimezone(CPH_TZ)
         return local.strftime("[%H:%M %d.%m]")
 
+    @staticmethod
+    def _should_greet(user_text: str, reply_to) -> str | None:
+        """Return greeting if empty tag with no reply, else None."""
+        if not user_text.strip() and reply_to is None:
+            return "Чё надо?"
+        return None
+
     async def _build_reply_context(self, message) -> str:
         """Extract reply-to message info for AI context.
 
@@ -563,12 +570,15 @@ class MoltbotHandlers:
         """Fetch recent messages and ask Qwen to rewrite chat-summary.md."""
         try:
             rows = await self.db.execute_query(
-                "SELECT name, message_text FROM messages ORDER BY timestamp DESC LIMIT %s",
+                "SELECT name, message_text, timestamp FROM messages ORDER BY timestamp DESC LIMIT %s",
                 (SUMMARY_FETCH_LIMIT,),
             )
             if not rows:
                 return
-            messages = [f"{r[0] or 'Аноним'}: {r[1]}" for r in reversed(rows)]
+            messages = [
+                f"{self._format_ts(r[2])} {r[0] or 'Аноним'}: {r[1]}"
+                for r in reversed(rows)
+            ]
             history_text = "\n".join(messages)
 
             current_summary = _load_chat_summary()
@@ -590,6 +600,8 @@ class MoltbotHandlers:
 - Добавь новое что появилось в последних сообщениях: шутки, события, пари, внутренние мемы, новые темы
 - Убери то, что явно устарело и больше не актуально
 - Держи размер ~4000 слов — сохраняй все детали, выкидывай только совсем устаревшее и неактуальное
+- Помечай когда тема/шутка была актуальна, например: (март 2026), (февраль 2026)
+- Это поможет отличить свежие темы от старых
 - Обнови поле "Последнее обновление" на {now}
 - Верни ТОЛЬКО текст нового summary в формате markdown, без пояснений, без обёртки в ```"""
 
@@ -1058,6 +1070,10 @@ class MoltbotHandlers:
                 return
             sender_name = self._resolve_sender_name(message.from_user)
             user_text = await self._extract_user_text(message)
+            greeting = self._should_greet(user_text, message.reply_to_message)
+            if greeting:
+                await message.reply(greeting)
+                return
             reply_ctx = await self._build_reply_context(message)
             if reply_ctx:
                 user_text = f"{reply_ctx}\n{user_text}" if user_text else reply_ctx
