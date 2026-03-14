@@ -394,8 +394,16 @@ class MoltbotHandlers:
             context_prefix += f"[Долгосрочная память о чате:\n{summary}\n]\n"
 
         if history:
+            now = datetime.now(CPH_TZ).strftime("%H:%M %d.%m")
             history_block = "\n".join(history)
-            context_prefix += f"[История чата (последние {len(history)} сообщений):\n{history_block}\n]\n"
+            context_prefix += (
+                f"[Сейчас: {now} Copenhagen]\n"
+                f"[История чата — последние {len(history)} сообщений.\n"
+                "Это фоновый контекст для понимания о чём речь.\n"
+                "Не поднимай старые темы сам — отвечай только на то, "
+                "что тебе написали сейчас.]\n"
+                f"{history_block}\n"
+            )
 
         user_content = (
             f"{context_prefix}{sender_name}: {user_text}"
