@@ -1058,6 +1058,9 @@ class MoltbotHandlers:
                 return
             sender_name = self._resolve_sender_name(message.from_user)
             user_text = await self._extract_user_text(message)
+            reply_ctx = await self._build_reply_context(message)
+            if reply_ctx:
+                user_text = f"{reply_ctx}\n{user_text}" if user_text else reply_ctx
             chat_context = self._get_chat_context(message)
             user_key = self._resolve_user_key(message)
 
@@ -1161,6 +1164,9 @@ class MoltbotHandlers:
 
             sender_name = self._resolve_sender_name(message.from_user)
             user_text = message.text or ""
+            reply_ctx = await self._build_reply_context(message)
+            if reply_ctx:
+                user_text = f"{reply_ctx}\n{user_text}" if user_text else reply_ctx
             chat_context = self._get_chat_context(message)
             user_key = self._resolve_user_key(message)
 
@@ -1204,6 +1210,7 @@ class MoltbotHandlers:
                 return
             sender_name = self._resolve_sender_name(message.from_user)
             user_question = await self._extract_caption_text(message)
+            reply_ctx = await self._build_reply_context(message)
             chat_context = self._get_chat_context(message)
             user_key = self._resolve_user_key(message)
 
@@ -1224,10 +1231,13 @@ class MoltbotHandlers:
                 self._analyze_image_with_gemini, image_bytes, user_question
             )
 
+            parts = []
+            if reply_ctx:
+                parts.append(reply_ctx)
+            parts.append(f"[Картинка: {image_analysis}]")
             if user_question:
-                combined_text = f"[Картинка: {image_analysis}]\n{user_question}"
-            else:
-                combined_text = f"[Картинка: {image_analysis}]"
+                parts.append(user_question)
+            combined_text = "\n".join(parts)
 
             try:
                 reply = await self._ask_moltbot(sender_name, combined_text, chat_context, user_key, history)
