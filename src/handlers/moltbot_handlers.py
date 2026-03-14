@@ -316,7 +316,9 @@ class MoltbotHandlers:
                 {"mime_type": "image/jpeg", "data": image_bytes},
                 prompt,
             ])
-            return response.text
+            result = response.text
+            logger.info(f"MoltBot: Gemini image analysis: {result[:200]}")
+            return result
         except Exception as e:
             logger.error(f"MoltBot: Gemini image analysis failed: {e}")
             return "[Не удалось проанализировать изображение]"
