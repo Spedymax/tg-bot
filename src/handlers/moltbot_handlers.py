@@ -1126,7 +1126,7 @@ class MoltbotHandlers:
             self._maybe_update_summary()
             asyncio.create_task(self._maybe_reply_probabilistic(message))
 
-        @router.message(StateFilter(None), F.content_types(['photo']), F.func(lambda m: (
+        @router.message(StateFilter(None), F.photo, F.func(lambda m: (
             m.caption_entities is not None
             and any(e.type == 'mention' for e in m.caption_entities)
         )))
@@ -1144,7 +1144,8 @@ class MoltbotHandlers:
 
             try:
                 file = await self.bot.get_file(message.photo[-1].file_id)
-                image_bytes = await self.bot.download_file(file.file_path)
+                bio = await self.bot.download_file(file.file_path)
+                image_bytes = bio.read()
             except Exception as e:
                 logger.error(f"MoltBot: failed to download photo: {e}")
                 await message.reply("Не могу загрузить картинку. Попробуй ещё раз.")
