@@ -29,7 +29,7 @@ class AdminHandlers:
         # Initialize Gemini for message analysis
         if Settings.GEMINI_API_KEY:
             genai.configure(api_key=Settings.GEMINI_API_KEY)
-            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash-lite')
+            self.gemini_model = genai.GenerativeModel('gemini-3-flash')
         else:
             self.gemini_model = None
             logger.warning("GEMINI_API_KEY not found, sho_tam_novogo feature will be disabled")
