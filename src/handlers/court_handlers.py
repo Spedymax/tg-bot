@@ -66,6 +66,8 @@ class CourtHandlers:
         self._game_locks: dict[int, asyncio.Lock] = {}
         # Track chats with active court games (for filter efficiency)
         self._active_game_chats: set[int] = set()
+        # Consecutive [ВОПРОС] counter per game: game_id → count (max 2, then force turn pass)
+        self._question_streak: dict[int, int] = {}
 
         self.router = Router()
         self._register()
@@ -217,7 +219,7 @@ class CourtHandlers:
             pending = self._pending_speech.get(chat_id)
             if pending and message.from_user.id == pending['user_id']:
                 self._pending_speech.pop(chat_id, None)
-                speech = (message.text or "").strip()[:500]
+                speech = (message.text or "").strip()[:3000]
                 logger.info(
                     f"[COURT] speech_input: game={pending['game_id']} chat={chat_id} "
                     f"role={pending['role']} user={message.from_user.id} speech='{speech[:60]}'"
@@ -253,7 +255,7 @@ class CourtHandlers:
             if not role:
                 return
 
-            reply_text = (message.text or "").strip()[:500]
+            reply_text = (message.text or "").strip()[:3000]
             if not reply_text:
                 return
 
@@ -552,7 +554,7 @@ class CourtHandlers:
             if signal in ("ВОПРОС", None):
                 signal = "ПРОКУРОР_ВАШ_ХОД" if round_num < 4 else "ФИНАЛ"
 
-            await self._handle_judge_signal(game_id, chat_id, signal, round_num)
+            await self._handle_judge_signal(game_id, chat_id, signal, round_num, last_role='lawyer')
 
         except Exception as e:
             logger.error(f"_ai_play_defense_test: ошибка: {e}", exc_info=True)
@@ -710,13 +712,37 @@ class CourtHandlers:
                 judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
                 await self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
 
-            await self._handle_judge_signal(game_id, chat_id, signal, round_num)
+            await self._handle_judge_signal(game_id, chat_id, signal, round_num, last_role=role)
 
         except Exception as e:
             logger.error(f"[COURT] _after_speech_received: ошибка для game {game_id}: {e}", exc_info=True)
 
-    async def _handle_judge_signal(self, game_id: int, chat_id: int, signal: str | None, round_num: int):
+    async def _handle_judge_signal(self, game_id: int, chat_id: int, signal: str | None, round_num: int, last_role: str = None):
         """Двигает игровой стейт по сигналу судьи."""
+        # Validate signal is contextually appropriate for the role that just spoke
+        if last_role == 'prosecutor' and signal in ('ПРОКУРОР_ВАШ_ХОД', 'ФИНАЛ'):
+            logger.warning(f"[COURT] signal override: {signal} invalid after prosecutor, → ЗАЩИТА_ВАШ_ХОД")
+            signal = 'ЗАЩИТА_ВАШ_ХОД'
+        elif last_role in ('lawyer', 'witness') and signal == 'ЗАЩИТА_ВАШ_ХОД':
+            corrected = 'ПРОКУРОР_ВАШ_ХОД' if round_num < 4 else 'ФИНАЛ'
+            logger.warning(f"[COURT] signal override: {signal} invalid after defense, → {corrected}")
+            signal = corrected
+
+        # Enforce max 2 consecutive [ВОПРОС] — then force turn pass
+        if signal == "ВОПРОС":
+            streak = self._question_streak.get(game_id, 0) + 1
+            if streak > 2:
+                if last_role == 'prosecutor':
+                    signal = 'ЗАЩИТА_ВАШ_ХОД'
+                else:
+                    signal = 'ПРОКУРОР_ВАШ_ХОД' if round_num < 4 else 'ФИНАЛ'
+                logger.info(f"[COURT] question streak limit: {streak} questions, forcing {signal}")
+                self._question_streak[game_id] = 0
+            else:
+                self._question_streak[game_id] = streak
+        else:
+            self._question_streak[game_id] = 0
+
         if signal == "ВОПРОС":
             await self.court_service.set_phase(game_id, 'judge')
             await self._start_fallback_timer(game_id, chat_id, round_num)
@@ -833,7 +859,7 @@ class CourtHandlers:
                 judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
                 await self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
 
-            await self._handle_judge_signal(game_id, chat_id, signal, round_num)
+            await self._handle_judge_signal(game_id, chat_id, signal, round_num, last_role=role)
 
         except Exception as e:
             logger.error(f"[COURT] _process_judge_reply: ошибка: {e}", exc_info=True)
