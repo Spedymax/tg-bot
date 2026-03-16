@@ -13,6 +13,11 @@ logger = logging.getLogger(__name__)
 class CourtService:
     def __init__(self, db):
         self.db = db
+        if Settings.GEMINI_API_KEY:
+            genai.configure(api_key=Settings.GEMINI_API_KEY)
+            self._gemini = genai.GenerativeModel('gemini-3-flash-preview')
+        else:
+            self._gemini = None
 
     # ── DB-хелперы ─────────────────────────────────────────────────────────
 
@@ -189,7 +194,20 @@ class CourtService:
     )
 
     async def _call_llm(self, system_prompt: str | None, user_prompt: str) -> str:
-        """Вызов Ollama (Qwen) с опциональным системным промптом."""
+        """Вызов Gemini (основной) с фолбеком на Ollama."""
+        # Try Gemini first
+        if self._gemini:
+            try:
+                prompt = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
+                import asyncio
+                response = await asyncio.to_thread(self._gemini.generate_content, prompt)
+                result = response.text.strip()
+                if result:
+                    return result
+            except Exception as e:
+                logger.warning(f"CourtService: Gemini error, falling back to Ollama: {e}")
+
+        # Fallback to Ollama
         if not ollama_breaker.allow_request():
             logger.warning("CourtService: Ollama circuit open, skipping LLM call")
             return ""
