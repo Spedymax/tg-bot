@@ -77,16 +77,24 @@ class OllamaWakeManager:
                 logger.error(f"OllamaWakeManager: drain error: {e}")
 
     async def _heartbeat_tick(self):
-        """Called by async loop every 120s. Detects PC going to sleep."""
+        """Called by async loop every 120s. Detects PC going to sleep.
+        Requires 2 consecutive failures before going OFFLINE to avoid false triggers
+        when Ollama is busy processing a request."""
         if self._state != WakeState.ONLINE:
             return
         try:
             from src.config.settings import Settings
             url = f"{Settings.LOCAL_LLM_URL}/api/tags"
-            await asyncio.to_thread(lambda: httpx.get(url, timeout=5).raise_for_status())
+            await asyncio.to_thread(lambda: httpx.get(url, timeout=10).raise_for_status())
+            self._heartbeat_failures = 0
         except Exception:
-            self._set_state(WakeState.OFFLINE)
-            await self._notify_admin("😴 PC went to sleep (Ollama unreachable)")
+            self._heartbeat_failures = getattr(self, '_heartbeat_failures', 0) + 1
+            if self._heartbeat_failures >= 3:
+                self._heartbeat_failures = 0
+                self._set_state(WakeState.OFFLINE)
+                await self._notify_admin("😴 PC went to sleep (Ollama unreachable)")
+            else:
+                logger.info(f"OllamaWakeManager: heartbeat fail {self._heartbeat_failures}/3, retrying")
 
     async def _notify_admin(self, text: str):
         """Send DM to admin. No-op if bot or admin_id not configured."""
