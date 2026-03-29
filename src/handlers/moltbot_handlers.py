@@ -1258,20 +1258,11 @@ class MoltbotHandlers:
                 except Exception as e:
                     logger.warning(f"MoltBot: reply photo analysis failed: {e}")
 
-            # Check if the bot's message was about a photo — re-analyze if needed
+            # If replying to a bot message that was about a photo, add context note (no re-analysis)
             replied_msg_id = message.reply_to_message.message_id
             photo_file_id = self._photo_context.get(replied_msg_id)
-            if photo_file_id and user_text and not message.photo:
-                try:
-                    file = await self.bot.get_file(photo_file_id)
-                    bio = await self.bot.download_file(file.file_path)
-                    image_bytes = bio.read()
-                    reanalysis = await asyncio.to_thread(
-                        self._analyze_image_with_gemini, image_bytes, user_text
-                    )
-                    user_text = f"[Повторный анализ картинки с вопросом \"{user_text}\": {reanalysis}]\n{user_text}"
-                except Exception as e:
-                    logger.warning(f"MoltBot: photo re-analysis failed: {e}")
+            if photo_file_id and not message.photo:
+                user_text = f"[Продолжение разговора о картинке — контекст в истории чата]\n{user_text}"
 
             reply_ctx = await self._build_reply_context(message)
             if reply_ctx:
@@ -1288,9 +1279,6 @@ class MoltbotHandlers:
                 if reply and reply.strip():
                     sent = await message.reply(reply)
                     await self._store_bot_reply(reply, sent.message_id)
-                    # Propagate photo context to follow-up replies too
-                    if photo_file_id:
-                        self._photo_context[sent.message_id] = photo_file_id
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
