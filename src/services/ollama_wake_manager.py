@@ -49,6 +49,7 @@ class OllamaWakeManager:
         self._bot = None
         self._woke_by_bot: bool = False  # True only when bot sent WoL for Ollama
         self._main_loop: asyncio.AbstractEventLoop | None = None
+        self._heartbeat_failures: int = 0
         self._initialized = True
 
     @property
@@ -85,11 +86,11 @@ class OllamaWakeManager:
         try:
             from src.config.settings import Settings
             url = f"{Settings.LOCAL_LLM_URL}/api/tags"
-            await asyncio.to_thread(lambda: httpx.get(url, timeout=10).raise_for_status())
+            await asyncio.to_thread(lambda: httpx.get(url, timeout=30).raise_for_status())
             self._heartbeat_failures = 0
         except Exception:
-            self._heartbeat_failures = getattr(self, '_heartbeat_failures', 0) + 1
-            if self._heartbeat_failures >= 3:
+            self._heartbeat_failures += 1
+            if self._heartbeat_failures >= 5:
                 self._heartbeat_failures = 0
                 self._set_state(WakeState.OFFLINE)
                 await self._notify_admin("😴 PC went to sleep (Ollama unreachable)")
