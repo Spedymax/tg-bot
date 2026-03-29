@@ -1136,10 +1136,8 @@ class MoltbotHandlers:
                 return
             sender_name = self._resolve_sender_name(message.from_user)
             user_text = await self._extract_user_text(message)
-            greeting = self._should_greet(user_text, message.reply_to_message)
-            if greeting:
-                await message.reply(greeting)
-                return
+            if not user_text.strip() and message.reply_to_message is None:
+                user_text = "(тегнули без текста)"
             reply_ctx = await self._build_reply_context(message)
             if reply_ctx:
                 user_text = f"{reply_ctx}\n{user_text}" if user_text else reply_ctx
