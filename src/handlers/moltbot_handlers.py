@@ -1243,12 +1243,25 @@ class MoltbotHandlers:
                 return
 
             sender_name = self._resolve_sender_name(message.from_user)
-            user_text = message.text or ""
+            user_text = message.text or message.caption or ""
+
+            # New photo in reply to bot — analyze via Gemini
+            if message.photo:
+                try:
+                    file = await self.bot.get_file(message.photo[-1].file_id)
+                    bio = await self.bot.download_file(file.file_path)
+                    image_bytes = bio.read()
+                    image_analysis = await asyncio.to_thread(
+                        self._analyze_image_with_gemini, image_bytes, user_text
+                    )
+                    user_text = f"[Картинка: {image_analysis}]\n{user_text}" if user_text else f"[Картинка: {image_analysis}]"
+                except Exception as e:
+                    logger.warning(f"MoltBot: reply photo analysis failed: {e}")
 
             # Check if the bot's message was about a photo — re-analyze if needed
             replied_msg_id = message.reply_to_message.message_id
             photo_file_id = self._photo_context.get(replied_msg_id)
-            if photo_file_id and user_text:
+            if photo_file_id and user_text and not message.photo:
                 try:
                     file = await self.bot.get_file(photo_file_id)
                     bio = await self.bot.download_file(file.file_path)
