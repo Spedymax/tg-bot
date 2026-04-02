@@ -355,6 +355,7 @@ class PetHandlers:
     # ──────────────────────────────────────────────
 
     async def revive_pet(self, call: CallbackQuery):
+        from datetime import datetime, timezone
         user_id = call.from_user.id
         player = await self.player_service.get_player(user_id)
 
@@ -373,6 +374,10 @@ class PetHandlers:
             player.pet = pet
             player.pet_revives_used = new_revives
             player.pet_revives_reset_date = new_reset
+            player.pet_happiness = 50
+            player.pet_hunger = 100
+            player.pet_happiness_last_activity = datetime.now(timezone.utc)
+            player.pet_hunger_last_decay = datetime.now(timezone.utc)
             await self.player_service.save_player(player)
             await call.answer("Питомец возрождён!")
         else:
