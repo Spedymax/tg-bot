@@ -1253,7 +1253,9 @@ class MoltbotHandlers:
 
             if topics:
                 lines.append("💬 *Темы недели:*")
-                lines.append(topics)
+                # strip markdown special chars from AI-generated text
+                clean = topics.replace('*', '').replace('_', '').replace('`', '').replace('[', '').replace(']', '')
+                lines.append(clean)
 
             await self.bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
             logger.info(f"MoltBot: weekly analytics sent to {chat_id}")
