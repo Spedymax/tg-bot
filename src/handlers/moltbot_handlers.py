@@ -689,10 +689,38 @@ class MoltbotHandlers:
         lower = text.lower()
         return any(p in lower for p in self._DISSATISFIED_PATTERNS)
 
+    def _would_gemini_block(self, user_text: str) -> bool:
+        """Ask Qwen whether Gemini would likely block this message due to safety filters."""
+        prompt = (
+            "Ты фильтр безопасности. Определи, заблокирует ли Google Gemini это сообщение "
+            "из-за safety filters (секс, наркотики, насилие, расизм, NSFW контент и т.д.).\n"
+            f"Сообщение: {user_text[:500]}\n"
+            "Ответь ОДНИМ словом: YES или NO"
+        )
+        try:
+            result = self._call_ollama_direct(prompt)
+            answer = result.strip().upper().split()[0] if result else "NO"
+            return answer.startswith("YES")
+        except Exception:
+            return False
+
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str, user_key: str,
                                   history: list[str] | None = None) -> str:
-        """Classify complexity, then route to Qwen (simple) or Gemini (complex)."""
+        """Route: check if Gemini would block → Qwen, else complexity-based routing."""
+        # Check if Gemini would block this content
+        would_block = await asyncio.to_thread(self._would_gemini_block, user_text)
+        if would_block:
+            logger.info(f"MoltBot: gemini would block → qwen for: {user_text[:60]}")
+            try:
+                reply = await self._ask_moltbot(sender_name, user_text, chat_context,
+                                                user_key, history, model="ollama/qwen3.5-uncensored")
+                if reply and reply.strip() and reply.strip() not in ("An unknown error occurred",):
+                    return reply
+            except (_AIConnectionError, _AIRefusalError) as e:
+                logger.info(f"MoltBot: Qwen failed on edgy ({e}), falling back to Gemini anyway")
+            return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
+
         # Fast pre-check: dissatisfaction / follow-up → always Gemini
         if self._is_dissatisfied_or_followup(user_text):
             logger.info(f"MoltBot: dissatisfied/followup → gemini for: {user_text[:60]}")

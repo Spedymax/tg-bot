@@ -259,7 +259,12 @@ class OllamaWakeManager:
             timeout=180,
         )
         r.raise_for_status()
-        return r.json()["message"]["content"]
+        text = r.json()["message"]["content"]
+        # Strip <think>...</think> blocks and Qwen artifacts
+        import re
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+        text = text.split('<|endoftext|>')[0].split('<|im_start|>')[0].strip()
+        return text
 
     async def call(self, prompt: str, bot, message,
              reply_fn: Callable[[str], None] | None = None) -> str | None:
