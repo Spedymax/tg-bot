@@ -691,9 +691,81 @@ class MoltbotHandlers:
 
     _IDENTITY_PATH = os.path.expanduser("~/.openclaw/workspace/IDENTITY.md")
 
+    # Bot names used to identify assistant messages in history
+    _BOT_NAMES = {"Лолита", "Ло", "Лола", "Jarvis"}
+
+    def _history_to_messages(self, history: list[str], sender_name: str,
+                             user_text: str) -> list[dict]:
+        """Convert history strings to OpenAI-style message dicts.
+        History format: '14:30 Макс: текст' or '14:30 Лолита: текст'."""
+        messages = []
+        for line in (history or [])[-15:]:
+            # Strip timestamp prefix: "14:30 Name: text" → "Name: text"
+            parts = line.split(" ", 1)
+            if len(parts) < 2:
+                continue
+            rest = parts[1] if ":" in parts[1] else line
+            colon_idx = rest.find(":")
+            if colon_idx == -1:
+                continue
+            name = rest[:colon_idx].strip()
+            text = rest[colon_idx + 1:].strip()
+            if not text:
+                continue
+            role = "assistant" if name in self._BOT_NAMES else "user"
+            content = text if role == "assistant" else f"{name}: {text}"
+            # Merge consecutive same-role messages
+            if messages and messages[-1]["role"] == role:
+                messages[-1]["content"] += f"\n{content}"
+            else:
+                messages.append({"role": role, "content": content})
+        # Add current message
+        messages.append({"role": "user", "content": f"{sender_name}: {user_text}"})
+        return messages
+
+    async def _call_together(self, sender_name: str, user_text: str,
+                             chat_context: str, history: list[str] | None = None) -> str:
+        """Call Together.ai with IDENTITY.md as system prompt and proper multi-turn."""
+        if not Settings.TOGETHER_API_KEY:
+            raise _AIConnectionError("TOGETHER_API_KEY not set")
+        try:
+            with open(self._IDENTITY_PATH, encoding="utf-8") as f:
+                identity = f.read()
+        except Exception:
+            identity = ""
+        summary = _load_chat_summary()
+        system_parts = [identity]
+        if chat_context:
+            system_parts.append(f"[Сообщение отправлено из: {chat_context}]")
+        if summary:
+            system_parts.append(f"[Долгосрочная память о чате:\n{summary}]")
+        system_msg = "\n\n".join(system_parts)
+
+        messages = [{"role": "system", "content": system_msg}]
+        messages.extend(self._history_to_messages(history, sender_name, user_text))
+
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                "https://api.together.xyz/v1/chat/completions",
+                headers={"Authorization": f"Bearer {Settings.TOGETHER_API_KEY}"},
+                json={
+                    "model": Settings.TOGETHER_MODEL,
+                    "messages": messages,
+                    "max_tokens": 500,
+                    "temperature": 0.9,
+                },
+                timeout=120,
+            )
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"]
+            # Strip thinking tags if present
+            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+            return text
+
     async def _call_qwen_with_identity(self, sender_name: str, user_text: str,
                                         chat_context: str, history: list[str] | None = None) -> str:
-        """Call Qwen directly with IDENTITY.md as system prompt, bypassing OpenClaw."""
+        """Call Qwen directly with IDENTITY.md as system prompt, bypassing OpenClaw.
+        Used as fallback when Together.ai is unavailable."""
         import httpx as _httpx
         try:
             with open(self._IDENTITY_PATH, encoding="utf-8") as f:
@@ -719,9 +791,9 @@ class MoltbotHandlers:
                 timeout=180,
             )
             r.raise_for_status()
-            import re
+            import re as _re
             text = r.json()["message"]["content"]
-            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+            text = _re.sub(r'<think>.*?</think>', '', text, flags=_re.DOTALL).strip()
             text = text.split('<|endoftext|>')[0].split('<|im_start|>')[0].strip()
             return text
 
@@ -745,17 +817,27 @@ class MoltbotHandlers:
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str, user_key: str,
                                   history: list[str] | None = None) -> str:
-        """Route: check if Gemini would block → Qwen, else complexity-based routing."""
-        # Check if Gemini would block this content → call Qwen directly with IDENTITY
+        """Route: check if Gemini would block → Together.ai (or Qwen fallback), else complexity-based."""
+        # Check if Gemini would block this content → Together.ai with IDENTITY
         would_block = await asyncio.to_thread(self._would_gemini_block, user_text)
         if would_block:
-            logger.info(f"MoltBot: gemini would block → qwen direct for: {user_text[:60]}")
+            # Try Together.ai first (Qwen3 235B — much better quality)
+            if Settings.TOGETHER_API_KEY:
+                try:
+                    logger.info(f"MoltBot: gemini would block → together.ai for: {user_text[:60]}")
+                    reply = await self._call_together(sender_name, user_text, chat_context, history)
+                    if reply and reply.strip():
+                        return reply
+                except Exception as e:
+                    logger.warning(f"MoltBot: Together.ai failed ({e}), trying local Qwen")
+            # Fallback to local Qwen
             try:
+                logger.info(f"MoltBot: gemini would block → local qwen for: {user_text[:60]}")
                 reply = await self._call_qwen_with_identity(sender_name, user_text, chat_context, history)
                 if reply and reply.strip():
                     return reply
             except Exception as e:
-                logger.info(f"MoltBot: Qwen direct failed on edgy ({e}), falling back to Gemini")
+                logger.info(f"MoltBot: local Qwen also failed ({e}), falling back to Gemini")
             return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
 
         # Fast pre-check: dissatisfaction / follow-up → always Gemini
