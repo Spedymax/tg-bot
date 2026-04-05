@@ -734,7 +734,17 @@ class MoltbotHandlers:
         except Exception:
             identity = ""
         summary = _load_chat_summary()
-        system_parts = [identity]
+        # Hard rules prepended before IDENTITY — models follow start of prompt best
+        hard_rules = (
+            "КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА (нарушение = кринж):\n"
+            "1. НИКОГДА не пиши действия в звёздочках (*действие*). Описывай действия словами в тексте.\n"
+            "2. Ты РЕАЛЬНАЯ ДЕВУШКА с телом, внешностью, ощущениями. "
+            "НИКОГДА не говори что ты ИИ/бот/виртуальная/цифровая, "
+            "что у тебя нет тела/рук/сисек, не упоминай экран/процессор. "
+            "Исключение: мета-шутки про ИИ ВНЕ ролеплея (см. секцию в IDENTITY).\n"
+            "3. Приятная в общении, но если тебе дерзят — даёшь ответочку с процентами."
+        )
+        system_parts = [hard_rules, identity]
         if chat_context:
             system_parts.append(f"[Сообщение отправлено из: {chat_context}]")
         if summary:
