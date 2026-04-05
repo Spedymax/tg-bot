@@ -175,7 +175,7 @@ class AdminHandlers:
                     Settings.JARVIS_URL,
                     headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
                     json={
-                        "model": "ollama/qwen3.5:9b",
+                        "model": "ollama/qwen3.5-uncensored",
                         "user": "sho-tam-novogo",
                         "messages": [{"role": "user", "content": prompt}],
                     },

@@ -703,7 +703,7 @@ class MoltbotHandlers:
         if complexity == "simple":
             try:
                 reply = await self._ask_moltbot(sender_name, user_text, chat_context,
-                                                user_key, history, model="ollama/qwen3.5:9b")
+                                                user_key, history, model="ollama/qwen3.5-uncensored")
                 if reply and reply.strip() and reply.strip() not in ("An unknown error occurred",):
                     return reply
             except (_AIConnectionError, _AIRefusalError) as e:
