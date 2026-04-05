@@ -72,7 +72,7 @@ class Settings:
     JARVIS_URL = os.getenv('JARVIS_URL', 'http://127.0.0.1:18789/v1/chat/completions')
     JARVIS_TOKEN = os.getenv('JARVIS_TOKEN')
     LOCAL_LLM_URL = os.getenv('LOCAL_LLM_URL', 'http://192.168.1.3:11434')
-    LOCAL_LLM_MODEL = os.getenv('LOCAL_LLM_MODEL', 'qwen3.5:9B')
+    LOCAL_LLM_MODEL = os.getenv('LOCAL_LLM_MODEL', 'qwen3.5-uncensored')
 
     # Wake-on-LAN / PC sleep control
     PC_MAC_ADDRESS = os.getenv('PC_MAC_ADDRESS', '')          # e.g. "AA:BB:CC:DD:EE:FF"
