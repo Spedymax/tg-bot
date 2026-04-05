@@ -326,6 +326,19 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: Gemini image analysis failed: {e}")
             return "[Не удалось проанализировать изображение]"
 
+    async def _store_user_message(self, message):
+        """Store a user message in the messages table (for analytics)."""
+        try:
+            if message.text and message.from_user and not message.from_user.is_bot:
+                name = message.from_user.first_name or message.from_user.username or 'Аноним'
+                await self.db.execute_query(
+                    "INSERT INTO messages (user_id, message_text, timestamp, name, message_id) "
+                    "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s)",
+                    (message.from_user.id, message.text, name, message.message_id),
+                )
+        except Exception as e:
+            logger.warning(f"MoltBot: failed to store user message: {e}")
+
     async def _store_bot_reply(self, text: str, msg_id: int | None = None):
         """Store Jarvis bot reply in the messages table."""
         try:
@@ -1297,6 +1310,7 @@ class MoltbotHandlers:
             m.entities and m.text and any(e.type == 'mention' for e in m.entities)
         )))
         async def handle_mention(message: Message):
+            await self._store_user_message(message)
             # Check actual bot mention asynchronously
             if not await self._is_bot_mentioned(message):
                 return
@@ -1395,6 +1409,7 @@ class MoltbotHandlers:
             and m.reply_to_message.from_user.is_bot
         )))
         async def handle_reply_to_bot(message: Message):
+            await self._store_user_message(message)
             chat_id = message.chat.id
             # Route to danetka: any reply to bot while game is active
             if chat_id in self._active_danetka:
@@ -1464,6 +1479,7 @@ class MoltbotHandlers:
             and not (m.entities and any(e.type == 'mention' for e in m.entities))
         )))
         async def handle_probabilistic(message: Message):
+            await self._store_user_message(message)
             self._maybe_update_summary()
             # asyncio.create_task(self._maybe_reply_probabilistic(message))
 
