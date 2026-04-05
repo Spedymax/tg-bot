@@ -689,6 +689,31 @@ class MoltbotHandlers:
         lower = text.lower()
         return any(p in lower for p in self._DISSATISFIED_PATTERNS)
 
+    _TG_MAX_LENGTH = 4096
+
+    async def _send_long_reply(self, message, text: str):
+        """Send a reply, splitting into multiple messages if > 4096 chars."""
+        if len(text) <= self._TG_MAX_LENGTH:
+            return await message.reply(text)
+        # Split on double newline, single newline, or hard cut
+        chunks = []
+        while text:
+            if len(text) <= self._TG_MAX_LENGTH:
+                chunks.append(text)
+                break
+            cut = text.rfind("\n\n", 0, self._TG_MAX_LENGTH)
+            if cut == -1:
+                cut = text.rfind("\n", 0, self._TG_MAX_LENGTH)
+            if cut == -1:
+                cut = self._TG_MAX_LENGTH
+            chunks.append(text[:cut])
+            text = text[cut:].lstrip("\n")
+        sent = None
+        for chunk in chunks:
+            if chunk.strip():
+                sent = await message.reply(chunk)
+        return sent
+
     _IDENTITY_PATH = os.path.expanduser("~/.openclaw/workspace/IDENTITY.md")
 
     # Bot names used to identify assistant messages in history
@@ -942,7 +967,7 @@ class MoltbotHandlers:
             if not reply:
                 return False
 
-            sent = await message.reply(reply)
+            sent = await self._send_long_reply(message, reply)
             await self._store_bot_reply(reply, sent.message_id)
             self._last_probabilistic_sent[chat_id] = now
             if is_cold_start:
@@ -1291,7 +1316,7 @@ class MoltbotHandlers:
             try:
                 reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 if reply and reply.strip():
-                    sent = await message.reply(reply)
+                    sent = await self._send_long_reply(message, reply)
                     await self._store_bot_reply(reply, sent.message_id)
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
@@ -1416,7 +1441,7 @@ class MoltbotHandlers:
             try:
                 reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
                 if reply and reply.strip():
-                    sent = await message.reply(reply)
+                    sent = await self._send_long_reply(message, reply)
                     await self._store_bot_reply(reply, sent.message_id)
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
@@ -1481,7 +1506,7 @@ class MoltbotHandlers:
             try:
                 reply = await self._ask_moltbot(sender_name, combined_text, chat_context, user_key, history)
                 if reply and reply.strip():
-                    sent = await message.reply(reply)
+                    sent = await self._send_long_reply(message, reply)
                     await self._store_bot_reply(reply, sent.message_id)
                     self._photo_context[sent.message_id] = message.photo[-1].file_id
                 else:
