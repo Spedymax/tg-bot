@@ -64,7 +64,7 @@ SPIKE_COOLDOWN_HOURS = 2
 SPIKE_DELAY_MIN, SPIKE_DELAY_MAX = 5 * 60, 20 * 60  # seconds
 
 # Smart summary config
-SUMMARY_UPDATE_INTERVAL = 40  # update chat-summary.md every N group messages
+SUMMARY_UPDATE_HOURS = 24     # update chat-summary.md every N hours
 SUMMARY_FETCH_LIMIT = 600     # messages to analyze when updating
 CPH_TZ = ZoneInfo("Europe/Copenhagen")
 
@@ -82,7 +82,7 @@ class MoltbotHandlers:
         self._proactive_queued: set[int] = set()
         self._last_probabilistic_sent: dict[int, datetime] = {}
         self._last_reaction_time: dict[int, datetime] = {}
-        self._messages_since_summary: int = 0
+        self._last_summary_update: datetime | None = None
         self._active_danetka: dict[int, dict] = {}
         self._photo_context: dict[int, str] = {}  # bot_reply_msg_id → original photo file_id
         self._prob_session_start: dict[int, datetime] = {}  # chat_id → when probabilistic session started
@@ -610,12 +610,13 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: summary update failed: {e}")
 
     def _maybe_update_summary(self):
-        """Increment message counter and trigger summary update every N messages."""
-        self._messages_since_summary += 1
-        if self._messages_since_summary >= SUMMARY_UPDATE_INTERVAL:
-            self._messages_since_summary = 0
-            asyncio.create_task(self._update_summary_via_qwen())
-            logger.info("MoltBot: triggered background summary update")
+        """Trigger summary update if enough time has passed (every SUMMARY_UPDATE_HOURS)."""
+        now = datetime.now(timezone.utc)
+        if self._last_summary_update and (now - self._last_summary_update) < timedelta(hours=SUMMARY_UPDATE_HOURS):
+            return
+        self._last_summary_update = now
+        asyncio.create_task(self._update_summary_via_qwen())
+        logger.info("MoltBot: triggered background summary update (24h timer)")
 
     # ── Topic detection ───────────────────────────────────────────────────────
 
