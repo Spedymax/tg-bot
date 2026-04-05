@@ -789,7 +789,7 @@ class MoltbotHandlers:
                 json={
                     "model": Settings.TOGETHER_MODEL,
                     "messages": messages,
-                    "max_tokens": 2000,
+                    "max_tokens": 800,
                     "temperature": 0.9,
                 },
                 timeout=120,
@@ -798,6 +798,10 @@ class MoltbotHandlers:
             text = r.json()["choices"][0]["message"]["content"]
             # Strip thinking tags if present
             text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+            # Strip asterisk actions (*действие*) — model ignores prompt rules about this
+            text = re.sub(r'\*[^*]{2,80}\*', '', text)
+            # Clean up leftover whitespace from stripped actions
+            text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
             return text
 
     async def _call_qwen_with_identity(self, sender_name: str, user_text: str,
