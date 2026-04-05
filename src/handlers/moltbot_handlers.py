@@ -408,6 +408,10 @@ class MoltbotHandlers:
                         logger.info("MoltBot: OpenClaw returned NO_REPLY signal, skipping response")
                         openclaw_breaker.record_success()
                         return ""
+                    if text.strip().lower() in ("an unknown error occurred",):
+                        logger.warning("MoltBot: OpenClaw returned generic error, treating as refusal")
+                        openclaw_breaker.record_success()
+                        return ""
                     openclaw_breaker.record_success()
                     return text
             except httpx.TimeoutException as e:
@@ -688,7 +692,24 @@ class MoltbotHandlers:
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str, user_key: str,
                                   history: list[str] | None = None) -> str:
-        """Route all requests through OpenClaw primary model (Gemini)."""
+        """Classify complexity, then route to Qwen (simple) or Gemini (complex)."""
+        # Fast pre-check: dissatisfaction / follow-up → always Gemini
+        if self._is_dissatisfied_or_followup(user_text):
+            logger.info(f"MoltBot: dissatisfied/followup → gemini for: {user_text[:60]}")
+            return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
+
+        complexity = await asyncio.to_thread(self._classify_complexity, user_text, history)
+        logger.info(f"MoltBot: complexity={complexity} for: {user_text[:60]}")
+        if complexity == "simple":
+            try:
+                reply = await self._ask_moltbot(sender_name, user_text, chat_context,
+                                                user_key, history, model="ollama/qwen3.5:9b")
+                if reply and reply.strip() and reply.strip() not in ("An unknown error occurred",):
+                    return reply
+            except (_AIConnectionError, _AIRefusalError) as e:
+                logger.info(f"MoltBot: Qwen failed ({e}), falling back to Gemini")
+            else:
+                logger.info("MoltBot: Qwen returned empty/error, falling back to Gemini")
         return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
 
     async def _qwen_should_reply(self, sender_name: str, user_text: str,
