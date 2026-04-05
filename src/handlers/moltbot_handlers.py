@@ -572,6 +572,14 @@ class MoltbotHandlers:
 
 Ты Джарвис. Тебя попросили обновить файл chat-summary.md на основе последних сообщений группового чата.
 
+== УЧАСТНИКИ ЧАТА (справка) ==
+- Макс (Max) — мужчина, создатель бота, программист. ОН/ЕГО.
+- Юра (Юрочка, Юра Ступаченко) — мужчина из Умани. ОН/ЕГО. НЕ "она"!
+- Богдан (@lofiSnitch) — мужчина, объект флирта Лолиты. ОН/ЕГО.
+- Ксюша — девушка Богдана. ОНА/ЕЁ.
+- Jarvis/Лолита — бот (девушка в ролеплее). ОНА/ЕЁ.
+Всегда используй правильный род при описании участников!
+
 == ТЕКУЩИЙ SUMMARY ==
 {current_summary or '(пусто)'}
 
@@ -583,9 +591,9 @@ class MoltbotHandlers:
 - Сохрани всё важное из текущего summary: персонажи, правила, мемы, внутренние шутки, проекты, незакрытые темы
 - Добавь новое что появилось в последних сообщениях: шутки, события, пари, внутренние мемы, новые темы
 - Убери то, что явно устарело и больше не актуально
+- Каждое сообщение имеет формат "timestamp Имя: текст" — точно указывай КТО что сказал, не путай авторство
 - Держи размер ~4000 слов — сохраняй все детали, выкидывай только совсем устаревшее и неактуальное
 - Помечай когда тема/шутка была актуальна, например: (март 2026), (февраль 2026)
-- Это поможет отличить свежие темы от старых
 - Обнови поле "Последнее обновление" на {now}
 - Верни ТОЛЬКО текст нового summary в формате markdown, без пояснений, без обёртки в ```"""
 
@@ -1175,7 +1183,7 @@ class MoltbotHandlers:
     async def _send_weekly_analytics(self, chat_id: int):
         try:
             total_rows = await self.db.execute_query(
-                "SELECT COUNT(*) FROM messages WHERE timestamp > NOW() - INTERVAL '7 days'",
+                "SELECT COUNT(*) FROM messages WHERE timestamp > NOW() - INTERVAL '7 days' AND user_id != 0",
                 ()
             )
             total = total_rows[0][0] if total_rows else 0
@@ -1185,13 +1193,13 @@ class MoltbotHandlers:
 
             per_person = await self.db.execute_query(
                 "SELECT name, COUNT(*) FROM messages "
-                "WHERE timestamp > NOW() - INTERVAL '7 days' "
+                "WHERE timestamp > NOW() - INTERVAL '7 days' AND user_id != 0 "
                 "GROUP BY name ORDER BY COUNT(*) DESC LIMIT 10",
                 ()
             )
             top_hours = await self.db.execute_query(
                 "SELECT EXTRACT(HOUR FROM timestamp)::int, COUNT(*) FROM messages "
-                "WHERE timestamp > NOW() - INTERVAL '7 days' "
+                "WHERE timestamp > NOW() - INTERVAL '7 days' AND user_id != 0 "
                 "GROUP BY 1 ORDER BY 2 DESC LIMIT 3",
                 ()
             )
