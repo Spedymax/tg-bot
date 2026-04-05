@@ -68,9 +68,7 @@ class Settings:
     ANSWERS_BROADCAST_TIMEZONE = 'Europe/Berlin'  # CET/CEST timezone
     ANSWERS_BROADCAST_TIME_LOCAL = "23:00"  # 23:00 local time
 
-    # MoltBot / OpenClaw configuration
-    JARVIS_URL = os.getenv('JARVIS_URL', 'http://127.0.0.1:18789/v1/chat/completions')
-    JARVIS_TOKEN = os.getenv('JARVIS_TOKEN')
+    # MoltBot LLM configuration
     LOCAL_LLM_URL = os.getenv('LOCAL_LLM_URL', 'http://192.168.1.3:11434')
     LOCAL_LLM_MODEL = os.getenv('LOCAL_LLM_MODEL', 'qwen3.5-uncensored')
 

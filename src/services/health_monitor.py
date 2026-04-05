@@ -54,8 +54,8 @@ class HealthMonitor:
             issues.append(f"Redis: {e}")
 
         # Check circuit breakers
-        from services.circuit_breaker import ollama_breaker, gemini_breaker, openclaw_breaker
-        for name, breaker in [("Ollama", ollama_breaker), ("Gemini", gemini_breaker), ("OpenClaw", openclaw_breaker)]:
+        from services.circuit_breaker import ollama_breaker, gemini_breaker, together_breaker
+        for name, breaker in [("Ollama", ollama_breaker), ("Gemini", gemini_breaker), ("Together", together_breaker)]:
             if breaker.state.value == "open":
                 issues.append(f"{name} circuit breaker OPEN")
 

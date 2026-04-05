@@ -73,4 +73,4 @@ class CircuitBreaker:
 # Shared instances for external services
 ollama_breaker = CircuitBreaker("ollama", failure_threshold=3, recovery_timeout=120)
 gemini_breaker = CircuitBreaker("gemini", failure_threshold=5, recovery_timeout=60)
-openclaw_breaker = CircuitBreaker("openclaw", failure_threshold=3, recovery_timeout=120)
+together_breaker = CircuitBreaker("together", failure_threshold=3, recovery_timeout=120)

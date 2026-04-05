@@ -180,3 +180,6 @@ moltbot_state.json
 
 # Git worktrees
 .worktrees/
+
+# Runtime data (chat summaries, etc.)
+data/
