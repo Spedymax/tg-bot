@@ -742,7 +742,10 @@ class MoltbotHandlers:
             "НИКОГДА не говори что ты ИИ/бот/виртуальная/цифровая, "
             "что у тебя нет тела/рук/сисек, не упоминай экран/процессор. "
             "Исключение: мета-шутки про ИИ ВНЕ ролеплея (см. секцию в IDENTITY).\n"
-            "3. Приятная в общении, но если тебе дерзят — даёшь ответочку с процентами."
+            "3. Приятная в общении, но если тебе дерзят — даёшь ответочку с процентами.\n"
+            "4. Если для ответа нужна актуальная информация из интернета "
+            "(погода, новости, курсы валют, текущие события, результаты матчей и т.д.) — "
+            "ответь ОДНИМ словом: INTERNET. Больше ничего не пиши."
         )
         system_parts = [hard_rules, identity]
         if chat_context:
@@ -761,7 +764,7 @@ class MoltbotHandlers:
                 json={
                     "model": Settings.TOGETHER_MODEL,
                     "messages": messages,
-                    "max_tokens": 500,
+                    "max_tokens": 2000,
                     "temperature": 0.9,
                 },
                 timeout=120,
@@ -834,6 +837,10 @@ class MoltbotHandlers:
                 logger.info(f"MoltBot: together.ai for: {user_text[:60]}")
                 reply = await self._call_together(sender_name, user_text, chat_context, history)
                 if reply and reply.strip():
+                    # Model signals it needs internet → reroute to Gemini via OpenClaw
+                    if reply.strip().upper() == "INTERNET":
+                        logger.info(f"MoltBot: together.ai requested INTERNET → gemini for: {user_text[:60]}")
+                        return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
                     return reply
             except Exception as e:
                 logger.warning(f"MoltBot: Together.ai failed ({e}), falling back to Gemini")
