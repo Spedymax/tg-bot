@@ -319,7 +319,7 @@ class TriviaHandlers:
                     if player.pet and player.pet.get('is_alive') and player.pet.get('is_locked'):
                         now = datetime.now(timezone.utc)
                         self.pet_service.apply_hunger_decay(player, now)
-                        self.pet_service.record_game_activity(player, 'trivia', now)
+                        await self.pet_service.record_game_activity(player, 'trivia', now)
                         multiplier = self.pet_service.get_xp_multiplier(player)
                         xp_gain = int(10 * multiplier)
                         if xp_gain > 0:
