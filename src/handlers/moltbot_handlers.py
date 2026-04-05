@@ -817,46 +817,17 @@ class MoltbotHandlers:
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str, user_key: str,
                                   history: list[str] | None = None) -> str:
-        """Route: check if Gemini would block → Together.ai (or Qwen fallback), else complexity-based."""
-        # Check if Gemini would block this content → Together.ai with IDENTITY
-        would_block = await asyncio.to_thread(self._would_gemini_block, user_text)
-        if would_block:
-            # Try Together.ai first (Qwen3 235B — much better quality)
-            if Settings.TOGETHER_API_KEY:
-                try:
-                    logger.info(f"MoltBot: gemini would block → together.ai for: {user_text[:60]}")
-                    reply = await self._call_together(sender_name, user_text, chat_context, history)
-                    if reply and reply.strip():
-                        return reply
-                except Exception as e:
-                    logger.warning(f"MoltBot: Together.ai failed ({e}), trying local Qwen")
-            # Fallback to local Qwen
+        """Route: Together.ai primary, Gemini (OpenClaw) fallback."""
+        # Together.ai as primary model for all messages
+        if Settings.TOGETHER_API_KEY:
             try:
-                logger.info(f"MoltBot: gemini would block → local qwen for: {user_text[:60]}")
-                reply = await self._call_qwen_with_identity(sender_name, user_text, chat_context, history)
+                logger.info(f"MoltBot: together.ai for: {user_text[:60]}")
+                reply = await self._call_together(sender_name, user_text, chat_context, history)
                 if reply and reply.strip():
                     return reply
             except Exception as e:
-                logger.info(f"MoltBot: local Qwen also failed ({e}), falling back to Gemini")
-            return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
-
-        # Fast pre-check: dissatisfaction / follow-up → always Gemini
-        if self._is_dissatisfied_or_followup(user_text):
-            logger.info(f"MoltBot: dissatisfied/followup → gemini for: {user_text[:60]}")
-            return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
-
-        complexity = await asyncio.to_thread(self._classify_complexity, user_text, history)
-        logger.info(f"MoltBot: complexity={complexity} for: {user_text[:60]}")
-        if complexity == "simple":
-            try:
-                reply = await self._ask_moltbot(sender_name, user_text, chat_context,
-                                                user_key, history, model="ollama/qwen3.5-uncensored")
-                if reply and reply.strip() and reply.strip() not in ("An unknown error occurred",):
-                    return reply
-            except (_AIConnectionError, _AIRefusalError) as e:
-                logger.info(f"MoltBot: Qwen failed ({e}), falling back to Gemini")
-            else:
-                logger.info("MoltBot: Qwen returned empty/error, falling back to Gemini")
+                logger.warning(f"MoltBot: Together.ai failed ({e}), falling back to Gemini")
+        # Fallback to Gemini via OpenClaw
         return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
 
     async def _qwen_should_reply(self, sender_name: str, user_text: str,
