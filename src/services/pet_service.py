@@ -262,7 +262,7 @@ class PetService:
         if ticks <= 0:
             return
         player.pet_happiness = max(0, getattr(player, 'pet_happiness', 50) - ticks * 10)
-        # Don't advance last_activity — only game actions reset the timer
+        player.pet_happiness_last_activity = last + timedelta(hours=24 * ticks)
 
     async def record_game_activity(self, player, activity: str, now: datetime):
         """Boost happiness on any game action and reset inactivity timer."""
