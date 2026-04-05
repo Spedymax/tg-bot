@@ -170,19 +170,22 @@ class AdminHandlers:
 {messages_text}
 """
         try:
+            import re as _re
             with httpx.Client() as client:
                 r = client.post(
-                    Settings.JARVIS_URL,
-                    headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
+                    f"{Settings.LOCAL_LLM_URL}/api/chat",
                     json={
-                        "model": "ollama/qwen3.5-uncensored",
-                        "user": "sho-tam-novogo",
+                        "model": Settings.LOCAL_LLM_MODEL,
+                        "think": False,
+                        "stream": False,
                         "messages": [{"role": "user", "content": prompt}],
                     },
-                    timeout=90,
+                    timeout=180,
                 )
                 r.raise_for_status()
-                return r.json()["choices"][0]["message"]["content"]
+                text = r.json()["message"]["content"]
+                text = _re.sub(r'<think>.*?</think>', '', text, flags=_re.DOTALL).strip()
+                return text
         except Exception as e:
             logger.error(f"Error analyzing messages with Qwen: {e}")
             return f"❌ Ошибка при анализе сообщений: {str(e)}"

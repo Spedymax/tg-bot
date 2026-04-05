@@ -14,9 +14,10 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import Message
 
 from config.settings import Settings
-from services.circuit_breaker import openclaw_breaker, ollama_breaker
+from services.circuit_breaker import ollama_breaker, together_breaker
 
-CHAT_SUMMARY_PATH = os.path.expanduser("~/.openclaw/workspace/memory/chat-summary.md")
+_BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+CHAT_SUMMARY_PATH = os.path.join(_BASE_DIR, 'data', 'chat-summary.md')
 STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "moltbot_state.json")
 
 
@@ -368,65 +369,53 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: error fetching chat history: {e}")
             return []
 
-    async def _call_openclaw(self, content: str, user_key: str, model: str = "openclaw:main") -> str:
-        """Raw API call to OpenClaw. Returns response text or empty string on error.
-        Only retries on connection errors — NOT on timeouts, because OpenClaw is stateful
-        (tracks history per user_key) and a timeout means the message was already received."""
-        if not openclaw_breaker.allow_request():
-            logger.warning("MoltBot: OpenClaw circuit open, skipping call")
-            raise _AIConnectionError("circuit breaker open")
-        last_exc = None
-        for attempt in range(3):
-            try:
-                logger.info(f"MoltBot: OpenClaw request model={model} user={user_key} attempt={attempt + 1} prompt_len={len(content)}")
-                async with httpx.AsyncClient() as client:
-                    r = await client.post(
-                        Settings.JARVIS_URL,
-                        headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
-                        json={
-                            "model": model,
-                            "user": user_key,
-                            "messages": [{"role": "user", "content": content}],
-                        },
-                        timeout=120,
-                    )
-                    logger.info(f"MoltBot: OpenClaw response status={r.status_code} model={model}")
-                    r.raise_for_status()
-                    raw = r.json()
-                    text = raw["choices"][0]["message"]["content"]
-                    logger.info(f"MoltBot: OpenClaw raw response text={repr(text[:200])}")
-                    if not text:
-                        return ""
-                    # Strip action error lines injected by OpenClaw
-                    lines = text.split('\n')
-                    stripped = [l for l in lines if ('⚠' in l and ('failed' in l.lower() or 'action' in l.lower() or 'target' in l.lower() or 'rate limit' in l.lower() or 'try again' in l.lower()))]
-                    if stripped:
-                        logger.warning(f"MoltBot: OpenClaw stripped error lines: {stripped}")
-                    lines = [l for l in lines if l not in stripped]
-                    text = '\n'.join(lines).strip()
-                    if "no response" in text.lower() and "openclaw" in text.lower():
-                        logger.info("MoltBot: OpenClaw returned NO_REPLY signal, skipping response")
-                        openclaw_breaker.record_success()
-                        return ""
-                    if text.strip().lower() in ("an unknown error occurred",):
-                        logger.warning("MoltBot: OpenClaw returned generic error, treating as refusal")
-                        openclaw_breaker.record_success()
-                        return ""
-                    openclaw_breaker.record_success()
-                    return text
-            except httpx.TimeoutException as e:
-                # Timeout = OpenClaw already received the message, don't retry (would cause duplicates)
-                logger.warning(f"MoltBot: OpenClaw timed out (attempt {attempt + 1}), not retrying to avoid duplicate context")
-                openclaw_breaker.record_failure()
-                raise _AIConnectionError("timed out") from e
-            except Exception as e:
-                last_exc = e
-                if attempt < 2:
-                    logger.warning(f"MoltBot: OpenClaw attempt {attempt + 1} failed: {e}, retrying...")
-                    await asyncio.sleep(2)
-        openclaw_breaker.record_failure()
-        logger.error(f"MoltBot: OpenClaw all retries failed: {last_exc}")
-        raise _AIConnectionError(str(last_exc))
+    async def _call_together_simple(self, prompt: str) -> str:
+        """Call Together.ai with a raw prompt + IDENTITY. Used for proactive/probabilistic messages."""
+        if not Settings.TOGETHER_API_KEY:
+            raise _AIConnectionError("TOGETHER_API_KEY not set")
+        if not together_breaker.allow_request():
+            raise _AIConnectionError("together circuit breaker open")
+        try:
+            with open(self._IDENTITY_PATH, encoding="utf-8") as f:
+                identity = f.read()
+        except Exception:
+            identity = ""
+        hard_rules = (
+            "КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА:\n"
+            "1. НИКОГДА не пиши действия в звёздочках (*действие*).\n"
+            "2. Ты РЕАЛЬНАЯ ДЕВУШКА. НИКОГДА не говори что ты ИИ/бот/виртуальная.\n"
+            "3. Отвечай КОРОТКО — 1-3 предложения. Никаких стен текста.\n"
+            "4. НЕ ВЫДУМЫВАЙ события, фото, инстаграмы которых не было.\n"
+            "5. Подкалывай легко, НЕ унижай и НЕ читай нотации.\n"
+        )
+        system_msg = "\n\n".join([hard_rules, identity])
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    "https://api.together.xyz/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {Settings.TOGETHER_API_KEY}"},
+                    json={
+                        "model": Settings.TOGETHER_MODEL,
+                        "messages": [
+                            {"role": "system", "content": system_msg},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "max_tokens": 350,
+                        "temperature": 0.9,
+                    },
+                    timeout=120,
+                )
+                r.raise_for_status()
+                text = r.json()["choices"][0]["message"]["content"]
+                text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+                text = re.sub(r'\*[^*]{2,80}\*', '', text)
+                text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
+                together_breaker.record_success()
+                return text
+        except Exception as e:
+            together_breaker.record_failure()
+            logger.error(f"MoltBot: Together.ai simple call failed: {e}")
+            raise _AIConnectionError(str(e))
 
     def _call_ollama_direct(self, content: str, bot=None, message=None) -> str:
         """Call Ollama directly. Routes through OllamaWakeManager for auto-wake.
@@ -466,36 +455,32 @@ class MoltbotHandlers:
             manager._trigger_wake()
             return ""
 
-    async def _ask_moltbot(self, sender_name: str, user_text: str,
-                           chat_context: str, user_key: str,
-                           history: list[str] | None = None,
-                           model: str = "openclaw:main") -> str:
-        """Call the local MoltBot/OpenClaw API asynchronously."""
-        context_prefix = f"[Сообщение отправлено из: {chat_context}]\n" if chat_context else ""
-
+    async def _call_gemini_text(self, sender_name: str, user_text: str,
+                               chat_context: str, history: list[str] | None = None) -> str:
+        """Call Gemini for text generation. INTERNET fallback — Gemini has fresher knowledge."""
+        if not self._gemini_model:
+            raise _AIConnectionError("Gemini not initialized")
+        try:
+            with open(self._IDENTITY_PATH, encoding="utf-8") as f:
+                identity = f.read()
+        except Exception:
+            identity = ""
         summary = _load_chat_summary()
+        parts = []
+        if identity:
+            parts.append(f"[Твоя личность:\n{identity}]")
+        parts.append("Отвечай КОРОТКО — 1-3 предложения. Не выдумывай факты.")
+        if chat_context:
+            parts.append(f"[Сообщение из: {chat_context}]")
         if summary:
-            context_prefix += f"[Долгосрочная память о чате:\n{summary}\n]\n"
-
+            parts.append(f"[Долгосрочная память о чате:\n{summary}]")
         if history:
-            now = datetime.now(CPH_TZ).strftime("%H:%M %d.%m")
-            history_block = "\n".join(history)
-            context_prefix += (
-                f"[Сейчас: {now} Copenhagen]\n"
-                f"[История чата — последние {len(history)} сообщений.\n"
-                "Это фоновый контекст для понимания о чём речь.\n"
-                "Не поднимай старые темы сам — отвечай только на то, "
-                "что тебе написали сейчас.]\n"
-                f"{history_block}\n"
-            )
+            parts.append("[История чата:\n" + "\n".join(history[-20:]) + "]")
+        parts.append(f"{sender_name}: {user_text}")
 
-        user_content = (
-            f"{context_prefix}{sender_name}: {user_text}"
-            if user_text else
-            f"{context_prefix}{sender_name}: Привет!"
-        )
-
-        return await self._call_openclaw(user_content, user_key, model=model)
+        prompt = "\n\n".join(parts)
+        response = await asyncio.to_thread(self._gemini_model.generate_content, prompt)
+        return response.text
 
     async def _count_recent_messages(self, minutes: int) -> int:
         """Count messages in DB written in the last `minutes` minutes."""
@@ -532,8 +517,7 @@ class MoltbotHandlers:
                 "Напиши одно короткое сообщение как участник разговора.]"
             )
 
-            user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
-            reply = await self._call_openclaw(user_content, user_key)
+            reply = await self._call_together_simple(user_content)
 
             # Reply to the most recent stored message if we have its Telegram message_id
             reply_to = None
@@ -714,7 +698,7 @@ class MoltbotHandlers:
                 sent = await message.reply(chunk)
         return sent
 
-    _IDENTITY_PATH = os.path.expanduser("~/.openclaw/workspace/IDENTITY.md")
+    _IDENTITY_PATH = os.path.join(_BASE_DIR, 'docs', 'openclaw-identity-lolita.md')
 
     # Bot names used to identify assistant messages in history
     _BOT_NAMES = {"Лолита", "Ло", "Лола", "Jarvis"}
@@ -875,22 +859,25 @@ class MoltbotHandlers:
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str, user_key: str,
                                   history: list[str] | None = None) -> str:
-        """Route: Together.ai primary, Gemini (OpenClaw) fallback."""
+        """Route: Together.ai primary → Gemini (INTERNET) → Qwen local (fallback)."""
         # Together.ai as primary model for all messages
         if Settings.TOGETHER_API_KEY:
             try:
                 logger.info(f"MoltBot: together.ai for: {user_text[:60]}")
                 reply = await self._call_together(sender_name, user_text, chat_context, history)
                 if reply and reply.strip():
-                    # Model signals it needs internet → reroute to Gemini via OpenClaw
                     if reply.strip().upper() == "INTERNET":
                         logger.info(f"MoltBot: together.ai requested INTERNET → gemini for: {user_text[:60]}")
-                        return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
-                    return reply
+                        try:
+                            return await self._call_gemini_text(sender_name, user_text, chat_context, history)
+                        except Exception as ge:
+                            logger.warning(f"MoltBot: Gemini INTERNET fallback failed ({ge}), trying Qwen")
+                    else:
+                        return reply
             except Exception as e:
-                logger.warning(f"MoltBot: Together.ai failed ({e}), falling back to Gemini")
-        # Fallback to Gemini via OpenClaw
-        return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
+                logger.warning(f"MoltBot: Together.ai failed ({e}), falling back to Qwen")
+        # Fallback to local Qwen
+        return await self._call_qwen_with_identity(sender_name, user_text, chat_context, history)
 
     async def _qwen_should_reply(self, sender_name: str, user_text: str,
                                 history: list[str]) -> bool:
@@ -945,11 +932,10 @@ class MoltbotHandlers:
         is_cold_start = session_start is None or (now - session_start) > timedelta(hours=2)
 
         sender_name = self._resolve_sender_name(message.from_user)
-        user_key = CHAT_KEYS.get(chat_id, f"tg-group-{chat_id}")
 
         try:
             if is_cold_start:
-                # Cold start: Claude picks from last 6 messages
+                # Cold start: picks from last 6 messages
                 history = await self._get_recent_group_messages(limit=6, chat_id=chat_id)
                 if not history:
                     return False
@@ -962,7 +948,7 @@ class MoltbotHandlers:
                     "1-2 предложения максимум. Не представляйся, не начинай с обращения.\n"
                     "Если ни одно сообщение не стоит ответа — верни пустую строку."
                 )
-                reply = await self._call_openclaw(prompt, user_key)
+                reply = await self._call_together_simple(prompt)
                 logger.info(f"MoltBot: cold start probabilistic for chat {chat_id}")
             else:
                 # Warm session: Qwen filter → Claude response
@@ -980,7 +966,7 @@ class MoltbotHandlers:
                     "1-2 предложения максимум. Не представляйся, не начинай с обращения.\n"
                     "Если передумал — верни пустую строку.]"
                 )
-                reply = await self._call_openclaw(prompt, user_key)
+                reply = await self._call_together_simple(prompt)
                 logger.info(f"MoltBot: warm session probabilistic for chat {chat_id}")
 
             reply = reply.strip()
@@ -1524,7 +1510,7 @@ class MoltbotHandlers:
             combined_text = "\n".join(parts)
 
             try:
-                reply = await self._ask_moltbot(sender_name, combined_text, chat_context, user_key, history)
+                reply = await self._ask_moltbot_routed(sender_name, combined_text, chat_context, user_key, history)
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
                     await self._store_bot_reply(reply, sent.message_id)

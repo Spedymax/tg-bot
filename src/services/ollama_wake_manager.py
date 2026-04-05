@@ -244,7 +244,7 @@ class OllamaWakeManager:
                 await asyncio.sleep(interval)
         logger.warning("OllamaWakeManager: PC did not wake within timeout, using Claude fallback")
         await self._notify_admin("⚠️ PC did not wake (3 min timeout) — using Claude fallback")
-        await self._drain_queue(self._call_claude_fallback)
+        await self._drain_queue(self._call_together_fallback)
         self._set_state(WakeState.OFFLINE)
 
     def _call_ollama_raw(self, prompt: str) -> str:
@@ -315,22 +315,23 @@ class OllamaWakeManager:
 
         return None
 
-    def _call_claude_fallback(self, prompt: str) -> str:
-        """Call OpenClaw/Claude as fallback when Ollama is unavailable."""
+    def _call_together_fallback(self, prompt: str) -> str:
+        """Call Together.ai as fallback when Ollama is unavailable."""
         from src.config.settings import Settings
-        if not Settings.JARVIS_TOKEN:
-            logger.error("OllamaWakeManager: JARVIS_TOKEN not configured, cannot use Claude fallback")
+        if not Settings.TOGETHER_API_KEY:
+            logger.error("OllamaWakeManager: TOGETHER_API_KEY not configured, cannot use fallback")
             return ""
         try:
             r = httpx.post(
-                Settings.JARVIS_URL,
-                headers={"Authorization": f"Bearer {Settings.JARVIS_TOKEN}"},
-                json={"model": "openclaw:main",
-                      "messages": [{"role": "user", "content": prompt}]},
+                "https://api.together.xyz/v1/chat/completions",
+                headers={"Authorization": f"Bearer {Settings.TOGETHER_API_KEY}"},
+                json={"model": Settings.TOGETHER_MODEL,
+                      "messages": [{"role": "user", "content": prompt}],
+                      "max_tokens": 350},
                 timeout=30,
             )
             r.raise_for_status()
             return r.json()["choices"][0]["message"]["content"]
         except Exception as e:
-            logger.error(f"OllamaWakeManager: Claude fallback also failed: {e}")
+            logger.error(f"OllamaWakeManager: Together.ai fallback also failed: {e}")
             return ""
