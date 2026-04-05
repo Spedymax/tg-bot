@@ -74,6 +74,10 @@ class Settings:
     LOCAL_LLM_URL = os.getenv('LOCAL_LLM_URL', 'http://192.168.1.3:11434')
     LOCAL_LLM_MODEL = os.getenv('LOCAL_LLM_MODEL', 'qwen3.5-uncensored')
 
+    # Together.ai (NSFW-capable model, used when Gemini would block)
+    TOGETHER_API_KEY = os.getenv('TOGETHER_API_KEY')
+    TOGETHER_MODEL = os.getenv('TOGETHER_MODEL', 'Qwen/Qwen3-235B-A22B-Instruct-2507-tput')
+
     # Wake-on-LAN / PC sleep control
     PC_MAC_ADDRESS = os.getenv('PC_MAC_ADDRESS', '')          # e.g. "AA:BB:CC:DD:EE:FF"
     PC_SSH_HOST = os.getenv('PC_SSH_HOST', '192.168.1.3')
