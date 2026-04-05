@@ -688,24 +688,7 @@ class MoltbotHandlers:
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str, user_key: str,
                                   history: list[str] | None = None) -> str:
-        """Classify complexity, then route to Qwen (simple) or Claude (complex)."""
-        # Fast pre-check: dissatisfaction / follow-up → always Claude
-        if self._is_dissatisfied_or_followup(user_text):
-            logger.info(f"MoltBot: dissatisfied/followup → claude for: {user_text[:60]}")
-            return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
-
-        complexity = await asyncio.to_thread(self._classify_complexity, user_text, history)
-        logger.info(f"MoltBot: complexity={complexity} for: {user_text[:60]}")
-        if complexity == "simple":
-            try:
-                reply = await self._ask_moltbot(sender_name, user_text, chat_context,
-                                                user_key, history, model="ollama/qwen3.5:9b")
-                if reply and reply.strip():
-                    return reply
-            except (_AIConnectionError, _AIRefusalError) as e:
-                logger.info(f"MoltBot: Qwen failed ({e}), falling back to Claude")
-            else:
-                logger.info("MoltBot: Qwen returned empty, falling back to Claude")
+        """Route all requests through OpenClaw primary model (Gemini)."""
         return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
 
     async def _qwen_should_reply(self, sender_name: str, user_text: str,
@@ -1299,7 +1282,7 @@ class MoltbotHandlers:
         )))
         async def handle_probabilistic(message: Message):
             self._maybe_update_summary()
-            asyncio.create_task(self._maybe_reply_probabilistic(message))
+            # asyncio.create_task(self._maybe_reply_probabilistic(message))
 
         @router.message(StateFilter(None), F.photo, F.func(lambda m: (
             m.caption_entities is not None
