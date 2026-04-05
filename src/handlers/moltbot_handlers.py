@@ -689,6 +689,44 @@ class MoltbotHandlers:
         lower = text.lower()
         return any(p in lower for p in self._DISSATISFIED_PATTERNS)
 
+    _IDENTITY_PATH = os.path.expanduser("~/.openclaw/workspace/IDENTITY.md")
+
+    async def _call_qwen_with_identity(self, sender_name: str, user_text: str,
+                                        chat_context: str, history: list[str] | None = None) -> str:
+        """Call Qwen directly with IDENTITY.md as system prompt, bypassing OpenClaw."""
+        import httpx as _httpx
+        try:
+            with open(self._IDENTITY_PATH, encoding="utf-8") as f:
+                identity = f.read()
+        except Exception:
+            identity = ""
+        summary = _load_chat_summary()
+        context_prefix = f"[Сообщение отправлено из: {chat_context}]\n" if chat_context else ""
+        summary_block = f"[Долгосрочная память о чате: {summary}]\n" if summary else ""
+        history_block = "\n".join(history[-30:]) + "\n" if history else ""
+        user_msg = f"{context_prefix}{summary_block}{history_block}{sender_name}: {user_text}"
+
+        def _call():
+            r = _httpx.post(
+                f"{Settings.LOCAL_LLM_URL}/api/chat",
+                json={"model": Settings.LOCAL_LLM_MODEL,
+                      "think": False,
+                      "stream": False,
+                      "messages": [
+                          {"role": "system", "content": identity},
+                          {"role": "user", "content": user_msg},
+                      ]},
+                timeout=180,
+            )
+            r.raise_for_status()
+            import re
+            text = r.json()["message"]["content"]
+            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+            text = text.split('<|endoftext|>')[0].split('<|im_start|>')[0].strip()
+            return text
+
+        return await asyncio.to_thread(_call)
+
     def _would_gemini_block(self, user_text: str) -> bool:
         """Ask Qwen whether Gemini would likely block this message due to safety filters."""
         prompt = (
@@ -708,17 +746,16 @@ class MoltbotHandlers:
                                   chat_context: str, user_key: str,
                                   history: list[str] | None = None) -> str:
         """Route: check if Gemini would block → Qwen, else complexity-based routing."""
-        # Check if Gemini would block this content
+        # Check if Gemini would block this content → call Qwen directly with IDENTITY
         would_block = await asyncio.to_thread(self._would_gemini_block, user_text)
         if would_block:
-            logger.info(f"MoltBot: gemini would block → qwen for: {user_text[:60]}")
+            logger.info(f"MoltBot: gemini would block → qwen direct for: {user_text[:60]}")
             try:
-                reply = await self._ask_moltbot(sender_name, user_text, chat_context,
-                                                user_key, history, model="ollama/qwen3.5-uncensored")
-                if reply and reply.strip() and reply.strip() not in ("An unknown error occurred",):
+                reply = await self._call_qwen_with_identity(sender_name, user_text, chat_context, history)
+                if reply and reply.strip():
                     return reply
-            except (_AIConnectionError, _AIRefusalError) as e:
-                logger.info(f"MoltBot: Qwen failed on edgy ({e}), falling back to Gemini anyway")
+            except Exception as e:
+                logger.info(f"MoltBot: Qwen direct failed on edgy ({e}), falling back to Gemini")
             return await self._ask_moltbot(sender_name, user_text, chat_context, user_key, history)
 
         # Fast pre-check: dissatisfaction / follow-up → always Gemini
