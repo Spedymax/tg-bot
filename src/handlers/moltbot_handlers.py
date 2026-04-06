@@ -616,12 +616,14 @@ class MoltbotHandlers:
 
     def _maybe_update_summary(self):
         """Trigger summary update if enough time has passed (every SUMMARY_UPDATE_HOURS)."""
-        now = datetime.now(timezone.utc)
-        if self._last_summary_update and (now - self._last_summary_update) < timedelta(hours=SUMMARY_UPDATE_HOURS):
-            return
-        self._last_summary_update = now
-        asyncio.create_task(self._update_summary_via_qwen())
-        logger.info("MoltBot: triggered background summary update (24h timer)")
+        # TODO: re-enable when old Lolita messages age out of DB
+        # now = datetime.now(timezone.utc)
+        # if self._last_summary_update and (now - self._last_summary_update) < timedelta(hours=SUMMARY_UPDATE_HOURS):
+        #     return
+        # self._last_summary_update = now
+        # asyncio.create_task(self._update_summary_via_qwen())
+        # logger.info("MoltBot: triggered background summary update (24h timer)")
+        return
 
     # ── Topic detection ───────────────────────────────────────────────────────
 
