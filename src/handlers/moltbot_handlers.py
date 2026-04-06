@@ -28,6 +28,15 @@ class _AIRefusalError(Exception):
     """Raised when AI explicitly refuses to respond."""
 
 
+def _get_summary_mtime() -> datetime | None:
+    """Return the modification time of chat-summary.md, or None if missing."""
+    try:
+        mtime = os.path.getmtime(CHAT_SUMMARY_PATH)
+        return datetime.fromtimestamp(mtime, tz=timezone.utc)
+    except Exception:
+        return None
+
+
 def _load_chat_summary() -> str:
     """Load the long-term chat summary written by the AI."""
     try:
@@ -81,7 +90,7 @@ class MoltbotHandlers:
         self._proactive_queued: set[int] = set()
         self._last_probabilistic_sent: dict[int, datetime] = {}
         self._last_reaction_time: dict[int, datetime] = {}
-        self._last_summary_update: datetime | None = None
+        self._last_summary_update: datetime | None = _get_summary_mtime()
         self._active_danetka: dict[int, dict] = {}
         self._photo_context: dict[int, str] = {}  # bot_reply_msg_id → original photo file_id
         self._prob_session_start: dict[int, datetime] = {}  # chat_id → when probabilistic session started
