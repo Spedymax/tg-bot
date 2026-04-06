@@ -1245,9 +1245,11 @@ class MoltbotHandlers:
 
     def start_proactive_scheduler(self, chat_id: int):
         """Start scheduled (2x/day) and activity-spike proactive messaging via asyncio tasks."""
-        asyncio.create_task(self._proactive_scheduled_loop(chat_id))
-        asyncio.create_task(self._proactive_monitor_loop(chat_id))
-        logger.info(f"MoltBot: proactive scheduler started for chat {chat_id}")
+        # TODO: re-enable when personality is tuned
+        # asyncio.create_task(self._proactive_scheduled_loop(chat_id))
+        # asyncio.create_task(self._proactive_monitor_loop(chat_id))
+        # logger.info(f"MoltBot: proactive scheduler started for chat {chat_id}")
+        return
 
     async def _proactive_scheduled_loop(self, chat_id: int):
         """Fire proactive messages at fixed times using an async polling loop."""
