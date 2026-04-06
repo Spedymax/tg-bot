@@ -1377,12 +1377,15 @@ class MoltbotHandlers:
 
         @router.message(Command(commands=['мут_сброс', 'mut_reset']))
         async def handle_reset(message: Message):
-            """Reset chat history context. Bot won't see messages before this point."""
+            """Reset chat history context in ALL chats. Bot won't see messages before this point."""
             now = datetime.now(timezone.utc)
-            self._history_reset_time[message.chat.id] = now
+            # Reset all known chats + current chat
+            all_chat_ids = set(CHAT_KEYS.keys()) | {message.chat.id}
+            for chat_id in all_chat_ids:
+                self._history_reset_time[chat_id] = now
             self._save_state()
-            logger.info(f"MoltBot: history reset for chat {message.chat.id} by {message.from_user.id}")
-            await message.reply("⚙️ Контекст сброшен. Начинаю с чистого листа.")
+            logger.info(f"MoltBot: history reset for ALL chats ({len(all_chat_ids)}) by {message.from_user.id}")
+            await message.reply(f"⚙️ Контекст сброшен во всех чатах ({len(all_chat_ids)}). Чистый лист.")
 
         @router.message(StateFilter(None), F.func(lambda m: (
             m.reply_to_message is not None
