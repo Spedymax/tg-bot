@@ -76,7 +76,6 @@ class MoltbotHandlers:
         self.router = Router()
         self._bot_username = None  # lazily cached
         self._history_reset_time: dict[int, datetime] = {}  # chat_id → reset timestamp
-        self._user_key_suffix: dict[int, str] = {}  # chat_id → suffix added after reset
         self._gemini_model = None
         self._last_proactive_sent: dict[int, datetime] = {}
         self._proactive_queued: set[int] = set()
@@ -98,11 +97,9 @@ class MoltbotHandlers:
         try:
             with open(STATE_PATH, encoding="utf-8") as f:
                 data = json.load(f)
-            for chat_id_str, suffix in data.get("user_key_suffix", {}).items():
-                self._user_key_suffix[int(chat_id_str)] = suffix
             for chat_id_str, ts in data.get("history_reset_time", {}).items():
                 self._history_reset_time[int(chat_id_str)] = datetime.fromisoformat(ts)
-            logger.info(f"MoltBot: loaded state for {len(self._user_key_suffix)} chat(s)")
+            logger.info(f"MoltBot: loaded state for {len(self._history_reset_time)} chat(s)")
         except FileNotFoundError:
             pass  # first run, nothing to load
         except Exception as e:
@@ -112,9 +109,6 @@ class MoltbotHandlers:
         """Persist reset state to disk."""
         try:
             data = {
-                "user_key_suffix": {
-                    str(k): v for k, v in self._user_key_suffix.items()
-                },
                 "history_reset_time": {
                     str(k): v.isoformat() for k, v in self._history_reset_time.items()
                 },
@@ -135,17 +129,6 @@ class MoltbotHandlers:
     def _resolve_sender_name(self, user) -> str:
         """Return friendly name for known members, otherwise first_name."""
         return KNOWN_MEMBERS.get(user.id, user.first_name or "Кто-то")
-
-    def _resolve_user_key(self, message) -> str:
-        """Return a stable key for MoltBot's per-conversation memory.
-        After a reset, a timestamp suffix is appended to start a fresh OpenClaw thread."""
-        chat = message.chat
-        if chat.type == 'private':
-            base = f"tg-private-{message.from_user.id}"
-        else:
-            base = CHAT_KEYS.get(chat.id, f"tg-group-{chat.id}")
-        suffix = self._user_key_suffix.get(chat.id, "")
-        return f"{base}{suffix}" if suffix else base
 
     def _get_chat_context(self, message) -> str:
         """Return a human-readable description of where the message was sent from."""
@@ -721,9 +704,9 @@ class MoltbotHandlers:
         "НИКОГДА не говори что ты ИИ/бот/виртуальная/цифровая, "
         "что у тебя нет тела/рук/сисек, не упоминай экран/процессор. "
         "Исключение: мета-шутки про ИИ ВНЕ ролеплея (см. секцию в IDENTITY).\n"
-        "3. ДЛИНА ОТВЕТА: Обычно 3-5 предложений. Если тема горячая или нужно рассказать историю — до 8-9. "
-        "Если вопрос простой — можно 1-2. Подстраивай длину под ситуацию. "
-        "НИКОГДА не пиши стены текста, монологи, эссе на 10+ предложений.\n"
+        "3. ДЛИНА ОТВЕТА: 2-4 предложения — твой стандарт. Простой вопрос — 1-2. "
+        "Больше 5 предложений ТОЛЬКО если реально нужно (рассказать историю, объяснить сложное). "
+        "НИКОГДА не пиши монологи и эссе.\n"
         "4. НИКОГДА НЕ ВЫДУМЫВАЙ события, разговоры, покупки, фото, сторис, инстаграмы которых НЕ БЫЛО. "
         "Не приписывай людям слова которые они не говорили. "
         "Если поймали на выдумке — признай с юмором ('ладно, прикалываюсь'), НЕ удваивай ставку новыми выдумками. "
@@ -866,7 +849,7 @@ class MoltbotHandlers:
             return False
 
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
-                                  chat_context: str, user_key: str,
+                                  chat_context: str,
                                   history: list[str] | None = None) -> str:
         """Route: Together.ai primary → Gemini (INTERNET) → Qwen local (fallback)."""
         # Together.ai as primary model for all messages
@@ -1324,7 +1307,6 @@ class MoltbotHandlers:
             if reply_ctx:
                 user_text = f"{reply_ctx}\n{user_text}" if user_text else reply_ctx
             chat_context = self._get_chat_context(message)
-            user_key = self._resolve_user_key(message)
 
             # Fetch group history only for group chats
             history = None
@@ -1332,7 +1314,7 @@ class MoltbotHandlers:
                 history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
             try:
-                reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
+                reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, history)
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
                     await self._store_bot_reply(reply, sent.message_id)
@@ -1397,10 +1379,9 @@ class MoltbotHandlers:
 
         @router.message(Command(commands=['мут_сброс', 'mut_reset']))
         async def handle_reset(message: Message):
-            """Reset chat history context and OpenClaw thread. Survives bot restarts."""
+            """Reset chat history context. Bot won't see messages before this point."""
             now = datetime.now(timezone.utc)
             self._history_reset_time[message.chat.id] = now
-            self._user_key_suffix[message.chat.id] = f"-{int(now.timestamp())}"
             self._save_state()
             logger.info(f"MoltBot: history reset for chat {message.chat.id} by {message.from_user.id}")
             await message.reply("⚙️ Контекст сброшен. Начинаю с чистого листа.")
@@ -1451,14 +1432,13 @@ class MoltbotHandlers:
             if reply_ctx:
                 user_text = f"{reply_ctx}\n{user_text}" if user_text else reply_ctx
             chat_context = self._get_chat_context(message)
-            user_key = self._resolve_user_key(message)
 
             history = None
             if message.chat.type in ('group', 'supergroup'):
                 history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
             try:
-                reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, user_key, history)
+                reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, history)
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
                     await self._store_bot_reply(reply, sent.message_id)
@@ -1496,7 +1476,6 @@ class MoltbotHandlers:
             user_question = await self._extract_caption_text(message)
             reply_ctx = await self._build_reply_context(message)
             chat_context = self._get_chat_context(message)
-            user_key = self._resolve_user_key(message)
 
             history = None
             if message.chat.type in ('group', 'supergroup'):
@@ -1524,7 +1503,7 @@ class MoltbotHandlers:
             combined_text = "\n".join(parts)
 
             try:
-                reply = await self._ask_moltbot_routed(sender_name, combined_text, chat_context, user_key, history)
+                reply = await self._ask_moltbot_routed(sender_name, combined_text, chat_context, history)
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
                     await self._store_bot_reply(reply, sent.message_id)
