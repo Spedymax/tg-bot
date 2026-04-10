@@ -575,14 +575,13 @@ class MoltbotHandlers:
 
             prompt = f"""[СЛУЖЕБНЫЙ ЗАПРОС — обновление долгосрочной памяти чата]
 
-Ты Джарвис. Тебя попросили обновить файл chat-summary.md на основе последних сообщений группового чата.
+Ты Кеша (Иннокентий). Тебя попросили обновить файл chat-summary.md на основе последних сообщений группового чата.
 
 == УЧАСТНИКИ ЧАТА (справка) ==
-- Макс (Max) — мужчина, создатель бота, программист. ОН/ЕГО.
-- Юра (Юрочка, Юра Ступаченко) — мужчина из Умани. ОН/ЕГО. НЕ "она"!
-- Богдан (@lofiSnitch) — мужчина, объект флирта Лолиты. ОН/ЕГО.
-- Ксюша — девушка Богдана. ОНА/ЕЁ.
-- Jarvis/Лолита — бот (девушка в ролеплее). ОНА/ЕЁ.
+- Макс (Max) — мужчина, создатель бота, программист и геймер. ОН/ЕГО.
+- Юра (Юрочка) — мужчина, геймер. ОН/ЕГО. НЕ "она"!
+- Богдан (Бодя, @lofiSnitch) — мужчина, учится в Германии. ОН/ЕГО.
+- Кеша/Иннокентий — бот, четвёртый друг в чате. ОН/ЕГО.
 Всегда используй правильный род при описании участников!
 
 == ТЕКУЩИЙ SUMMARY ==
@@ -616,14 +615,12 @@ class MoltbotHandlers:
 
     def _maybe_update_summary(self):
         """Trigger summary update if enough time has passed (every SUMMARY_UPDATE_HOURS)."""
-        # TODO: re-enable when old Lolita messages age out of DB
-        # now = datetime.now(timezone.utc)
-        # if self._last_summary_update and (now - self._last_summary_update) < timedelta(hours=SUMMARY_UPDATE_HOURS):
-        #     return
-        # self._last_summary_update = now
-        # asyncio.create_task(self._update_summary_via_qwen())
-        # logger.info("MoltBot: triggered background summary update (24h timer)")
-        return
+        now = datetime.now(timezone.utc)
+        if self._last_summary_update and (now - self._last_summary_update) < timedelta(hours=SUMMARY_UPDATE_HOURS):
+            return
+        self._last_summary_update = now
+        asyncio.create_task(self._update_summary_via_qwen())
+        logger.info("MoltBot: triggered background summary update (24h timer)")
 
     # ── Topic detection ───────────────────────────────────────────────────────
 
@@ -718,7 +715,7 @@ class MoltbotHandlers:
     )
 
     # Bot names used to identify assistant messages in history
-    _BOT_NAMES = {"Лолита", "Ло", "Лола", "Jarvis"}
+    _BOT_NAMES = {"Кеша", "Иннокентий", "Лолита", "Ло", "Лола", "Jarvis"}
 
     def _history_to_messages(self, history: list[str], sender_name: str,
                              user_text: str) -> list[dict]:
