@@ -555,12 +555,12 @@ class MoltbotHandlers:
 
     # ── Smart summary ─────────────────────────────────────────────────────────
 
-    async def _update_summary_via_qwen(self):
-        """Fetch recent messages and ask Qwen to rewrite chat-summary.md."""
+    async def _update_summary(self, fetch_limit: int = SUMMARY_FETCH_LIMIT):
+        """Fetch recent messages and ask Together.ai to rewrite chat-summary.md."""
         try:
             rows = await self.db.execute_query(
                 "SELECT name, message_text, timestamp FROM messages ORDER BY timestamp DESC LIMIT %s",
-                (SUMMARY_FETCH_LIMIT,),
+                (fetch_limit,),
             )
             if not rows:
                 return
@@ -575,14 +575,12 @@ class MoltbotHandlers:
 
             prompt = f"""[СЛУЖЕБНЫЙ ЗАПРОС — обновление долгосрочной памяти чата]
 
-Ты Кеша (Иннокентий). Тебя попросили обновить файл chat-summary.md на основе последних сообщений группового чата.
-
-== УЧАСТНИКИ ЧАТА (справка) ==
-- Макс (Max) — мужчина, создатель бота, программист и геймер. ОН/ЕГО.
-- Юра (Юрочка) — мужчина, геймер. ОН/ЕГО. НЕ "она"!
-- Богдан (Бодя, @lofiSnitch) — мужчина, учится в Германии. ОН/ЕГО.
-- Кеша/Иннокентий — бот, четвёртый друг в чате. ОН/ЕГО.
-Всегда используй правильный род при описании участников!
+== УЧАСТНИКИ ЧАТА ==
+- Макс (Max) — программист и геймер, создатель бота
+- Юра (Юрочка, Spatifilum) — геймер
+- Богдан (Бодя, @lofiSnitch) — учится в Германии
+- Кеша/Иннокентий (Jarvis в ТГ) — бот, четвёртый друг в чате
+Все мужчины. Используй правильный род!
 
 == ТЕКУЩИЙ SUMMARY ==
 {current_summary or '(пусто)'}
@@ -590,26 +588,67 @@ class MoltbotHandlers:
 == ПОСЛЕДНИЕ {len(messages)} СООБЩЕНИЙ ==
 {history_text}
 
-== ИНСТРУКЦИЯ ==
-Обнови summary. Правила:
-- Сохрани всё важное из текущего summary: персонажи, правила, мемы, внутренние шутки, проекты, незакрытые темы
-- Добавь новое что появилось в последних сообщениях: шутки, события, пари, внутренние мемы, новые темы
-- Убери то, что явно устарело и больше не актуально
-- Каждое сообщение имеет формат "timestamp Имя: текст" — точно указывай КТО что сказал, не путай авторство
-- Держи размер ~4000 слов — сохраняй все детали, выкидывай только совсем устаревшее и неактуальное
-- Помечай когда тема/шутка была актуальна, например: (март 2026), (февраль 2026)
-- Обнови поле "Последнее обновление" на {now}
-- Верни ТОЛЬКО текст нового summary в формате markdown, без пояснений, без обёртки в ```"""
+== ЗАДАЧА ==
+Перепиши summary на основе новых сообщений.
 
-            new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
+Стиль:
+- Пиши как заметки для себя, не как статью. Коротко и по делу.
+- Без академизма, канцелярита и анализа "динамики общения"
+- Формат: буллеты и короткие абзацы, не простыни текста
+
+Что сохранять:
+- Внутренние шутки, мемы, приколы — это самое важное
+- Кто что сказал если это важно или смешно
+- Пари, споры, незакрытые темы
+- Важные события (игры, фильмы, новости которые обсуждали)
+
+Что НЕ надо:
+- Бытовой мусор (привет/пока, тесты бота, технические сообщения)
+- Пересказ каждого сообщения — только суть
+- Выводы и "анализ атмосферы"
+
+Формат:
+- Группируй по темам, не по хронологии
+- Помечай когда было актуально: (апрель 2026)
+- Размер: до 2000 слов. Лучше короче и по делу чем длинно и водянисто.
+- Обнови "Последнее обновление: {now}"
+- Верни ТОЛЬКО markdown текст, без обёртки в ```"""
+
+            if not Settings.TOGETHER_API_KEY:
+                logger.warning("MoltBot: TOGETHER_API_KEY not set, falling back to Ollama for summary")
+                new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
+            else:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        r = await client.post(
+                            "https://api.together.xyz/v1/chat/completions",
+                            headers={"Authorization": f"Bearer {Settings.TOGETHER_API_KEY}"},
+                            json={
+                                "model": Settings.TOGETHER_MODEL,
+                                "messages": [
+                                    {"role": "system", "content": "Ты обновляешь файл заметок о групповом чате. Пиши коротко и по делу."},
+                                    {"role": "user", "content": prompt},
+                                ],
+                                "max_tokens": 4000,
+                                "temperature": 0.4,
+                            },
+                            timeout=180,
+                        )
+                        r.raise_for_status()
+                        new_summary = r.json()["choices"][0]["message"]["content"]
+                        new_summary = re.sub(r'<think>.*?</think>', '', new_summary, flags=re.DOTALL).strip()
+                except Exception as e:
+                    logger.warning(f"MoltBot: Together.ai summary failed, falling back to Ollama: {e}")
+                    new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
+
             if not new_summary or len(new_summary) < 100:
-                logger.warning("MoltBot: Qwen returned suspiciously short summary, skipping save")
+                logger.warning("MoltBot: LLM returned suspiciously short summary, skipping save")
                 return
 
             os.makedirs(os.path.dirname(CHAT_SUMMARY_PATH), exist_ok=True)
             with open(CHAT_SUMMARY_PATH, "w", encoding="utf-8") as f:
                 f.write(new_summary)
-            logger.info(f"MoltBot: chat-summary.md updated via Qwen ({len(new_summary)} chars)")
+            logger.info(f"MoltBot: chat-summary.md updated ({len(new_summary)} chars)")
         except Exception as e:
             logger.error(f"MoltBot: summary update failed: {e}")
 
@@ -619,7 +658,7 @@ class MoltbotHandlers:
         if self._last_summary_update and (now - self._last_summary_update) < timedelta(hours=SUMMARY_UPDATE_HOURS):
             return
         self._last_summary_update = now
-        asyncio.create_task(self._update_summary_via_qwen())
+        asyncio.create_task(self._update_summary())
         logger.info("MoltBot: triggered background summary update (24h timer)")
 
     # ── Topic detection ───────────────────────────────────────────────────────
