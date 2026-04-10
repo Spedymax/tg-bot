@@ -74,7 +74,7 @@ SPIKE_DELAY_MIN, SPIKE_DELAY_MAX = 5 * 60, 20 * 60  # seconds
 
 # Smart summary config
 SUMMARY_UPDATE_HOURS = 24     # update chat-summary.md every N hours
-SUMMARY_FETCH_LIMIT = 600     # messages to analyze when updating
+SUMMARY_FETCH_HOURS = 48      # fetch messages from last N hours for summary
 CPH_TZ = ZoneInfo("Europe/Copenhagen")
 
 
@@ -555,18 +555,20 @@ class MoltbotHandlers:
 
     # ── Smart summary ─────────────────────────────────────────────────────────
 
-    async def _update_summary(self, fetch_limit: int = SUMMARY_FETCH_LIMIT):
+    async def _update_summary(self):
         """Fetch recent messages and ask Together.ai to rewrite chat-summary.md."""
         try:
             rows = await self.db.execute_query(
-                "SELECT name, message_text, timestamp FROM messages ORDER BY timestamp DESC LIMIT %s",
-                (fetch_limit,),
+                "SELECT name, message_text, timestamp FROM messages "
+                "WHERE timestamp >= NOW() - INTERVAL '%s hours' "
+                "ORDER BY timestamp ASC",
+                (SUMMARY_FETCH_HOURS,),
             )
             if not rows:
                 return
             messages = [
                 f"{self._format_ts(r[2])} {r[0] or 'Аноним'}: {r[1]}"
-                for r in reversed(rows)
+                for r in rows
             ]
             history_text = "\n".join(messages)
 
@@ -576,20 +578,21 @@ class MoltbotHandlers:
             prompt = f"""[СЛУЖЕБНЫЙ ЗАПРОС — обновление долгосрочной памяти чата]
 
 == УЧАСТНИКИ ЧАТА ==
-- Макс (Max) — программист и геймер, создатель бота
+- Макс (Max) — программист и геймер, создатель бота, живёт в Дании
 - Юра (Юрочка, Spatifilum) — геймер
-- Богдан (Бодя, @lofiSnitch) — учится в Германии
+- Богдан (Бодя, @lofiSnitch) — учится в Германии (Эрланген)
+- Шева — друг, иногда играет в доту с ребятами, не в чате
 - Кеша/Иннокентий (Jarvis в ТГ) — бот, четвёртый друг в чате
 Все мужчины. Используй правильный род!
 
 == ТЕКУЩИЙ SUMMARY ==
 {current_summary or '(пусто)'}
 
-== ПОСЛЕДНИЕ {len(messages)} СООБЩЕНИЙ ==
+== СООБЩЕНИЯ ЗА ПОСЛЕДНИЕ {SUMMARY_FETCH_HOURS} ЧАСОВ ==
 {history_text}
 
 == ЗАДАЧА ==
-Перепиши summary на основе новых сообщений.
+Обнови summary: добавь новое из сообщений выше. Старое НЕ удаляй если оно не устарело.
 
 Стиль:
 - Пиши как заметки для себя, не как статью. Коротко и по делу.
@@ -606,6 +609,7 @@ class MoltbotHandlers:
 - Бытовой мусор (привет/пока, тесты бота, технические сообщения)
 - Пересказ каждого сообщения — только суть
 - Выводы и "анализ атмосферы"
+- НЕ интерпретируй и НЕ додумывай. Не пиши "ирония", "возможно отсылка к", "неясно что именно". Записывай факт как есть, без догадок.
 
 Формат:
 - Группируй по темам, не по хронологии
