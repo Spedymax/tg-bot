@@ -398,7 +398,7 @@ class MoltbotHandlers:
                             {"role": "user", "content": prompt},
                         ],
                         "max_tokens": 500,
-                        "temperature": 0.7,
+                        "temperature": 0.8,
                     },
                     timeout=120,
                 )
@@ -822,7 +822,7 @@ class MoltbotHandlers:
                     "model": Settings.TOGETHER_MODEL,
                     "messages": messages,
                     "max_tokens": 500,
-                    "temperature": 0.7,
+                    "temperature": 0.8,
                 },
                 timeout=120,
             )
