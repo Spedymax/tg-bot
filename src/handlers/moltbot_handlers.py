@@ -808,11 +808,13 @@ class MoltbotHandlers:
         system_parts = [self._HARD_RULES, identity]
         if chat_context:
             system_parts.append(f"[Сообщение отправлено из: {chat_context}]")
-        if summary:
-            system_parts.append(f"[Долгосрочная память о чате:\n{summary}]")
         system_msg = "\n\n".join(system_parts)
 
         messages = [{"role": "system", "content": system_msg}]
+        # Summary as separate user context block — keeps it away from identity/rules
+        if summary:
+            messages.append({"role": "user", "content": f"[Фоновые знания о чате — НЕ цитируй, НЕ пересказывай, только для понимания контекста]\n{summary}"})
+            messages.append({"role": "assistant", "content": "ок"})
         messages.extend(self._history_to_messages(history, sender_name, user_text))
 
         async with httpx.AsyncClient() as client:
