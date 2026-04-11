@@ -404,7 +404,7 @@ class MoltbotHandlers:
                 )
                 r.raise_for_status()
                 text = r.json()["choices"][0]["message"]["content"]
-                text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+                text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL).strip()
                 text = re.sub(r'\*[^*]{2,80}\*', '', text)
                 text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
                 together_breaker.record_success()
@@ -640,7 +640,7 @@ class MoltbotHandlers:
                         )
                         r.raise_for_status()
                         new_summary = r.json()["choices"][0]["message"]["content"]
-                        new_summary = re.sub(r'<think>.*?</think>', '', new_summary, flags=re.DOTALL).strip()
+                        new_summary = re.sub(r'<think>.*?(?:</think>|$)', '', new_summary, flags=re.DOTALL).strip()
                 except Exception as e:
                     logger.warning(f"MoltBot: Together.ai summary failed, falling back to Ollama: {e}")
                     new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
@@ -827,15 +827,13 @@ class MoltbotHandlers:
                     "messages": messages,
                     "max_tokens": 2000,
                     "temperature": 0.8,
-                    "reasoning": {"enabled": True},
-                    "reasoning_effort": "low",
                 },
                 timeout=120,
             )
             r.raise_for_status()
             text = r.json()["choices"][0]["message"]["content"]
             # Strip thinking tags if present
-            text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+            text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL).strip()
             # Strip asterisk actions (*действие*) — model ignores prompt rules about this
             text = re.sub(r'\*[^*]{2,80}\*', '', text)
             # Clean up leftover whitespace from stripped actions
@@ -874,7 +872,7 @@ class MoltbotHandlers:
             r.raise_for_status()
             import re as _re
             text = r.json()["message"]["content"]
-            text = _re.sub(r'<think>.*?</think>', '', text, flags=_re.DOTALL).strip()
+            text = _re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=_re.DOTALL).strip()
             text = text.split('<|endoftext|>')[0].split('<|im_start|>')[0].strip()
             return text
 
@@ -1150,7 +1148,7 @@ class MoltbotHandlers:
         )
         try:
             raw = await asyncio.to_thread(self._call_ollama_direct, prompt)
-            clean = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+            clean = re.sub(r'<think>.*?(?:</think>|$)', '', raw, flags=re.DOTALL).strip()
             # If nothing outside think tags, search the full raw text
             search_in = clean if clean else raw
             match = re.search(r'\{.*\}', search_in, re.DOTALL)
