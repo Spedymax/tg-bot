@@ -935,6 +935,7 @@ class MoltbotHandlers:
             upper = line.upper()
             if upper.startswith("SEARCH:"):
                 query = line[7:].strip()
+                logger.info(f"MoltBot: _extract_search_query found '{query}' in line: {line[:80]}")
                 return query if query else None
         return None
 
@@ -973,9 +974,11 @@ class MoltbotHandlers:
                 logger.info(f"MoltBot: together.ai for: {user_text[:60]}")
                 reply = await self._call_together(sender_name, user_text, chat_context, history)
                 if reply and reply.strip():
+                    logger.info(f"MoltBot: routed got reply ({len(reply)} chars): {reply[:100]!r}")
                     # Check for SEARCH: or INTERNET
                     searched = await self._maybe_search(reply, sender_name, user_text, chat_context, history)
                     if searched:
+                        logger.info(f"MoltBot: SEARCH resolved, returning: {searched[:100]!r}")
                         return searched
                     stripped = reply.strip()
                     if stripped.upper() == "INTERNET":
@@ -990,10 +993,12 @@ class MoltbotHandlers:
                 logger.warning(f"MoltBot: Together.ai failed ({e}), falling back to Qwen")
         # Fallback to local Qwen
         reply = await self._call_qwen_with_identity(sender_name, user_text, chat_context, history)
+        logger.info(f"MoltBot: Qwen fallback reply ({len(reply) if reply else 0} chars): {reply[:100]!r if reply else 'None'}")
         # Check for SEARCH: in Qwen reply too
         if reply:
             searched = await self._maybe_search(reply, sender_name, user_text, chat_context, history)
             if searched:
+                logger.info(f"MoltBot: Qwen SEARCH resolved: {searched[:100]!r}")
                 return searched
         return reply
 
