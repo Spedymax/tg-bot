@@ -76,6 +76,9 @@ class Settings:
     TOGETHER_API_KEY = os.getenv('TOGETHER_API_KEY')
     TOGETHER_MODEL = os.getenv('TOGETHER_MODEL', 'Qwen/Qwen3-235B-A22B-Instruct-2507-tput')
 
+    # Brave Search API
+    BRAVE_API_KEY = os.getenv('BRAVE_API_KEY')
+
     # Wake-on-LAN / PC sleep control
     PC_MAC_ADDRESS = os.getenv('PC_MAC_ADDRESS', '')          # e.g. "AA:BB:CC:DD:EE:FF"
     PC_SSH_HOST = os.getenv('PC_SSH_HOST', '192.168.1.3')
