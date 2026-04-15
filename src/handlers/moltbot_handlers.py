@@ -993,7 +993,8 @@ class MoltbotHandlers:
                 logger.warning(f"MoltBot: Together.ai failed ({e}), falling back to Qwen")
         # Fallback to local Qwen
         reply = await self._call_qwen_with_identity(sender_name, user_text, chat_context, history)
-        logger.info(f"MoltBot: Qwen fallback reply ({len(reply) if reply else 0} chars): {reply[:100]!r if reply else 'None'}")
+        _preview = repr(reply[:100]) if reply else 'None'
+        logger.info(f"MoltBot: Qwen fallback reply ({len(reply) if reply else 0} chars): {_preview}")
         # Check for SEARCH: in Qwen reply too
         if reply:
             searched = await self._maybe_search(reply, sender_name, user_text, chat_context, history)
