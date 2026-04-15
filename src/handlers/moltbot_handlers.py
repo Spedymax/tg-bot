@@ -896,18 +896,68 @@ class MoltbotHandlers:
         except Exception:
             return False
 
+    async def _brave_search(self, query: str, count: int = 5) -> str:
+        """Search the web via Brave Search API. Returns formatted results."""
+        if not Settings.BRAVE_API_KEY:
+            return ""
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(
+                    "https://api.search.brave.com/res/v1/web/search",
+                    headers={"X-Subscription-Token": Settings.BRAVE_API_KEY,
+                             "Accept": "application/json"},
+                    params={"q": query, "count": count},
+                    timeout=10,
+                )
+                r.raise_for_status()
+                data = r.json()
+                results = []
+                for item in (data.get("web", {}).get("results") or [])[:count]:
+                    title = item.get("title", "")
+                    desc = item.get("description", "")
+                    results.append(f"- {title}: {desc}")
+                return "\n".join(results) if results else ""
+        except Exception as e:
+            logger.warning(f"MoltBot: Brave search failed: {e}")
+            return ""
+
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str,
                                   history: list[str] | None = None) -> str:
-        """Route: Together.ai primary → Gemini (INTERNET) → Qwen local (fallback)."""
-        # Together.ai as primary model for all messages
+        """Route: Together.ai primary → Brave Search (SEARCH:) → Qwen local (fallback)."""
         if Settings.TOGETHER_API_KEY:
             try:
                 logger.info(f"MoltBot: together.ai for: {user_text[:60]}")
                 reply = await self._call_together(sender_name, user_text, chat_context, history)
                 if reply and reply.strip():
-                    if reply.strip().upper() == "INTERNET":
-                        logger.info(f"MoltBot: together.ai requested INTERNET → gemini for: {user_text[:60]}")
+                    stripped = reply.strip()
+                    # SEARCH: query — bot wants to look something up
+                    if stripped.upper().startswith("SEARCH:"):
+                        search_query = stripped[7:].strip()
+                        if search_query:
+                            logger.info(f"MoltBot: SEARCH requested → '{search_query}'")
+                            results = await self._brave_search(search_query)
+                            if results:
+                                # Re-call with search results injected
+                                search_context = (
+                                    f"[Результаты поиска по запросу '{search_query}':\n"
+                                    f"{results}\n"
+                                    f"Используй эту информацию чтобы ответить. Отвечай коротко, своими словами.]"
+                                )
+                                augmented_text = f"{user_text}\n\n{search_context}"
+                                return await self._call_together(
+                                    sender_name, augmented_text, chat_context, history
+                                )
+                            else:
+                                # Search failed, try Gemini as fallback
+                                try:
+                                    return await self._call_gemini_text(
+                                        sender_name, user_text, chat_context, history
+                                    )
+                                except Exception as ge:
+                                    logger.warning(f"MoltBot: Gemini fallback failed ({ge})")
+                    elif stripped.upper() == "INTERNET":
+                        logger.info(f"MoltBot: INTERNET → gemini for: {user_text[:60]}")
                         try:
                             return await self._call_gemini_text(sender_name, user_text, chat_context, history)
                         except Exception as ge:
