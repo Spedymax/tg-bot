@@ -921,6 +921,49 @@ class MoltbotHandlers:
             logger.warning(f"MoltBot: Brave search failed: {e}")
             return ""
 
+    @staticmethod
+    def _extract_search_query(text: str) -> str | None:
+        """Extract search query from LLM reply. Handles SEARCH: anywhere in text."""
+        if not text:
+            return None
+        for line in text.strip().splitlines():
+            line = line.strip()
+            # Remove common prefixes: timestamps, bot name, brackets
+            for prefix in ("Jarvis:", "Кеша:", "[", "]"):
+                if line.startswith(prefix):
+                    line = line[len(prefix):].strip()
+            upper = line.upper()
+            if upper.startswith("SEARCH:"):
+                query = line[7:].strip()
+                return query if query else None
+        return None
+
+    async def _maybe_search(self, reply: str, sender_name: str, user_text: str,
+                            chat_context: str, history: list[str] | None) -> str | None:
+        """If reply contains SEARCH:, do the search and re-generate. Returns new reply or None."""
+        query = self._extract_search_query(reply)
+        if not query:
+            return None
+        logger.info(f"MoltBot: SEARCH requested → '{query}'")
+        results = await self._brave_search(query)
+        if results:
+            search_context = (
+                f"[Результаты поиска по запросу '{query}':\n"
+                f"{results}\n"
+                f"Используй эту информацию чтобы ответить. Отвечай коротко, своими словами.]"
+            )
+            augmented_text = f"{user_text}\n\n{search_context}"
+            try:
+                return await self._call_together(sender_name, augmented_text, chat_context, history)
+            except Exception as e:
+                logger.warning(f"MoltBot: re-call after search failed: {e}")
+        # Search failed or no results — try Gemini
+        try:
+            return await self._call_gemini_text(sender_name, user_text, chat_context, history)
+        except Exception as ge:
+            logger.warning(f"MoltBot: Gemini fallback failed ({ge})")
+        return None
+
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str,
                                   history: list[str] | None = None) -> str:
@@ -930,33 +973,12 @@ class MoltbotHandlers:
                 logger.info(f"MoltBot: together.ai for: {user_text[:60]}")
                 reply = await self._call_together(sender_name, user_text, chat_context, history)
                 if reply and reply.strip():
+                    # Check for SEARCH: or INTERNET
+                    searched = await self._maybe_search(reply, sender_name, user_text, chat_context, history)
+                    if searched:
+                        return searched
                     stripped = reply.strip()
-                    # SEARCH: query — bot wants to look something up
-                    if stripped.upper().startswith("SEARCH:"):
-                        search_query = stripped[7:].strip()
-                        if search_query:
-                            logger.info(f"MoltBot: SEARCH requested → '{search_query}'")
-                            results = await self._brave_search(search_query)
-                            if results:
-                                # Re-call with search results injected
-                                search_context = (
-                                    f"[Результаты поиска по запросу '{search_query}':\n"
-                                    f"{results}\n"
-                                    f"Используй эту информацию чтобы ответить. Отвечай коротко, своими словами.]"
-                                )
-                                augmented_text = f"{user_text}\n\n{search_context}"
-                                return await self._call_together(
-                                    sender_name, augmented_text, chat_context, history
-                                )
-                            else:
-                                # Search failed, try Gemini as fallback
-                                try:
-                                    return await self._call_gemini_text(
-                                        sender_name, user_text, chat_context, history
-                                    )
-                                except Exception as ge:
-                                    logger.warning(f"MoltBot: Gemini fallback failed ({ge})")
-                    elif stripped.upper() == "INTERNET":
+                    if stripped.upper() == "INTERNET":
                         logger.info(f"MoltBot: INTERNET → gemini for: {user_text[:60]}")
                         try:
                             return await self._call_gemini_text(sender_name, user_text, chat_context, history)
@@ -1062,6 +1084,18 @@ class MoltbotHandlers:
             reply = reply.strip()
             if not reply:
                 return False
+
+            # Intercept SEARCH: in probabilistic replies
+            search_q = self._extract_search_query(reply)
+            if search_q:
+                logger.info(f"MoltBot: probabilistic SEARCH → '{search_q}'")
+                results = await self._brave_search(search_q)
+                if results:
+                    augmented = f"{prompt}\n\n[Результаты поиска '{search_q}':\n{results}\nОтвечай коротко.]"
+                    reply = await self._call_together_simple(augmented)
+                    reply = reply.strip()
+                    if not reply or self._extract_search_query(reply):
+                        return False  # avoid infinite loop
 
             sent = await self._send_long_reply(message, reply)
             await self._store_bot_reply(reply, sent.message_id)
