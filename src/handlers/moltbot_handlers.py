@@ -463,17 +463,17 @@ class MoltbotHandlers:
                 identity = f.read()
         except Exception:
             identity = ""
-        summary = _load_chat_summary()
+        # summary = _load_chat_summary()  # DISABLED: testing without long-term memory
         parts = []
         if identity:
             parts.append(f"[Твоя личность:\n{identity}]")
         parts.append("Обычно 3-5 предложений, до 8-9 если тема горячая. Простой вопрос — 1-2. Не выдумывай факты.")
         if chat_context:
             parts.append(f"[Сообщение из: {chat_context}]")
-        if summary:
-            parts.append(f"[Долгосрочная память о чате:\n{summary}]")
+        # if summary:
+        #     parts.append(f"[Долгосрочная память о чате:\n{summary}]")
         if history:
-            parts.append("[История чата:\n" + "\n".join(history[-20:]) + "]")
+            parts.append("[История чата:\n" + "\n".join(history) + "]")
         parts.append(self._POST_PROMPT)
         parts.append(f"{sender_name}: {user_text}")
 
@@ -496,12 +496,9 @@ class MoltbotHandlers:
     async def _send_proactive_message(self, chat_id: int):
         """Build context and send a proactive (unprompted) message to the chat."""
         try:
-            history = await self._get_recent_group_messages(30, chat_id)
-            summary = _load_chat_summary()
+            history = await self._get_recent_group_messages(50, chat_id)
 
             context_prefix = ""
-            if summary:
-                context_prefix += f"[Долгосрочная память о чате:\n{summary}\n]\n"
             if history:
                 history_block = "\n".join(history)
                 context_prefix += f"[История чата (последние {len(history)} сообщений):\n{history_block}\n]\n"
@@ -800,7 +797,7 @@ class MoltbotHandlers:
         """Convert history strings to OpenAI-style message dicts.
         History format: '14:30 Макс: текст' or '14:30 Лолита: текст'."""
         messages = []
-        for line in (history or [])[-15:]:
+        for line in (history or []):
             # Strip timestamp prefix: "14:30 Name: text" → "Name: text"
             parts = line.split(" ", 1)
             if len(parts) < 2:
@@ -834,21 +831,21 @@ class MoltbotHandlers:
                 identity = f.read()
         except Exception:
             identity = ""
-        summary = _load_chat_summary()
+        # summary = _load_chat_summary()  # DISABLED: testing without long-term memory
         # Hard rules prepended before IDENTITY — models follow start of prompt best
         system_parts = [self._HARD_RULES, identity]
         if chat_context:
             system_parts.append(f"[Сообщение отправлено из: {chat_context}]")
-        if summary:
-            system_parts.append(
-                "=== ФОНОВЫЕ ЗАМЕТКИ О ЧАТЕ (ТОЛЬКО ДЛЯ СПРАВКИ) ===\n"
-                "Эти заметки — ПАССИВНЫЙ контекст. Правила использования:\n"
-                "- НИКОГДА не цитируй, не пересказывай и не ссылайся на эти заметки\n"
-                "- НИКОГДА не используй фразы, мемы или выражения из заметок в своих ответах\n"
-                "- Заметки нужны ТОЛЬКО чтобы ты понимал о чём речь если кто-то упомянет тему\n"
-                "- Отвечай СВОИМИ словами, не словами из заметок\n"
-                f"=== НАЧАЛО ЗАМЕТОК ===\n{summary}\n=== КОНЕЦ ЗАМЕТОК ==="
-            )
+        # if summary:
+        #     system_parts.append(
+        #         "=== ФОНОВЫЕ ЗАМЕТКИ О ЧАТЕ (ТОЛЬКО ДЛЯ СПРАВКИ) ===\n"
+        #         "Эти заметки — ПАССИВНЫЙ контекст. Правила использования:\n"
+        #         "- НИКОГДА не цитируй, не пересказывай и не ссылайся на эти заметки\n"
+        #         "- НИКОГДА не используй фразы, мемы или выражения из заметок в своих ответах\n"
+        #         "- Заметки нужны ТОЛЬКО чтобы ты понимал о чём речь если кто-то упомянет тему\n"
+        #         "- Отвечай СВОИМИ словами, не словами из заметок\n"
+        #         f"=== НАЧАЛО ЗАМЕТОК ===\n{summary}\n=== КОНЕЦ ЗАМЕТОК ==="
+        #     )
         system_msg = "\n\n".join(system_parts)
 
         messages = [{"role": "system", "content": system_msg}]
@@ -894,12 +891,12 @@ class MoltbotHandlers:
                 identity = f.read()
         except Exception:
             identity = ""
-        summary = _load_chat_summary()
+        # summary = _load_chat_summary()  # DISABLED: testing without long-term memory
         system_msg = self._HARD_RULES + "\n" + identity
         context_prefix = f"[Сообщение отправлено из: {chat_context}]\n" if chat_context else ""
-        summary_block = f"[Долгосрочная память о чате: {summary}]\n" if summary else ""
-        history_block = "\n".join(history[-30:]) + "\n" if history else ""
-        user_msg = f"{context_prefix}{summary_block}{history_block}{self._POST_PROMPT}\n{sender_name}: {user_text}"
+        # summary_block = f"[Долгосрочная память о чате: {summary}]\n" if summary else ""
+        history_block = "\n".join(history) + "\n" if history else ""
+        user_msg = f"{context_prefix}{history_block}{self._POST_PROMPT}\n{sender_name}: {user_text}"
 
         def _call():
             r = _httpx.post(
@@ -1033,7 +1030,7 @@ class MoltbotHandlers:
                 logger.info(f"MoltBot: cold start probabilistic for chat {chat_id}")
             else:
                 # Warm session: Qwen filter → Claude response
-                history = await self._get_recent_group_messages(limit=30, chat_id=chat_id)
+                history = await self._get_recent_group_messages(limit=50, chat_id=chat_id)
                 should = await self._qwen_should_reply(sender_name, user_text, history)
                 if not should:
                     return False
