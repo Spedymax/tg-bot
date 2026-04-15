@@ -989,7 +989,13 @@ class MoltbotHandlers:
             except Exception as e:
                 logger.warning(f"MoltBot: Together.ai failed ({e}), falling back to Qwen")
         # Fallback to local Qwen
-        return await self._call_qwen_with_identity(sender_name, user_text, chat_context, history)
+        reply = await self._call_qwen_with_identity(sender_name, user_text, chat_context, history)
+        # Check for SEARCH: in Qwen reply too
+        if reply:
+            searched = await self._maybe_search(reply, sender_name, user_text, chat_context, history)
+            if searched:
+                return searched
+        return reply
 
     async def _qwen_should_reply(self, sender_name: str, user_text: str,
                                 history: list[str]) -> bool:
