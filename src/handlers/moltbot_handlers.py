@@ -374,6 +374,33 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: error fetching chat history: {e}")
             return []
 
+    async def _together_post(self, payload: dict, timeout: float) -> dict:
+        """POST to Together.ai with retry on 5xx and transient network errors.
+        3 attempts total with 1.5s/3s backoff. Returns parsed JSON or raises last error."""
+        url = "https://api.together.xyz/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {Settings.TOGETHER_API_KEY}"}
+        delays = [0, 1.5, 3.0]
+        last_exc: Exception | None = None
+        async with httpx.AsyncClient() as client:
+            for attempt, delay in enumerate(delays, start=1):
+                if delay:
+                    await asyncio.sleep(delay)
+                try:
+                    r = await client.post(url, headers=headers, json=payload, timeout=timeout)
+                    if r.status_code in (429, 502, 503, 504):
+                        last_exc = httpx.HTTPStatusError(
+                            f"Together.ai {r.status_code}", request=r.request, response=r
+                        )
+                        logger.warning(f"MoltBot: Together.ai {r.status_code}, retry {attempt}/3")
+                        continue
+                    r.raise_for_status()
+                    return r.json()
+                except (httpx.TransportError, httpx.TimeoutException) as e:
+                    last_exc = e
+                    logger.warning(f"MoltBot: Together.ai transient error ({e!r}), retry {attempt}/3")
+                    continue
+        raise last_exc if last_exc else _AIConnectionError("Together.ai retry exhausted")
+
     async def _call_together_simple(self, prompt: str) -> str:
         """Call Together.ai with a raw prompt + IDENTITY. Used for proactive/probabilistic messages."""
         if not Settings.TOGETHER_API_KEY:
@@ -387,29 +414,25 @@ class MoltbotHandlers:
             identity = ""
         system_msg = "\n\n".join([self._HARD_RULES, identity])
         try:
-            async with httpx.AsyncClient() as client:
-                r = await client.post(
-                    "https://api.together.xyz/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {Settings.TOGETHER_API_KEY}"},
-                    json={
-                        "model": Settings.TOGETHER_MODEL,
-                        "messages": [
-                            {"role": "system", "content": system_msg},
-                            {"role": "system", "content": self._POST_PROMPT},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "max_tokens": 500,
-                        "temperature": 0.8,
-                    },
-                    timeout=120,
-                )
-                r.raise_for_status()
-                text = r.json()["choices"][0]["message"]["content"]
-                text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL).strip()
-                text = re.sub(r'\*[^*]{2,80}\*', '', text)
-                text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
-                together_breaker.record_success()
-                return text
+            data = await self._together_post(
+                {
+                    "model": Settings.TOGETHER_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_msg},
+                        {"role": "system", "content": self._POST_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "max_tokens": 500,
+                    "temperature": 0.8,
+                },
+                timeout=120,
+            )
+            text = data["choices"][0]["message"]["content"]
+            text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL).strip()
+            text = re.sub(r'\*[^*]{2,80}\*', '', text)
+            text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
+            together_breaker.record_success()
+            return text
         except Exception as e:
             together_breaker.record_failure()
             logger.error(f"MoltBot: Together.ai simple call failed: {e}")
@@ -622,24 +645,20 @@ class MoltbotHandlers:
                 new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
             else:
                 try:
-                    async with httpx.AsyncClient() as client:
-                        r = await client.post(
-                            "https://api.together.xyz/v1/chat/completions",
-                            headers={"Authorization": f"Bearer {Settings.TOGETHER_API_KEY}"},
-                            json={
-                                "model": Settings.TOGETHER_MODEL,
-                                "messages": [
-                                    {"role": "system", "content": "Ты обновляешь файл заметок о групповом чате. Пиши коротко и по делу."},
-                                    {"role": "user", "content": prompt},
-                                ],
-                                "max_tokens": 4000,
-                                "temperature": 0.4,
-                            },
-                            timeout=180,
-                        )
-                        r.raise_for_status()
-                        new_summary = r.json()["choices"][0]["message"]["content"]
-                        new_summary = re.sub(r'<think>.*?(?:</think>|$)', '', new_summary, flags=re.DOTALL).strip()
+                    data = await self._together_post(
+                        {
+                            "model": Settings.TOGETHER_MODEL,
+                            "messages": [
+                                {"role": "system", "content": "Ты обновляешь файл заметок о групповом чате. Пиши коротко и по делу."},
+                                {"role": "user", "content": prompt},
+                            ],
+                            "max_tokens": 4000,
+                            "temperature": 0.4,
+                        },
+                        timeout=180,
+                    )
+                    new_summary = data["choices"][0]["message"]["content"]
+                    new_summary = re.sub(r'<think>.*?(?:</think>|$)', '', new_summary, flags=re.DOTALL).strip()
                 except Exception as e:
                     logger.warning(f"MoltBot: Together.ai summary failed, falling back to Ollama: {e}")
                     new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
@@ -821,27 +840,20 @@ class MoltbotHandlers:
             messages.append({"role": "system", "content": self._POST_PROMPT})
             messages.extend(history_msgs)
 
-        async with httpx.AsyncClient() as client:
-            r = await client.post(
-                "https://api.together.xyz/v1/chat/completions",
-                headers={"Authorization": f"Bearer {Settings.TOGETHER_API_KEY}"},
-                json={
-                    "model": Settings.TOGETHER_MODEL,
-                    "messages": messages,
-                    "max_tokens": 3000,
-                    "temperature": 0.8,
-                },
-                timeout=120,
-            )
-            r.raise_for_status()
-            text = r.json()["choices"][0]["message"]["content"]
-            # Strip thinking tags if present
-            text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL).strip()
-            # Strip asterisk actions (*действие*) — model ignores prompt rules about this
-            text = re.sub(r'\*[^*]{2,80}\*', '', text)
-            # Clean up leftover whitespace from stripped actions
-            text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
-            return text
+        data = await self._together_post(
+            {
+                "model": Settings.TOGETHER_MODEL,
+                "messages": messages,
+                "max_tokens": 3000,
+                "temperature": 0.8,
+            },
+            timeout=120,
+        )
+        text = data["choices"][0]["message"]["content"]
+        text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL).strip()
+        text = re.sub(r'\*[^*]{2,80}\*', '', text)
+        text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
+        return text
 
     async def _call_qwen_with_identity(self, sender_name: str, user_text: str,
                                         chat_context: str, history: list[str] | None = None) -> str:
