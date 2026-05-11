@@ -58,3 +58,25 @@ class PromptService:
                     (seed, int(admin_id or 0), "bootstrap", "bootstrap from file"),
                 )
                 logger.info(f"PromptService.bootstrap: seeded first identity version ({len(seed)} chars)")
+
+    async def get_current_identity(self) -> str:
+        """Return latest identity. Cached in-memory. Falls back to seed file on DB error."""
+        if self._cached_identity is not None:
+            return self._cached_identity
+        try:
+            async with self.db.connection() as conn:
+                cur = await conn.execute(
+                    "SELECT id, content FROM prompt_versions ORDER BY created_at DESC LIMIT 1"
+                )
+                row = await cur.fetchone()
+                if row:
+                    self._cache_version_id = row[0]
+                    self._cached_identity = row[1]
+                    return self._cached_identity
+        except Exception as e:
+            logger.warning(f"PromptService.get_current_identity: DB read failed ({e}), using seed file")
+        try:
+            with open(_SEED_IDENTITY_PATH, encoding="utf-8") as f:
+                return f.read().strip()
+        except FileNotFoundError:
+            return "Ты — AI-помощник."
