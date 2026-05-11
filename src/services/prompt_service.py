@@ -129,3 +129,14 @@ class PromptService:
                 return None
             cols = [d[0] for d in cur.description]
             return dict(zip(cols, row))
+
+    async def rollback_to(
+        self, version_id: int, author_id: int, author_name: str | None
+    ) -> int | None:
+        """Read v{version_id}, insert its content as a new version with rollback note.
+        Returns new version id, or None if source version doesn't exist."""
+        src = await self.get_version(version_id)
+        if not src:
+            return None
+        note = f"rollback to v{version_id}"
+        return await self.set_identity(src["content"], author_id, author_name, note=note)
