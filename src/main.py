@@ -60,6 +60,11 @@ async def main():
     player_service = PlayerService(db_manager, redis=redis)
     game_service = GameService(player_service)
 
+    # ── PromptService: DB-backed AI identity with version history ───────────
+    from services.prompt_service import init_prompt_service
+    prompt_service = init_prompt_service(db_manager)
+    await prompt_service.bootstrap()
+
     # ── aiogram v3 Bot + Dispatcher with Redis FSM storage ───────────────────
     bot = Bot(
         token=Settings.TELEGRAM_BOT_TOKEN,
@@ -115,6 +120,8 @@ async def main():
     dp.include_router(miniapp_h.router)
     dp.include_router(health_h.router)
     dp.include_router(pet_h.router)
+    from handlers.prompt_handlers import prompt_router
+    dp.include_router(prompt_router)
 
     # ── Global error handler ──────────────────────────────────────────────────
     @dp.error()
@@ -149,6 +156,14 @@ async def main():
         BotCommand(command="mut_reset",       description="Сбросить контекст бота"),
         BotCommand(command="sho_tam_novogo",  description="Что нового в чате (адм)"),
         BotCommand(command="analitika",       description="Аналитика за неделю (адм)"),
+        BotCommand(command="prompt",          description="Показать AI Identity"),
+        BotCommand(command="setprompt",       description="Заменить AI Identity (адм)"),
+        BotCommand(command="promptlog",       description="История версий Identity"),
+        BotCommand(command="promptshow",      description="Показать версию по номеру"),
+        BotCommand(command="rollback",        description="Откатиться на версию (адм)"),
+        BotCommand(command="grant",           description="Дать админ-доступ (адм)"),
+        BotCommand(command="revoke",          description="Отозвать админ-доступ"),
+        BotCommand(command="admins",          description="Список админов промпта"),
     ])
     logger.info("Bot commands registered")
 
