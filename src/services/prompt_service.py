@@ -80,3 +80,52 @@ class PromptService:
                 return f.read().strip()
         except FileNotFoundError:
             return "Ты — AI-помощник."
+
+    async def set_identity(
+        self,
+        content: str,
+        author_id: int,
+        author_name: str | None,
+        note: str | None = None,
+    ) -> int:
+        """Insert new version. Updates cache directly. Returns new version id."""
+        async with self.db.connection() as conn:
+            cur = await conn.execute(
+                "INSERT INTO prompt_versions (content, author_id, author_name, note) "
+                "VALUES (%s, %s, %s, %s) RETURNING id",
+                (content, int(author_id), author_name, note),
+            )
+            row = await cur.fetchone()
+            new_id = row[0]
+        self._cached_identity = content
+        self._cache_version_id = new_id
+        logger.info(
+            f"PromptService.set_identity: v{new_id} by {author_id} ({len(content)} chars) "
+            f"preview={content[:80]!r}"
+        )
+        return new_id
+
+    async def list_versions(self, limit: int = 7) -> list[dict[str, Any]]:
+        async with self.db.connection() as conn:
+            cur = await conn.execute(
+                "SELECT id, author_id, author_name, created_at, note, "
+                "       LEFT(content, 80) AS preview, LENGTH(content) AS length "
+                "FROM prompt_versions ORDER BY created_at DESC LIMIT %s",
+                (limit,),
+            )
+            rows = await cur.fetchall()
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, r)) for r in rows]
+
+    async def get_version(self, version_id: int) -> dict[str, Any] | None:
+        async with self.db.connection() as conn:
+            cur = await conn.execute(
+                "SELECT id, content, author_id, author_name, created_at, note "
+                "FROM prompt_versions WHERE id = %s",
+                (int(version_id),),
+            )
+            row = await cur.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cur.description]
+            return dict(zip(cols, row))
