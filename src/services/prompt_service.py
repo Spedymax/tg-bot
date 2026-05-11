@@ -27,7 +27,8 @@ class PromptService:
 
     async def bootstrap(self) -> None:
         """Seed admin and first version if tables are empty. Idempotent."""
-        admin_id = getattr(Settings, "ADMIN_USER_ID", None)
+        admin_ids = getattr(Settings, "ADMIN_IDS", None) or []
+        admin_id = admin_ids[0] if admin_ids else None
         if not admin_id:
             logger.warning("PromptService.bootstrap: ADMIN_USER_ID not set, skipping admin seed")
         else:
