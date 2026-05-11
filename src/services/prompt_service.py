@@ -140,3 +140,71 @@ class PromptService:
             return None
         note = f"rollback to v{version_id}"
         return await self.set_identity(src["content"], author_id, author_name, note=note)
+
+    async def is_admin(self, user_id: int) -> bool:
+        async with self.db.connection() as conn:
+            cur = await conn.execute(
+                "SELECT 1 FROM prompt_admins WHERE user_id = %s",
+                (int(user_id),),
+            )
+            return await cur.fetchone() is not None
+
+    async def grant(
+        self, user_id: int, username: str | None, granted_by: int
+    ) -> bool:
+        """Insert new admin. Idempotent — returns False if user is already admin."""
+        async with self.db.connection() as conn:
+            cur = await conn.execute(
+                "INSERT INTO prompt_admins (user_id, username, granted_by) "
+                "VALUES (%s, %s, %s) ON CONFLICT (user_id) DO NOTHING RETURNING user_id",
+                (int(user_id), username, int(granted_by)),
+            )
+            return await cur.fetchone() is not None
+
+    async def revoke(self, user_id: int) -> tuple[bool, str]:
+        """Remove admin. Refuses bootstrap admin (granted_by IS NULL).
+        Returns (success, message)."""
+        async with self.db.connection() as conn:
+            cur = await conn.execute(
+                "SELECT granted_by FROM prompt_admins WHERE user_id = %s",
+                (int(user_id),),
+            )
+            row = await cur.fetchone()
+            if not row:
+                return False, "не админ"
+            if row[0] is None:
+                return False, "нельзя отозвать bootstrap-админа"
+            await conn.execute(
+                "DELETE FROM prompt_admins WHERE user_id = %s",
+                (int(user_id),),
+            )
+            return True, "отозван"
+
+    async def list_admins(self) -> list[dict[str, Any]]:
+        async with self.db.connection() as conn:
+            cur = await conn.execute(
+                "SELECT user_id, username, granted_by, granted_at "
+                "FROM prompt_admins ORDER BY granted_at ASC"
+            )
+            rows = await cur.fetchall()
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, r)) for r in rows]
+
+
+prompt_service: PromptService | None = None
+
+
+def init_prompt_service(db_manager: DatabaseManager) -> PromptService:
+    """Create the global singleton. Call from main.py after db init_pool."""
+    global prompt_service
+    prompt_service = PromptService(db_manager)
+    return prompt_service
+
+
+def get_prompt_service() -> PromptService:
+    """Lazy getter — always returns the current singleton.
+    Use this in handlers instead of `from ... import prompt_service`,
+    because `from X import Y` captures Y's value at import time (None here)."""
+    if prompt_service is None:
+        raise RuntimeError("PromptService not initialized — call init_prompt_service() first")
+    return prompt_service
