@@ -408,8 +408,8 @@ class MoltbotHandlers:
         if not together_breaker.allow_request():
             raise _AIConnectionError("together circuit breaker open")
         try:
-            with open(self._IDENTITY_PATH, encoding="utf-8") as f:
-                identity = f.read()
+            from services.prompt_service import get_prompt_service
+            identity = await get_prompt_service().get_current_identity()
         except Exception:
             identity = ""
         system_msg = "\n\n".join([self._HARD_RULES, identity])
@@ -482,8 +482,8 @@ class MoltbotHandlers:
         if not self._gemini_model:
             raise _AIConnectionError("Gemini not initialized")
         try:
-            with open(self._IDENTITY_PATH, encoding="utf-8") as f:
-                identity = f.read()
+            from services.prompt_service import get_prompt_service
+            identity = await get_prompt_service().get_current_identity()
         except Exception:
             identity = ""
         # summary = _load_chat_summary()  # DISABLED: testing without long-term memory
@@ -808,8 +808,8 @@ class MoltbotHandlers:
         if not Settings.TOGETHER_API_KEY:
             raise _AIConnectionError("TOGETHER_API_KEY not set")
         try:
-            with open(self._IDENTITY_PATH, encoding="utf-8") as f:
-                identity = f.read()
+            from services.prompt_service import get_prompt_service
+            identity = await get_prompt_service().get_current_identity()
         except Exception:
             identity = ""
         # summary = _load_chat_summary()  # DISABLED: testing without long-term memory
@@ -861,8 +861,8 @@ class MoltbotHandlers:
         Used as fallback when Together.ai is unavailable."""
         import httpx as _httpx
         try:
-            with open(self._IDENTITY_PATH, encoding="utf-8") as f:
-                identity = f.read()
+            from services.prompt_service import get_prompt_service
+            identity = await get_prompt_service().get_current_identity()
         except Exception:
             identity = ""
         # summary = _load_chat_summary()  # DISABLED: testing without long-term memory
