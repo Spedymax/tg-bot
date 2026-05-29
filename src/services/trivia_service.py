@@ -76,8 +76,10 @@ class TriviaService:
         except Exception as e:
             logger.error(f"Error migrating questions table: {e}")
 
-    def generate_questions_batch_with_ai(self, count: int) -> List[Question]:
-        """Generate `count` questions in a single API call. Returns a list of Question objects."""
+    def generate_questions_batch_with_ai(self, count: int, existing_questions: Optional[List[str]] = None) -> List[Question]:
+        """Generate `count` questions in a single API call. Returns a list of Question objects.
+
+        `existing_questions` is a list of already-used question texts the model must avoid."""
         if not self.ai_client:
             logger.error("AI client not available for batch question generation")
             return []
@@ -85,7 +87,7 @@ class TriviaService:
             logger.warning("TriviaService: Gemini circuit open, skipping batch generation")
             return []
         try:
-            prompt = self._build_batch_question_prompt(count)
+            prompt = self._build_batch_question_prompt(count, existing_questions)
             response = self.ai_client.generate_content(prompt)
             gemini_breaker.record_success()
             return self._parse_batch_ai_response(response.text)
@@ -94,8 +96,12 @@ class TriviaService:
             logger.error(f"Error generating question batch with AI: {str(e)}")
             return []
 
-    def _build_batch_question_prompt(self, count: int) -> str:
-        """Build a prompt that requests `count` questions in one response."""
+    def _build_batch_question_prompt(self, count: int, existing_questions: Optional[List[str]] = None) -> str:
+        """Build a prompt that requests `count` questions in one response.
+
+        When `existing_questions` is provided, the model is shown the already-used
+        questions and instructed to avoid those topics, so generation produces
+        genuinely new material instead of rewordings of the same trivia."""
         lines = [
             f"Ты - эксперт по созданию вопросов для викторины. Создай {count} разных интересных вопросов.",
             "",
@@ -116,7 +122,32 @@ class TriviaService:
             "- Объяснение не длиннее 150 символов",
             "- НЕ добавляй нумерацию вопросов, только разделитель ===ВОПРОС===",
         ]
+
+        if existing_questions:
+            lines += [
+                "",
+                "КРИТИЧЕСКИ ВАЖНО — ЗАПРЕЩЕНО повторять темы из списка ниже.",
+                "Эти вопросы УЖЕ были в викторине. НЕ создавай их перефразировки,",
+                "не используй те же факты/ответы, бери СОВЕРШЕННО другие темы:",
+                "",
+            ]
+            lines += [f"- {q}" for q in existing_questions]
+
         return "\n".join(lines)
+
+    async def get_recent_question_texts(self, limit: int = 200) -> List[str]:
+        """Return recent question texts to feed into the generation prompt as a 'do not repeat' list."""
+        try:
+            async with self.db_manager.connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT question FROM questions ORDER BY date_added DESC LIMIT %s",
+                    (limit,)
+                )
+                rows = await cursor.fetchall()
+            return [r[0] for r in rows]
+        except Exception as e:
+            logger.error(f"Error fetching recent question texts: {e}")
+            return []
 
     def _parse_batch_ai_response(self, response_text: str) -> List[Question]:
         """Parse a batch AI response containing multiple questions."""
@@ -215,45 +246,57 @@ class TriviaService:
             logger.error(f"Error parsing AI response: {str(e)}")
             return None
 
+    def _normalize_text(self, text: str) -> str:
+        """Lowercase, strip punctuation and collapse whitespace for robust comparison."""
+        if not text:
+            return ""
+        cleaned = text.lower()
+        for ch in '?!.,:;«»"\'()-—':
+            cleaned = cleaned.replace(ch, ' ')
+        return ' '.join(cleaned.split())
+
     async def is_duplicate_question(self, question_text: str, correct_answer: str) -> bool:
-        """Check if similar question already exists based on answer and keywords."""
+        """Check if a similar question already exists.
+
+        Catches rewordings of previously-asked questions even when the correct
+        answer is phrased differently: we compare every existing question by
+        keyword similarity, not only those whose answer matches exactly."""
         try:
+            norm_question = self._normalize_text(question_text)
+            norm_answer = self._normalize_text(correct_answer)
+            question_keywords = self._extract_keywords(question_text)
+
             async with self.db_manager.connection() as conn:
-                # Check by exact answer match
                 cursor = await conn.execute(
-                    "SELECT question FROM questions WHERE LOWER(correct_answer) = LOWER(%s)",
-                    (correct_answer,)
+                    "SELECT question, correct_answer FROM questions"
                 )
-                existing_questions = await cursor.fetchall()
+                existing = await cursor.fetchall()
 
-                if existing_questions:
-                    # Check if the question is about the same topic using keywords
-                    question_keywords = self._extract_keywords(question_text)
+            for existing_question, existing_answer in existing:
+                # Check 1: exact (normalized) question match
+                if self._normalize_text(existing_question) == norm_question:
+                    logger.info(f"Duplicate detected (exact normalized question): '{question_text}'")
+                    return True
 
-                    for (existing_question,) in existing_questions:
-                        existing_keywords = self._extract_keywords(existing_question)
+                existing_keywords = self._extract_keywords(existing_question)
+                similarity = self._calculate_similarity(question_keywords, existing_keywords)
+                shared = question_keywords.intersection(existing_keywords)
+                same_answer = self._normalize_text(existing_answer) == norm_answer
 
-                        # Multiple checks for duplicates
-                        similarity = self._calculate_similarity(question_keywords, existing_keywords)
+                # Check 2: very high keyword similarity → reworded same question,
+                # regardless of how the answer is phrased
+                if similarity > 0.7:
+                    logger.info(f"Duplicate detected by keyword similarity ({similarity:.2f}): '{question_text}' similar to '{existing_question}'")
+                    return True
 
-                        # Check 1: High keyword similarity (stricter threshold since answers already match)
-                        if similarity > 0.7:  # Increased from 0.5 to 0.7
-                            logger.info(f"Duplicate detected by keyword similarity ({similarity:.2f}): '{question_text}' similar to '{existing_question}'")
-                            return True
+                # Check 3: same answer + meaningful topic overlap → same trivia
+                if same_answer and (similarity > 0.4 or len(shared) >= 2):
+                    logger.info(f"Duplicate detected (same answer + overlap {shared}): '{question_text}' similar to '{existing_question}'")
+                    return True
 
-                        # Check 2: Look for key shared concepts (require more matches)
-                        shared_important_words = question_keywords.intersection(existing_keywords)
-                        if len(shared_important_words) >= 3:  # Increased from 2 to 3 words
-                            logger.info(f"Duplicate detected by shared concepts ({shared_important_words}): '{question_text}' similar to '{existing_question}'")
-                            return True
-
-                # Check for exact question match (just in case)
-                cursor = await conn.execute(
-                    "SELECT 1 FROM questions WHERE LOWER(question) = LOWER(%s)",
-                    (question_text,)
-                )
-                if await cursor.fetchone():
-                    logger.info(f"Exact duplicate question found: '{question_text}'")
+                # Check 4: strong concept overlap on the question itself
+                if len(shared) >= 3:
+                    logger.info(f"Duplicate detected by shared concepts ({shared}): '{question_text}' similar to '{existing_question}'")
                     return True
 
             return False
