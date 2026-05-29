@@ -179,7 +179,8 @@ class QuizScheduler:
         added = 0
         skipped = 0
         try:
-            questions = self.trivia_service.generate_questions_batch_with_ai(count)
+            existing_questions = await self.trivia_service.get_recent_question_texts(200)
+            questions = self.trivia_service.generate_questions_batch_with_ai(count, existing_questions)
             if not questions:
                 logger.error("Batch generation returned no questions")
                 return {"added": 0, "skipped": count}
