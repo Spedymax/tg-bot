@@ -1561,7 +1561,7 @@ class MoltbotHandlers:
             logger.info(f"MoltBot: history reset for ALL chats ({len(all_chat_ids)}) by {message.from_user.id}")
             await message.reply(f"⚙️ Контекст сброшен во всех чатах ({len(all_chat_ids)}). Чистый лист.")
 
-        @router.message(Command(commands=['память', 'memory']))
+        @router.message(Command(commands=['memory']))
         async def handle_memory_view(message: Message):
             if message.from_user.id not in Settings.ADMIN_IDS:
                 await message.reply("У вас нет доступа.")
@@ -1569,7 +1569,7 @@ class MoltbotHandlers:
             mem = _load_chat_summary()
             await message.reply(f"🧠 Память чата ({len(mem)} симв.):\n\n{mem}" if mem else "🧠 Память пуста.")
 
-        @router.message(Command(commands=['память_обнови', 'memory_refresh']))
+        @router.message(Command(commands=['memory_refresh']))
         async def handle_memory_refresh(message: Message):
             if message.from_user.id not in Settings.ADMIN_IDS:
                 await message.reply("У вас нет доступа.")
@@ -1578,7 +1578,7 @@ class MoltbotHandlers:
             self._last_summary_update = datetime.now(timezone.utc)
             asyncio.create_task(self._update_summary())
 
-        @router.message(Command(commands=['память_очисти', 'memory_wipe']))
+        @router.message(Command(commands=['memory_clear']))
         async def handle_memory_wipe(message: Message):
             if message.from_user.id not in Settings.ADMIN_IDS:
                 await message.reply("У вас нет доступа.")
