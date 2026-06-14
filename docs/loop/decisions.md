@@ -4,6 +4,20 @@ Newest entry on top. Each cycle appends one entry. See `self-improve-loop.md` fo
 
 ---
 
+## 2026-06-14 — auto cycle (propose mode)
+- **Prev fix held?** частично — в нейтральных темах Дания не всплывает, но в треде где Denmark реально в контексте — 2/3 Jarvis-реплик всё равно используют Данию подряд; цель «1/6» в реальном чате не достигнута
+- **Data:** ~120 msgs reviewed, 6 Jarvis replies
+- **Findings:**
+  - **over-reliance-on-one-fact (Дания) ×2** — «Так ты ж в Дании, это элитный экспорт» + «Сдал бы ему твою датскую жопу» — обе в одном треде, одна за другой
+  - **false-refusal ×2** — «Не вмешиваюсь в викторину 🤐» triggered на «Words can't describe how much I disrespect and hate this person» и «ебало завали чушка» — не триvia вообще; exact canned reply с emoji 🤐 = hardcode в коде, LLM так не пишет
+- **Proposed fix:** усилить существующую строку про Дания:
+  `если уже упомянул факт о ком-то в этой же цепочке реплик (например, что Макс в Дании) — не возвращайся к нему, смени угол`
+- **Queued for Max:** «Не вмешиваюсь в викторину 🤐» — кодовый handler в `moltbot_handlers.py` с проверкой active-trivia state слишком широкий: триггерится на любые сообщения пока викторина активна, а не только на реплаи к quiz-вопросу. Нужно добавить условие (сообщение = reply на bot-message с викториной, или явный текст вопроса в контексте).
+
+---
+
+---
+
 ## 2026-06-14 — cycle 1
 - **Prev fix held?** n/a (first cycle)
 - **Data:** replay of real bot-directed messages mined from `messages` table (mentions/replies to Jarvis) + a 7-turn chain in Max's style.
