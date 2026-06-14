@@ -12,7 +12,8 @@ Newest entry on top. Each cycle appends one entry. See `self-improve-loop.md` fo
   - **false-refusal ×2** — «Не вмешиваюсь в викторину 🤐» triggered на «Words can't describe how much I disrespect and hate this person» и «ебало завали чушка» — не триvia вообще; exact canned reply с emoji 🤐 = hardcode в коде, LLM так не пишет
 - **Proposed fix:** усилить существующую строку про Дания:
   `если уже упомянул факт о ком-то в этой же цепочке реплик (например, что Макс в Дании) — не возвращайся к нему, смени угол`
-- **Queued for Max:** «Не вмешиваюсь в викторину 🤐» — кодовый handler в `moltbot_handlers.py` с проверкой active-trivia state слишком широкий: триггерится на любые сообщения пока викторина активна, а не только на реплаи к quiz-вопросу. Нужно добавить условие (сообщение = reply на bot-message с викториной, или явный текст вопроса в контексте).
+- **Queued for Max:** ~~«Не вмешиваюсь в викторину 🤐» = hardcoded handler~~ → **FALSE ALARM, verified.** No such code (grep: only `"🤐 AI отказался отвечать"` generic refusal-fallback at moltbot_handlers.py:1494/1650/1716). All «Не вмешиваюсь» replies are dated 06-10..06-13 — BEFORE the v8 deploy; they were v7-prompt-driven (v7 ordered that exact phrase + emoji). Already fixed by v8/v9. Root cause of the false alarm: the loop analyzed stale pre-deploy data → loop fixed (data window now 36h).
+- **Applied (Max approved 2026-06-14):** persona **v10** — «если уже упомянул факт о ком-то в этой цепочке, не возвращайся к нему, смени угол». NEXT CYCLE must verify this held (Дания no longer repeats within a thread).
 
 ---
 
