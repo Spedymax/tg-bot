@@ -116,40 +116,8 @@ class AdminHandlers:
             logger.error(f"Error getting recent messages: {e}")
             return []
 
-    def _analyze_messages_with_gemini(self, messages):
-        """Analyze messages using Gemini AI"""
-        if not self.gemini_model:
-            return "❌ Gemini API не настроен. Проверьте GEMINI_API_KEY в .env файле."
-
-        if not messages:
-            return "📭 За последние 12 часов не было сообщений для анализа."
-
-        try:
-            messages_text = "\n".join(messages)
-            prompt = f"""Ты бот-анализатор чата. Тебе дан список сообщений от пользователей за последние 12 часов.
-
-Твоя задача: сделать краткую сводку того, о чём была речь в этих сообщениях.
-
-Требования:
-1. Начни сообщение с: "За последние 12 часов речь шла о том что:"
-2. Раздели темы на отдельные абзацы
-3. Используй эмодзи для наглядности
-4. Будь кратким и информативным
-5. Если были какие-то забавные моменты - упомяни их
-6. Пиши на русском языке
-
-Сообщения:
-{messages_text}
-"""
-            response = self.gemini_model.generate_content(prompt)
-            return response.text
-
-        except Exception as e:
-            logger.error(f"Error analyzing messages with Gemini: {e}")
-            return f"❌ Ошибка при анализе сообщений: {str(e)}"
-
     def _analyze_messages_with_qwen(self, messages):
-        """Analyze messages using Qwen via OpenClaw."""
+        """Analyze messages using the local Ollama Qwen model (192.168.1.3:11434)."""
         if not messages:
             return "📭 За последние 12 часов не было сообщений для анализа."
 
