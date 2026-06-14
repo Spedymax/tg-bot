@@ -15,18 +15,21 @@ mkdir -p "$REPO/.omc"
 ts() { date "+%F %T"; }
 echo "[$(ts)] loop start" >> "$RUNLOG"
 
-# 1. pull RECENT messages only (last 36h — avoid re-analyzing pre-deploy/already-fixed behavior)
-DATA=$($SSH "export LC_ALL=C; echo '123' | sudo -S -u postgres psql -d server-tg-pisunchik -t -A -F'|' -c \"SELECT name, message_text FROM messages WHERE timestamp >= NOW() - INTERVAL '36 hours' ORDER BY timestamp ASC LIMIT 400;\"" 2>/dev/null | grep -vi 'locale\|\[sudo\]')
+# 1. pull messages SINCE the current persona was deployed — so the loop only ever judges
+#    the CURRENT bot (no stale pre-fix behavior). Capped at 7 days so a long-stable persona
+#    doesn't drag in months of history.
+CUTOFF=$($SSH "export LC_ALL=C; echo '123' | sudo -S -u postgres psql -d server-tg-pisunchik -t -A -c \"SELECT created_at FROM prompt_versions ORDER BY created_at DESC LIMIT 1;\"" 2>/dev/null | grep -vi 'locale\|\[sudo\]' | sed -n '1s/^ *//p')
+DATA=$($SSH "export LC_ALL=C; echo '123' | sudo -S -u postgres psql -d server-tg-pisunchik -t -A -F'|' -c \"SELECT name, message_text FROM messages WHERE timestamp >= GREATEST((SELECT created_at FROM prompt_versions ORDER BY created_at DESC LIMIT 1), NOW() - INTERVAL '7 days') ORDER BY timestamp ASC LIMIT 400;\"" 2>/dev/null | grep -vi 'locale\|\[sudo\]')
 if [ -z "$DATA" ]; then
-  echo "[$(ts)] no recent messages, quiet cycle, skip" >> "$RUNLOG"; exit 0
+  echo "[$(ts)] no messages since persona deploy ($CUTOFF), quiet cycle, skip" >> "$RUNLOG"; exit 0
 fi
 
 # 2. previous decision-log entry (state)
 PREV=$(awk '/^## /{c++} c==1{print} c==2{exit}' "$LOG")
 
 # 3. analyze (claude as pure analyst — no tools)
-REPORT=$(printf '%s\n\n=== PREVIOUS DECISION ===\n%s\n\n=== RECENT MESSAGES (newest first, name|text; Jarvis=bot) ===\n%s\n' \
-  "$(cat "$REPO/docs/loop/analysis-prompt.md")" "$PREV" "$DATA" \
+REPORT=$(printf '%s\n\n=== PREVIOUS DECISION ===\n%s\n\n=== MESSAGES SINCE CURRENT PERSONA DEPLOY (%s) — chronological, name|text; Jarvis=bot. EVERY Jarvis reply below is the CURRENT persona, so anything wrong here is current behavior (not stale). ===\n%s\n' \
+  "$(cat "$REPO/docs/loop/analysis-prompt.md")" "$PREV" "$CUTOFF" "$DATA" \
   | "$CLAUDE" -p --model sonnet 2>>"$RUNLOG")
 if [ -z "$REPORT" ]; then echo "[$(ts)] empty report, abort" >> "$RUNLOG"; exit 1; fi
 
