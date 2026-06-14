@@ -375,10 +375,16 @@ class MoltbotHandlers:
             return []
 
     async def _together_post(self, payload: dict, timeout: float) -> dict:
-        """POST to Together.ai with retry on 5xx and transient network errors.
-        3 attempts total with 1.5s/3s backoff. Returns parsed JSON or raises last error."""
+        """POST to Together.ai (streaming) with retry on 5xx and transient errors.
+
+        Always streams — some models (e.g. Qwen3.7-Max) only support streaming,
+        and it's harmless for the rest — then accumulates the SSE deltas back into
+        the standard non-streaming response shape so callers stay unchanged.
+        3 attempts total with 1.5s/3s backoff. Returns
+        {"choices": [{"message": {"content": <full text>}}]} or raises last error."""
         url = "https://api.together.xyz/v1/chat/completions"
         headers = {"Authorization": f"Bearer {Settings.TOGETHER_API_KEY}"}
+        payload = {**payload, "stream": True}
         delays = [0, 1.5, 3.0]
         last_exc: Exception | None = None
         async with httpx.AsyncClient() as client:
@@ -386,15 +392,33 @@ class MoltbotHandlers:
                 if delay:
                     await asyncio.sleep(delay)
                 try:
-                    r = await client.post(url, headers=headers, json=payload, timeout=timeout)
-                    if r.status_code in (429, 502, 503, 504):
-                        last_exc = httpx.HTTPStatusError(
-                            f"Together.ai {r.status_code}", request=r.request, response=r
-                        )
-                        logger.warning(f"MoltBot: Together.ai {r.status_code}, retry {attempt}/3")
-                        continue
-                    r.raise_for_status()
-                    return r.json()
+                    async with client.stream("POST", url, headers=headers,
+                                             json=payload, timeout=timeout) as r:
+                        if r.status_code in (429, 502, 503, 504):
+                            await r.aread()
+                            last_exc = httpx.HTTPStatusError(
+                                f"Together.ai {r.status_code}", request=r.request, response=r
+                            )
+                            logger.warning(f"MoltBot: Together.ai {r.status_code}, retry {attempt}/3")
+                            continue
+                        if r.status_code != 200:
+                            body = (await r.aread()).decode(errors="replace")[:300]
+                            raise _AIConnectionError(f"Together.ai {r.status_code}: {body}")
+                        chunks: list[str] = []
+                        async for line in r.aiter_lines():
+                            if not line or not line.startswith("data: "):
+                                continue
+                            data = line[6:]
+                            if data.strip() == "[DONE]":
+                                break
+                            try:
+                                delta = json.loads(data)["choices"][0].get("delta") or {}
+                                piece = delta.get("content")
+                                if piece:
+                                    chunks.append(piece)
+                            except Exception:
+                                continue
+                        return {"choices": [{"message": {"content": "".join(chunks)}}]}
                 except (httpx.TransportError, httpx.TimeoutException) as e:
                     last_exc = e
                     logger.warning(f"MoltBot: Together.ai transient error ({e!r}), retry {attempt}/3")
