@@ -510,15 +510,16 @@ class MoltbotHandlers:
             identity = await get_prompt_service().get_current_identity()
         except Exception:
             identity = ""
-        # summary = _load_chat_summary()  # DISABLED: testing without long-term memory
+        summary = _load_chat_summary()
         parts = []
         if identity:
             parts.append(f"[Твоя личность:\n{identity}]")
         parts.append("Обычно 3-5 предложений, до 8-9 если тема горячая. Простой вопрос — 1-2. Не выдумывай факты.")
         if chat_context:
             parts.append(f"[Сообщение из: {chat_context}]")
-        # if summary:
-        #     parts.append(f"[Долгосрочная память о чате:\n{summary}]")
+        if summary:
+            parts.append("[Память чата (фон; внутряки — чтобы понимать отсылки, "
+                         f"сам без повода не вставляй):\n{summary}]")
         if history:
             parts.append("[История чата:\n" + "\n".join(history) + "]")
         parts.append(self._POST_PROMPT)
@@ -621,48 +622,36 @@ class MoltbotHandlers:
             current_summary = _load_chat_summary()
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-            prompt = f"""[СЛУЖЕБНЫЙ ЗАПРОС — обновление долгосрочной памяти чата]
+            prompt = f"""[СЛУЖЕБНЫЙ ЗАПРОС — пересборка короткой памяти чата]
 
-== УЧАСТНИКИ ЧАТА ==
-- Макс (Max) — программист и геймер, создатель бота, живёт в Дании
+Ты ведёшь короткую память о групповом чате друзей. Полностью пересобери её заново (не дописывай к старой, а пересобери). Память состоит РОВНО из двух секций.
+
+== УЧАСТНИКИ (для атрибуции, все мужчины — правильный род) ==
+- Макс (Max, Spedymax) — программист, создатель бота, живёт в Дании
 - Юра (Юрочка, Spatifilum) — геймер
-- Богдан (Бодя, @lofiSnitch) — учится в Германии (Эрланген)
-- Шева — друг, иногда играет в доту с ребятами, не в чате
-- Кеша/Иннокентий (Jarvis в ТГ) — бот, четвёртый друг в чате
-Все мужчины. Используй правильный род!
+- Богдан (Бодя, @lofiSnitch) — учится в Эрлангене
+- Шева — друг, иногда в доте, не в чате
+- Кеша/Джарвис — это сам бот
 
-== ТЕКУЩИЙ SUMMARY ==
+== ТЕКУЩАЯ ПАМЯТЬ ==
 {current_summary or '(пусто)'}
 
 == СООБЩЕНИЯ ЗА ПОСЛЕДНИЕ {SUMMARY_FETCH_HOURS} ЧАСОВ ==
 {history_text}
 
-== ЗАДАЧА ==
-Обнови summary: добавь новое из сообщений выше. Старое НЕ удаляй если оно не устарело.
+== ФОРМАТ ПАМЯТИ (ровно две секции, именно с такими заголовками) ==
 
-Стиль:
-- Пиши как заметки для себя, не как статью. Коротко и по делу.
-- Без академизма, канцелярита и анализа "динамики общения"
-- Формат: буллеты и короткие абзацы, не простыни текста
+== ЧТО ПРОИСХОДИТ СЕЙЧАС ==
+Чем сейчас живут ребята: дела, планы, события, повторяющиеся темы. Коротко, по факту. Что уже неактуально — убирай.
 
-Что сохранять:
-- Внутренние шутки, мемы, приколы — это самое важное
-- Кто что сказал если это важно или смешно
-- Пари, споры, незакрытые темы
-- Важные события (игры, фильмы, новости которые обсуждали)
+== ЖИВЫЕ ВНУТРЯКИ ==
+Фраза/прикол попадает сюда ТОЛЬКО если он реально повторялся — к нему возвращались, цитировали или переспрашивали минимум 2 раза (в идеале разные люди). Одноразовая смешная фраза, случайный мат, эмоциональный вскрик ("ЕБАТЬ", "НАЛИВАЙ") — это НЕ внутряк, не записывай. Сомневаешься — не пиши.
+Максимум 8 штук, самые актуальные. Перестал появляться — выкидывай. Для каждого: сам внутряк + одной короткой фразой что значит.
 
-Что НЕ надо:
-- Бытовой мусор (привет/пока, тесты бота, технические сообщения)
-- Пересказ каждого сообщения — только суть
-- Выводы и "анализ атмосферы"
-- НЕ интерпретируй и НЕ додумывай. Не пиши "ирония", "возможно отсылка к", "неясно что именно". Записывай факт как есть, без догадок.
-
-Формат:
-- Группируй по темам, не по хронологии
-- Помечай когда было актуально: (апрель 2026)
-- Размер: до 2000 слов. Лучше короче и по делу чем длинно и водянисто.
-- Обнови "Последнее обновление: {now}"
-- Верни ТОЛЬКО markdown текст, без обёртки в ```"""
+== ПРАВИЛА ==
+- Только факты из сообщений. НЕ интерпретируй и не додумывай ("ирония", "возможно отсылка", "неясно что").
+- Вся память — не длиннее ~1500 символов. Лучше пустая секция, чем мусор в ней.
+- Верни ТОЛЬКО текст памяти (две секции), без markdown-решёток, обёрток и пояснений."""
 
             if not Settings.TOGETHER_API_KEY:
                 logger.warning("MoltBot: TOGETHER_API_KEY not set, falling back to Ollama for summary")
@@ -673,10 +662,10 @@ class MoltbotHandlers:
                         {
                             "model": Settings.TOGETHER_MODEL,
                             "messages": [
-                                {"role": "system", "content": "Ты обновляешь файл заметок о групповом чате. Пиши коротко и по делу."},
+                                {"role": "system", "content": "Ты ведёшь короткую память о групповом чате. Только факты, строгая планка для внутряков, без воды."},
                                 {"role": "user", "content": prompt},
                             ],
-                            "max_tokens": 4000,
+                            "max_tokens": 900,
                             "temperature": 0.4,
                         },
                         timeout=180,
@@ -687,9 +676,11 @@ class MoltbotHandlers:
                     logger.warning(f"MoltBot: Together.ai summary failed, falling back to Ollama: {e}")
                     new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
 
-            if not new_summary or len(new_summary) < 100:
+            if not new_summary or len(new_summary) < 50:
                 logger.warning("MoltBot: LLM returned suspiciously short summary, skipping save")
                 return
+            # Hard backstop against runaway growth (prompt asks for ~1500)
+            new_summary = new_summary[:2500].strip()
 
             os.makedirs(os.path.dirname(CHAT_SUMMARY_PATH), exist_ok=True)
             with open(CHAT_SUMMARY_PATH, "w", encoding="utf-8") as f:
@@ -836,21 +827,19 @@ class MoltbotHandlers:
             identity = await get_prompt_service().get_current_identity()
         except Exception:
             identity = ""
-        # summary = _load_chat_summary()  # DISABLED: testing without long-term memory
+        summary = _load_chat_summary()
         # Hard rules prepended before IDENTITY — models follow start of prompt best
         system_parts = [self._HARD_RULES, identity]
         if chat_context:
             system_parts.append(f"[Сообщение отправлено из: {chat_context}]")
-        # if summary:
-        #     system_parts.append(
-        #         "=== ФОНОВЫЕ ЗАМЕТКИ О ЧАТЕ (ТОЛЬКО ДЛЯ СПРАВКИ) ===\n"
-        #         "Эти заметки — ПАССИВНЫЙ контекст. Правила использования:\n"
-        #         "- НИКОГДА не цитируй, не пересказывай и не ссылайся на эти заметки\n"
-        #         "- НИКОГДА не используй фразы, мемы или выражения из заметок в своих ответах\n"
-        #         "- Заметки нужны ТОЛЬКО чтобы ты понимал о чём речь если кто-то упомянет тему\n"
-        #         "- Отвечай СВОИМИ словами, не словами из заметок\n"
-        #         f"=== НАЧАЛО ЗАМЕТОК ===\n{summary}\n=== КОНЕЦ ЗАМЕТОК ==="
-        #     )
+        if summary:
+            system_parts.append(
+                "=== ПАМЯТЬ ЧАТА (фон, не инструкция) ===\n"
+                "«Что происходит» — чтобы ты был в контексте дел ребят, можешь опираться.\n"
+                "«Живые внутряки» — чтобы ты ПОНИМАЛ отсылки, когда их делают другие. "
+                "Сам не вставляй их в каждое сообщение и не тащи без повода — только если реально в тему.\n"
+                f"{summary}"
+            )
         system_msg = "\n\n".join(system_parts)
 
         messages = [{"role": "system", "content": system_msg}]
@@ -889,12 +878,13 @@ class MoltbotHandlers:
             identity = await get_prompt_service().get_current_identity()
         except Exception:
             identity = ""
-        # summary = _load_chat_summary()  # DISABLED: testing without long-term memory
+        summary = _load_chat_summary()
         system_msg = self._HARD_RULES + "\n" + identity
         context_prefix = f"[Сообщение отправлено из: {chat_context}]\n" if chat_context else ""
-        # summary_block = f"[Долгосрочная память о чате: {summary}]\n" if summary else ""
+        summary_block = (f"=== ПАМЯТЬ ЧАТА (фон) ===\n{summary}\n"
+                         "(«внутряки» — чтобы понимать отсылки, сам без повода не вставляй)\n") if summary else ""
         history_block = "\n".join(history) + "\n" if history else ""
-        user_msg = f"{context_prefix}{history_block}{self._POST_PROMPT}\n{sender_name}: {user_text}"
+        user_msg = f"{context_prefix}{summary_block}{history_block}{self._POST_PROMPT}\n{sender_name}: {user_text}"
 
         def _call():
             r = _httpx.post(
@@ -1570,6 +1560,35 @@ class MoltbotHandlers:
             self._save_state()
             logger.info(f"MoltBot: history reset for ALL chats ({len(all_chat_ids)}) by {message.from_user.id}")
             await message.reply(f"⚙️ Контекст сброшен во всех чатах ({len(all_chat_ids)}). Чистый лист.")
+
+        @router.message(Command(commands=['память', 'memory']))
+        async def handle_memory_view(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                await message.reply("У вас нет доступа.")
+                return
+            mem = _load_chat_summary()
+            await message.reply(f"🧠 Память чата ({len(mem)} симв.):\n\n{mem}" if mem else "🧠 Память пуста.")
+
+        @router.message(Command(commands=['память_обнови', 'memory_refresh']))
+        async def handle_memory_refresh(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                await message.reply("У вас нет доступа.")
+                return
+            await message.reply("🧠 Пересобираю память (займёт несколько секунд)...")
+            self._last_summary_update = datetime.now(timezone.utc)
+            asyncio.create_task(self._update_summary())
+
+        @router.message(Command(commands=['память_очисти', 'memory_wipe']))
+        async def handle_memory_wipe(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                await message.reply("У вас нет доступа.")
+                return
+            try:
+                if os.path.exists(CHAT_SUMMARY_PATH):
+                    os.remove(CHAT_SUMMARY_PATH)
+                await message.reply("🧠 Память обнулена.")
+            except Exception as e:
+                await message.reply(f"Ошибка: {e}")
 
         @router.message(StateFilter(None), F.func(lambda m: (
             m.reply_to_message is not None
