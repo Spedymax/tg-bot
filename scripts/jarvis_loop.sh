@@ -7,13 +7,25 @@ set -uo pipefail
 REPO="/Users/mso/PycharmProjects/tg-bot"
 CLAUDE="/Users/mso/.local/bin/claude"
 PY="/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"
-SSH="ssh -i $HOME/.ssh/mac-max -o ConnectTimeout=20 spedymax@192.168.1.35"
+# Reach the server via CloudFlare Access (ssh.spedymax.org, headless service token in
+# ~/.ssh/cf-env via the ProxyCommand in ~/.ssh/config) — NOT the LAN IP. The LAN path only
+# worked when this Mac happened to be on the home network at 13:00; off-LAN it timed out and
+# the empty result was silently mistaken for "no new messages" (see connectivity guard below).
+SSH="ssh -i $HOME/.ssh/mac-max -o ConnectTimeout=30 -o BatchMode=yes spedymax@ssh.spedymax.org"
 LOG="$REPO/docs/loop/decisions.md"
 RUNLOG="$REPO/.omc/loop-run.log"
 cd "$REPO" || exit 1
 mkdir -p "$REPO/.omc"
 ts() { date "+%F %T"; }
 echo "[$(ts)] loop start" >> "$RUNLOG"
+
+# 0. connectivity guard — a failed SSH (server down, CF Access hiccup, etc.) must NOT be
+#    mistaken for "no new messages". Verify the server is reachable BEFORE trusting an empty
+#    query result; perl alarm hard-bounds a hung handshake (macOS has no `timeout`).
+if ! perl -e 'alarm 50; exec @ARGV' $SSH "true" 2>>"$RUNLOG"; then
+  echo "[$(ts)] server UNREACHABLE (ssh/CF Access failed) — aborting, NOT a quiet cycle" >> "$RUNLOG"
+  exit 1
+fi
 
 # 1. pull messages SINCE the current persona was deployed — so the loop only ever judges
 #    the CURRENT bot (no stale pre-fix behavior). Capped at 7 days so a long-stable persona
@@ -62,7 +74,7 @@ git commit -q -m "loop: auto cycle decision-log entry ($(date +%F))" >/dev/null 
 # 7. notify Max (DM via Jarvis token on the server). Digest goes via a file to avoid
 #    any shell-escaping of its content (backticks, quotes, $).
 printf '%s' "$DIGEST" > /tmp/loop_digest.txt
-scp -i "$HOME/.ssh/mac-max" -o ConnectTimeout=20 /tmp/loop_digest.txt spedymax@192.168.1.35:/tmp/loop_digest.txt >/dev/null 2>&1
+scp -i "$HOME/.ssh/mac-max" -o ConnectTimeout=30 -o BatchMode=yes /tmp/loop_digest.txt spedymax@ssh.spedymax.org:/tmp/loop_digest.txt >/dev/null 2>&1
 $SSH "cd /home/spedymax/tg-bot; TOKEN=\$(grep '^TELEGRAM_BOT_TOKEN=' .env | cut -d= -f2- | tr -d '\"'\"'\"' \r'); curl -s \"https://api.telegram.org/bot\$TOKEN/sendMessage\" -d chat_id=741542965 --data-urlencode 'text@/tmp/loop_digest.txt' -o /dev/null -w 'tg %{http_code}\n'" >> "$RUNLOG" 2>&1
 
 echo "[$(ts)] loop done" >> "$RUNLOG"
