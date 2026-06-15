@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from aiogram import Router, F, Bot
 from aiogram.filters import Command, StateFilter
 from aiogram.types import Message
+from aiogram.utils.chat_action import ChatActionSender
 
 from config.settings import Settings
 from services.circuit_breaker import ollama_breaker, together_breaker
@@ -323,21 +324,23 @@ class MoltbotHandlers:
         try:
             if message.text and message.from_user and not message.from_user.is_bot:
                 name = message.from_user.first_name or message.from_user.username or 'Аноним'
+                reply_to = message.reply_to_message.message_id if message.reply_to_message else None
                 await self.db.execute_query(
-                    "INSERT INTO messages (user_id, message_text, timestamp, name, message_id) "
-                    "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s)",
-                    (message.from_user.id, message.text, name, message.message_id),
+                    "INSERT INTO messages (user_id, message_text, timestamp, name, message_id, reply_to_message_id) "
+                    "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s, %s)",
+                    (message.from_user.id, message.text, name, message.message_id, reply_to),
                 )
         except Exception as e:
             logger.warning(f"MoltBot: failed to store user message: {e}")
 
-    async def _store_bot_reply(self, text: str, msg_id: int | None = None):
-        """Store Jarvis bot reply in the messages table."""
+    async def _store_bot_reply(self, text: str, msg_id: int | None = None, reply_to: int | None = None):
+        """Store Jarvis bot reply in the messages table.
+        `reply_to` = message_id of the user message this reply answers (for reply-thread context)."""
         try:
             await self.db.execute_query(
-                "INSERT INTO messages (user_id, message_text, timestamp, name, message_id) "
-                "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s)",
-                (0, text, "Jarvis", msg_id),
+                "INSERT INTO messages (user_id, message_text, timestamp, name, message_id, reply_to_message_id) "
+                "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s, %s)",
+                (0, text, "Jarvis", msg_id, reply_to),
             )
         except Exception as e:
             logger.warning(f"MoltBot: failed to store bot reply: {e}")
@@ -1486,10 +1489,11 @@ class MoltbotHandlers:
                 history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
             try:
-                reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, history)
+                async with ChatActionSender.typing(bot=self.bot, chat_id=message.chat.id):
+                    reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, history)
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
-                    await self._store_bot_reply(reply, sent.message_id)
+                    await self._store_bot_reply(reply, sent.message_id, reply_to=message.message_id)
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
@@ -1642,10 +1646,11 @@ class MoltbotHandlers:
                 history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
 
             try:
-                reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, history)
+                async with ChatActionSender.typing(bot=self.bot, chat_id=message.chat.id):
+                    reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, history)
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
-                    await self._store_bot_reply(reply, sent.message_id)
+                    await self._store_bot_reply(reply, sent.message_id, reply_to=message.message_id)
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
@@ -1707,10 +1712,11 @@ class MoltbotHandlers:
             combined_text = "\n".join(parts)
 
             try:
-                reply = await self._ask_moltbot_routed(sender_name, combined_text, chat_context, history)
+                async with ChatActionSender.typing(bot=self.bot, chat_id=message.chat.id):
+                    reply = await self._ask_moltbot_routed(sender_name, combined_text, chat_context, history)
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
-                    await self._store_bot_reply(reply, sent.message_id)
+                    await self._store_bot_reply(reply, sent.message_id, reply_to=message.message_id)
                     self._photo_context[sent.message_id] = message.photo[-1].file_id
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
