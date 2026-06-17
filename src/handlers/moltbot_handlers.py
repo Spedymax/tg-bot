@@ -648,11 +648,12 @@ class MoltbotHandlers:
             history_text = "\n".join(messages)
 
             current_summary = _load_chat_summary()
+            current_lore = _load_chat_lore()
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
             prompt = f"""[СЛУЖЕБНЫЙ ЗАПРОС — пересборка короткой памяти чата]
 
-Ты ведёшь короткую память о групповом чате друзей. Полностью пересобери её заново (не дописывай к старой, а пересобери). Память состоит РОВНО из двух секций.
+Ты ведёшь короткую память о групповом чате друзей. Полностью пересобери её заново (не дописывай к старой, а пересобери). Память состоит из двух секций (+ опциональная третья — НА ЗАКРЕП).
 
 == УЧАСТНИКИ (для атрибуции, все мужчины — правильный род) ==
 - Макс (Max, Spedymax) — программист, создатель бота, живёт в Дании
@@ -664,10 +665,13 @@ class MoltbotHandlers:
 == ТЕКУЩАЯ ПАМЯТЬ ==
 {current_summary or '(пусто)'}
 
+== УЖЕ ЗАКРЕПЛЕНО НАВСЕГДА (НЕ дублируй это в секции НА ЗАКРЕП) ==
+{current_lore or '(пусто)'}
+
 == СООБЩЕНИЯ ЗА ПОСЛЕДНИЕ {SUMMARY_FETCH_HOURS} ЧАСОВ ==
 {history_text}
 
-== ФОРМАТ ПАМЯТИ (ровно две секции, именно с такими заголовками) ==
+== ФОРМАТ ПАМЯТИ (именно такие заголовки) ==
 
 == ЧТО ПРОИСХОДИТ СЕЙЧАС ==
 Чем сейчас живут ребята: дела, планы, события, повторяющиеся темы. Коротко, по факту. Что уже неактуально — убирай.
@@ -676,10 +680,13 @@ class MoltbotHandlers:
 Фраза/прикол попадает сюда ТОЛЬКО если он реально повторялся — к нему возвращались, цитировали или переспрашивали минимум 2 раза (в идеале разные люди). Одноразовая смешная фраза, случайный мат, эмоциональный вскрик ("ЕБАТЬ", "НАЛИВАЙ") — это НЕ внутряк, не записывай. Сомневаешься — не пиши.
 Максимум 8 штук, самые актуальные. Перестал появляться — выкидывай. Для каждого: сам внутряк + одной короткой фразой что значит.
 
+== НА ЗАКРЕП ==
+Сюда — ТОЛЬКО устоявшаяся легенда чата: внутряк/персонаж/мем, который всплывает СНОВА И СНОВА через разные дни (не просто пару раз за сегодня), настолько свой и живучий, что забыть его было бы потерей. Если такого нет — оставь секцию ПУСТОЙ (это норма). Максимум 1-2 за раз. НЕ дублируй то, что уже в «УЖЕ ЗАКРЕПЛЕНО». НИКОГДА не закрепляй ничего про несовершеннолетних или реальное насилие. Каждый — одной строкой: суть + что значит.
+
 == ПРАВИЛА ==
 - Только факты из сообщений. НЕ интерпретируй и не додумывай ("ирония", "возможно отсылка", "неясно что").
-- Вся память — не длиннее ~1500 символов. Лучше пустая секция, чем мусор в ней.
-- Верни ТОЛЬКО текст памяти (две секции), без markdown-решёток, обёрток и пояснений."""
+- Память (первые две секции) — не длиннее ~1500 символов. Лучше пустая секция, чем мусор.
+- Верни ТОЛЬКО текст (две секции памяти + при необходимости НА ЗАКРЕП), без markdown-решёток, обёрток и пояснений."""
 
             if not Settings.TOGETHER_API_KEY:
                 logger.warning("MoltBot: TOGETHER_API_KEY not set, falling back to Ollama for summary")
@@ -707,15 +714,59 @@ class MoltbotHandlers:
             if not new_summary or len(new_summary) < 50:
                 logger.warning("MoltBot: LLM returned suspiciously short summary, skipping save")
                 return
+            # Separate the optional auto-pin section from the rolling summary so it
+            # never pollutes chat-summary.md and survives in chat-lore.md instead.
+            summary_text, pin_block = new_summary, ""
+            parts = re.split(r'==\s*НА\s+ЗАКРЕП\s*==', new_summary, maxsplit=1)
+            if len(parts) == 2:
+                summary_text, pin_block = parts[0].strip(), parts[1].strip()
             # Hard backstop against runaway growth (prompt asks for ~1500)
-            new_summary = new_summary[:2500].strip()
+            summary_text = summary_text[:2500].strip()
 
             os.makedirs(os.path.dirname(CHAT_SUMMARY_PATH), exist_ok=True)
             with open(CHAT_SUMMARY_PATH, "w", encoding="utf-8") as f:
-                f.write(new_summary)
-            logger.info(f"MoltBot: chat-summary.md updated ({len(new_summary)} chars)")
+                f.write(summary_text)
+            logger.info(f"MoltBot: chat-summary.md updated ({len(summary_text)} chars)")
+            if pin_block:
+                self._promote_lore(pin_block)
         except Exception as e:
             logger.error(f"MoltBot: summary update failed: {e}")
+
+    _LORE_CAP = 20
+
+    def _promote_lore(self, pin_block: str):
+        """Append LLM-proposed permanent in-jokes to chat-lore.md (dedup + cap)."""
+        def _sig_words(s: str) -> set:
+            # proper nouns (Capitalized+lowercase tail) — the real key of an in-joke
+            # ("Коваленко", "Фреско"); topical lowercase words are ignored to avoid
+            # over-suppressing distinct jokes that merely share a theme word.
+            return {w.lower() for w in re.findall(r'[A-ZА-ЯЁ][a-zа-яё]{3,}', s)}
+
+        try:
+            kept = _lore_lines()
+            kept_lc = [l.lower() for l in kept]
+            kept_sig = [_sig_words(l) for l in kept]
+            added = []
+            for raw in pin_block.splitlines():
+                cand = re.sub(r'^\s*[-•*]?\s*\d{0,2}[.)]?\s*', '', raw).strip()
+                if len(cand) < 8 or cand.startswith('(') or cand.startswith('=='):
+                    continue
+                cl = cand.lower()
+                csig = _sig_words(cand)
+                # dup if substring overlap OR shares a distinctive token with an existing pin
+                if any(cl in e or e in cl for e in kept_lc) or any(csig & ks for ks in kept_sig):
+                    continue
+                kept.append(cand)
+                kept_lc.append(cl)
+                kept_sig.append(csig)
+                added.append(cand)
+                if len(kept) >= self._LORE_CAP:
+                    break
+            if added:
+                _save_lore_lines(kept)
+                logger.info(f"MoltBot: auto-pinned {len(added)} lore item(s): {added}")
+        except Exception as e:
+            logger.error(f"MoltBot: lore promotion failed: {e}")
 
     def _maybe_update_summary(self):
         """Trigger summary update if enough time has passed (every SUMMARY_UPDATE_HOURS)."""
