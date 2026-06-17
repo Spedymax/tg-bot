@@ -19,6 +19,8 @@ from services.circuit_breaker import ollama_breaker, together_breaker
 
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CHAT_SUMMARY_PATH = os.path.join(_BASE_DIR, 'data', 'chat-summary.md')
+# Pinned lore — permanent in-jokes/legends that survive the rolling summary rewrite.
+CHAT_LORE_PATH = os.path.join(_BASE_DIR, 'data', 'chat-lore.md')
 STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "moltbot_state.json")
 
 
@@ -49,6 +51,29 @@ def _load_chat_summary() -> str:
         logger = logging.getLogger(__name__)
         logger.warning(f"MoltBot: could not read chat summary: {e}")
         return ""
+
+
+def _load_chat_lore() -> str:
+    """Load pinned lore — permanent in-jokes the rolling summary must never drop."""
+    try:
+        with open(CHAT_LORE_PATH, encoding="utf-8") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"MoltBot: could not read chat lore: {e}")
+        return ""
+
+
+def _lore_lines() -> list[str]:
+    """Pinned lore as a list of non-empty lines."""
+    return [ln.strip() for ln in _load_chat_lore().splitlines() if ln.strip()]
+
+
+def _save_lore_lines(lines: list[str]) -> None:
+    os.makedirs(os.path.dirname(CHAT_LORE_PATH), exist_ok=True)
+    with open(CHAT_LORE_PATH, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines).strip() + ("\n" if lines else ""))
 
 
 logger = logging.getLogger(__name__)
@@ -843,6 +868,13 @@ class MoltbotHandlers:
                 "Сам не вставляй их в каждое сообщение и не тащи без повода — только если реально в тему.\n"
                 f"{summary}"
             )
+        lore = _load_chat_lore()
+        if lore:
+            system_parts.append(
+                "=== ЗАКРЕПЛЁННЫЕ ВНУТРЯКИ (легенды компании — помни ВСЕГДА, не выпадают со временем) ===\n"
+                f"{lore}\n"
+                "Это чтобы ты понимал устоявшиеся отсылки и мог поддержать, когда их поднимают. Сам без повода не вытаскивай."
+            )
         system_msg = "\n\n".join(system_parts)
 
         messages = [{"role": "system", "content": system_msg}]
@@ -886,8 +918,10 @@ class MoltbotHandlers:
         context_prefix = f"[Сообщение отправлено из: {chat_context}]\n" if chat_context else ""
         summary_block = (f"=== ПАМЯТЬ ЧАТА (фон) ===\n{summary}\n"
                          "(«внутряки» — чтобы понимать отсылки, сам без повода не вставляй)\n") if summary else ""
+        lore = _load_chat_lore()
+        lore_block = (f"=== ЗАКРЕПЛЁННЫЕ ВНУТРЯКИ (помни всегда) ===\n{lore}\n") if lore else ""
         history_block = "\n".join(history) + "\n" if history else ""
-        user_msg = f"{context_prefix}{summary_block}{history_block}{self._POST_PROMPT}\n{sender_name}: {user_text}"
+        user_msg = f"{context_prefix}{lore_block}{summary_block}{history_block}{self._POST_PROMPT}\n{sender_name}: {user_text}"
 
         def _call():
             r = _httpx.post(
@@ -1565,13 +1599,17 @@ class MoltbotHandlers:
             logger.info(f"MoltBot: history reset for ALL chats ({len(all_chat_ids)}) by {message.from_user.id}")
             await message.reply(f"⚙️ Контекст сброшен во всех чатах ({len(all_chat_ids)}). Чистый лист.")
 
-        @router.message(Command(commands=['memory']))
+        @router.message(Command(commands=['memory', 'память']))
         async def handle_memory_view(message: Message):
             if message.from_user.id not in Settings.ADMIN_IDS:
                 await message.reply("У вас нет доступа.")
                 return
             mem = _load_chat_summary()
-            await message.reply(f"🧠 Память чата ({len(mem)} симв.):\n\n{mem}" if mem else "🧠 Память пуста.")
+            lines = _lore_lines()
+            pinned = ("\n\n📌 Закреплённые внутряки:\n" +
+                      "\n".join(f"{i+1}. {ln}" for i, ln in enumerate(lines))) if lines else "\n\n📌 Закреплённых внутряков нет."
+            body = (f"🧠 Память чата ({len(mem)} симв.):\n\n{mem}" if mem else "🧠 Память пуста.") + pinned
+            await message.reply(body)
 
         @router.message(Command(commands=['memory_refresh']))
         async def handle_memory_refresh(message: Message):
@@ -1593,6 +1631,42 @@ class MoltbotHandlers:
                 await message.reply("🧠 Память обнулена.")
             except Exception as e:
                 await message.reply(f"Ошибка: {e}")
+
+        @router.message(Command(commands=['memory_pin', 'память_закрепи', 'закрепи']))
+        async def handle_memory_pin(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                await message.reply("У вас нет доступа.")
+                return
+            text = (message.text or "").split(maxsplit=1)
+            if len(text) < 2 or not text[1].strip():
+                await message.reply("Что закрепить? `/память_закрепи <внутряк одной строкой>`")
+                return
+            lines = _lore_lines()
+            lines.append(text[1].strip().replace("\n", " "))
+            _save_lore_lines(lines)
+            await message.reply(f"📌 Закреплено ({len(lines)} всего). Бот теперь помнит это всегда.")
+
+        @router.message(Command(commands=['memory_unpin', 'память_открепи', 'открепи']))
+        async def handle_memory_unpin(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                await message.reply("У вас нет доступа.")
+                return
+            lines = _lore_lines()
+            if not lines:
+                await message.reply("Закреплённых внутряков нет.")
+                return
+            arg = (message.text or "").split(maxsplit=1)
+            if len(arg) < 2 or not arg[1].strip().isdigit():
+                listing = "\n".join(f"{i+1}. {ln}" for i, ln in enumerate(lines))
+                await message.reply(f"Какой открепить? `/память_открепи <номер>`\n\n{listing}")
+                return
+            idx = int(arg[1].strip()) - 1
+            if idx < 0 or idx >= len(lines):
+                await message.reply(f"Нет такого номера (всего {len(lines)}).")
+                return
+            removed = lines.pop(idx)
+            _save_lore_lines(lines)
+            await message.reply(f"🗑 Откреплено: {removed}")
 
         @router.message(StateFilter(None), F.func(lambda m: (
             m.reply_to_message is not None
