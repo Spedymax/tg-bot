@@ -5,6 +5,15 @@ Newest entry on top. Each cycle appends one entry. See `self-improve-loop.md` fo
 ---
 
 ## 2026-06-29 — auto cycle (propose mode)
+- **Prev fix held?** n/a — предыдущий цикл тоже был пустым (0 реплик бота), фиксить было нечего
+- **Data:** ~210 сообщений reviewed, 0 Jarvis replies
+- **Findings:** clean — бот не ответил ни разу. Все сообщения от Spatifilum, Богдан., Макс: обсуждение поезда, Dota, украинско-польские отношения, Дания/беженцы, война, ЛГБТ. Ни одного @ggallmute2_bot, ни одного reply-to-bot в окне.
+- **Proposed fix:** none
+- **Queued for Max:** Два цикла подряд — нулевое окно (0 реплик бота). Возможно, бот не отвечает из-за технической причины (сервис упал, polling не работает) или чат просто не тегает бота. Стоит проверить `sudo systemctl status bot-manager.service` на сервере.
+
+---
+
+## 2026-06-29 — auto cycle (propose mode)
 - **Prev fix held?** n/a — предыдущий лог пуст (нет данных о фиксе)
 - **Data:** ~180 msgs reviewed, 0 Jarvis replies
 - **Findings:** clean — бот не ответил ни разу за весь период. Все сообщения — органический чат между Spatifilum, Богдан. и Макс. Ни одного @ggallmute2_bot и ни одного reply-to-bot в окне.
