@@ -31,7 +31,11 @@ fi
 #    the CURRENT bot (no stale pre-fix behavior). Capped at 7 days so a long-stable persona
 #    doesn't drag in months of history.
 CUTOFF=$($SSH "export LC_ALL=C; echo '123' | sudo -S -u postgres psql -d server-tg-pisunchik -t -A -c \"SELECT created_at FROM prompt_versions ORDER BY created_at DESC LIMIT 1;\"" 2>/dev/null | grep -vi 'locale\|\[sudo\]' | sed -n '1s/^ *//p')
-DATA=$($SSH "export LC_ALL=C; echo '123' | sudo -S -u postgres psql -d server-tg-pisunchik -t -A -F'|' -c \"SELECT m.name, CASE WHEN r.message_id IS NOT NULL THEN '[↩ '||COALESCE(r.name,'?')||': '||left(r.message_text,60)||'] '||m.message_text ELSE m.message_text END FROM messages m LEFT JOIN messages r ON m.reply_to_message_id = r.message_id WHERE m.timestamp >= GREATEST((SELECT created_at FROM prompt_versions ORDER BY created_at DESC LIMIT 1), NOW() - INTERVAL '7 days') ORDER BY m.timestamp ASC LIMIT 400;\"" 2>/dev/null | grep -vi 'locale\|\[sudo\]')
+# NOTE: take the MOST RECENT messages of the window (inner DESC LIMIT), then re-sort
+#       chronologically for the analyst. A plain `ASC LIMIT 400` kept the OLDEST 400 and
+#       silently dropped the freshest tail once the window grew past the cap — exactly where
+#       the bot's recent behavior lives — making busy cycles report "0 bot replies".
+DATA=$($SSH "export LC_ALL=C; echo '123' | sudo -S -u postgres psql -d server-tg-pisunchik -t -A -F'|' -c \"SELECT name, line FROM (SELECT m.timestamp AS ts, m.name AS name, CASE WHEN r.message_id IS NOT NULL THEN '[↩ '||COALESCE(r.name,'?')||': '||left(r.message_text,60)||'] '||m.message_text ELSE m.message_text END AS line FROM messages m LEFT JOIN messages r ON m.reply_to_message_id = r.message_id WHERE m.timestamp >= GREATEST((SELECT created_at FROM prompt_versions ORDER BY created_at DESC LIMIT 1), NOW() - INTERVAL '7 days') ORDER BY m.timestamp DESC LIMIT 600) sub ORDER BY ts ASC;\"" 2>/dev/null | grep -vi 'locale\|\[sudo\]')
 if [ -z "$DATA" ]; then
   echo "[$(ts)] no messages since persona deploy ($CUTOFF), quiet cycle, skip" >> "$RUNLOG"; exit 0
 fi
