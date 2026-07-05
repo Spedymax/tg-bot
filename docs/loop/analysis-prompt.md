@@ -27,7 +27,7 @@ Do this:
 Persona lives in `docs/identity-jarvis-v8.md` (Russian, ~30 lines). Sensitive/relationship
 content is OFF-LIMITS for auto-proposals.
 
-Output EXACTLY these two sections and nothing else:
+Output EXACTLY these three sections and nothing else:
 
 === LOG ===
 - **Prev fix held?** <yes/no/n-a + one line>
@@ -37,5 +37,12 @@ Output EXACTLY these two sections and nothing else:
 - **Queued for Max:** <bigger items needing judgement, or "none">
 
 === DIGEST ===
-<short Russian Telegram message to Max: 1-line health verdict + the proposed fix if any +
-"ответь «ок» — применю" ; or "цикл прошёл, всё чисто" if nothing. Keep under 4 lines.>
+<short Russian Telegram message to Max: 1-line health verdict + the proposed fix if any.
+ONLY if there is a proposed fix, end with "ответь «ок» — применю". If nothing:
+"цикл прошёл, всё чисто". Keep under 4 lines.>
+
+=== FIX ===
+<machine-read section: the EXACT persona line(s) from "Proposed fix", verbatim and nothing
+else — on Max's «ок» this text is appended to the persona as-is. If no fix: exactly `none`.
+ONLY additions go here; a fix that EDITS/REMOVES an existing line is not appendable — put
+it in "Queued for Max" and write `none` here.>

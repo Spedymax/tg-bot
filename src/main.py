@@ -112,6 +112,10 @@ async def main():
     # StateFilter(None) catch-alls in moltbot/admin sit at the bottom naturally.
     dp.include_router(court_h.router)
     dp.include_router(shop_h.router)
+    # prompt_router BEFORE moltbot: its «ок»-approve handler must win over moltbot's
+    # handle_reply_to_bot — Max's «ок» is a reply to the loop digest, i.e. a reply to the bot.
+    from handlers.prompt_handlers import prompt_router
+    dp.include_router(prompt_router)
     dp.include_router(moltbot_h.router)
     dp.include_router(game_h.router)
     dp.include_router(admin_h.router)
@@ -120,8 +124,6 @@ async def main():
     dp.include_router(miniapp_h.router)
     dp.include_router(health_h.router)
     dp.include_router(pet_h.router)
-    from handlers.prompt_handlers import prompt_router
-    dp.include_router(prompt_router)
 
     # ── Global error handler ──────────────────────────────────────────────────
     @dp.error()

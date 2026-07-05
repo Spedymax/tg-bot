@@ -183,3 +183,4 @@ moltbot_state.json
 
 # Runtime data (chat summaries, etc.)
 data/
+data/loop_pending_fix.txt

@@ -6,10 +6,13 @@ silently ignored to avoid spam from random chat members.
 from __future__ import annotations
 
 import logging
+import os
+import re
+import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, BufferedInputFile
 
@@ -23,6 +26,14 @@ _MIN_LEN = 20
 _MAX_LEN = 8000
 _TG_TEXT_LIMIT = 4000
 _ATTACHMENT_MAX = 16 * 1024  # 16 KB
+
+# Self-improve loop approval: jarvis_loop.sh drops the proposed persona line here and the
+# digest promises «ответь „ок" — применю». The handler below fulfils that promise.
+_PENDING_FIX_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "data", "loop_pending_fix.txt")
+)
+_PENDING_FIX_TTL = 3 * 86400  # an old «ок» must not apply a forgotten fix
+_OK_RE = re.compile(r"^\s*(ок|окей|ok)\s*[.!)]*\s*$", re.IGNORECASE)
 
 
 def _fmt_ts(dt: datetime | None) -> str:
@@ -78,6 +89,49 @@ async def _resolve_user_id(arg: str) -> tuple[int | None, str | None]:
         return int(arg), None
     except ValueError:
         return None, None
+
+
+@prompt_router.message(
+    F.chat.type == "private",
+    F.text.regexp(_OK_RE),
+    F.func(lambda m: os.path.exists(_PENDING_FIX_PATH)),
+)
+async def loop_fix_approve(message: Message):
+    """Apply the self-improve loop's pending persona fix on Max's «ок» in a DM."""
+    if not await _require_admin(message):
+        return
+    try:
+        stale = time.time() - os.path.getmtime(_PENDING_FIX_PATH) > _PENDING_FIX_TTL
+        with open(_PENDING_FIX_PATH, encoding="utf-8") as f:
+            fix = f.read().strip()
+    except OSError as e:
+        logger.error(f"loop_fix_approve: cannot read pending fix: {e}")
+        await message.reply("Не смог прочитать предложенный фикс — применяй вручную")
+        return
+    if stale or not fix:
+        os.remove(_PENDING_FIX_PATH)
+        await message.reply("Предложение петли устарело или пустое — сброшено, жди следующий цикл")
+        return
+
+    ps = get_prompt_service()
+    current = (await ps.get_current_identity()).rstrip()
+    author = message.from_user
+    try:
+        new_id = await ps.set_identity(
+            f"{current}\n{fix}",
+            author_id=author.id if author else 0,
+            author_name="loop",
+            note="loop fix approved via «ок»",
+        )
+    except Exception as e:
+        logger.error(f"loop_fix_approve: DB error: {e}")
+        await message.reply("Ошибка БД, фикс НЕ применён — повтори «ок» позже или применяй вручную")
+        return
+    os.remove(_PENDING_FIX_PATH)
+    await message.reply(
+        f"Применил, identity v{new_id}:\n{fix}\n\n"
+        "(docs/identity-jarvis-v8.md теперь отстаёт от БД — синкани при следующей ручной правке)"
+    )
 
 
 @prompt_router.message(Command("prompt"))

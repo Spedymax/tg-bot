@@ -49,9 +49,10 @@ REPORT=$(printf '%s\n\n=== PREVIOUS DECISION ===\n%s\n\n=== MESSAGES SINCE CURRE
   | "$CLAUDE" -p --model sonnet 2>>"$RUNLOG")
 if [ -z "$REPORT" ]; then echo "[$(ts)] empty report, abort" >> "$RUNLOG"; exit 1; fi
 
-# 4. split LOG / DIGEST sections
+# 4. split LOG / DIGEST / FIX sections
 LOGBODY=$(printf '%s' "$REPORT" | awk '/^=== LOG ===/{f=1;next} /^=== DIGEST ===/{f=0} f')
-DIGEST=$(printf '%s' "$REPORT" | awk '/^=== DIGEST ===/{f=1;next} f')
+DIGEST=$(printf '%s' "$REPORT" | awk '/^=== DIGEST ===/{f=1;next} /^=== FIX ===/{f=0} f')
+FIX=$(printf '%s' "$REPORT" | awk '/^=== FIX ===/{f=1;next} f' | sed '/^[[:space:]]*none[[:space:]]*$/d')
 [ -z "$DIGEST" ] && DIGEST="Петля: цикл прошёл (детали в логе)."
 
 # 5. prepend a decision-log entry (newest on top, right after the first '---')
@@ -74,6 +75,15 @@ PYEOF
 # 6. commit the log entry
 git add docs/loop/decisions.md >/dev/null 2>&1
 git commit -q -m "loop: auto cycle decision-log entry ($(date +%F))" >/dev/null 2>&1 && git push -q origin main >/dev/null 2>&1
+
+# 6.5. pending fix → file the bot's «ок»-handler reads (prompt_handlers.loop_fix_approve).
+#      Cleared on a no-fix cycle so a stale «ок» can't apply an outdated line.
+if [ -n "$(printf '%s' "$FIX" | tr -d '[:space:]')" ]; then
+  printf '%s\n' "$FIX" | $SSH "mkdir -p /home/spedymax/tg-bot/data && cat > /home/spedymax/tg-bot/data/loop_pending_fix.txt" 2>>"$RUNLOG" \
+    && echo "[$(ts)] pending fix shipped to server" >> "$RUNLOG"
+else
+  $SSH "rm -f /home/spedymax/tg-bot/data/loop_pending_fix.txt" 2>>"$RUNLOG"
+fi
 
 # 7. notify Max (DM via Jarvis token on the server). Digest goes via a file to avoid
 #    any shell-escaping of its content (backticks, quotes, $).
