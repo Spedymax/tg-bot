@@ -123,6 +123,7 @@ class MoltbotHandlers:
         self._load_state()
         self._init_gemini()
         asyncio.ensure_future(self._ensure_danetki_table())
+        asyncio.ensure_future(self._reminder_loop())
         self._register()
 
     # ── Persistence ──────────────────────────────────────────────────────────
@@ -1433,6 +1434,74 @@ class MoltbotHandlers:
                 f"Вопросов задано: {active['questions_count']}"
             )
 
+    # ── Ивенты / напоминания ─────────────────────────────────────────────────
+
+    async def _ensure_reminders_table(self):
+        try:
+            await self.db.execute_query(
+                "CREATE TABLE IF NOT EXISTS reminders ("
+                "id SERIAL PRIMARY KEY, "
+                "chat_id BIGINT NOT NULL, "
+                "text TEXT NOT NULL, "
+                "remind_at TIMESTAMP NOT NULL, "
+                "sent BOOLEAN DEFAULT FALSE, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+                ()
+            )
+        except Exception as e:
+            logger.error(f"MoltBot: failed to create reminders table: {e}")
+
+    async def _parse_reminder(self, user_text: str) -> dict | None:
+        """LLM-парсинг свободного текста в {text, remind_at}. Без persona — только JSON."""
+        now = datetime.now(CPH_TZ)
+        weekday = ['понедельник', 'вторник', 'среда', 'четверг',
+                   'пятница', 'суббота', 'воскресенье'][now.weekday()]
+        prompt = (
+            f"Сейчас {now.strftime('%Y-%m-%d %H:%M')}, {weekday}.\n"
+            f"Пользователь просит поставить напоминание: «{user_text}»\n\n"
+            "Верни ТОЛЬКО JSON без лишнего текста:\n"
+            '{"text": "текст напоминания", "remind_at": "YYYY-MM-DD HH:MM"}\n\n'
+            "Правила:\n"
+            "- remind_at — когда прислать напоминание, обязательно в будущем\n"
+            "- Если время суток не указано, ставь 12:00\n"
+            '- Если дату определить невозможно, верни {"error": "причина"}'
+        )
+        try:
+            data = await self._together_post(
+                {
+                    "model": Settings.TOGETHER_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 200,
+                    "temperature": 0.1,
+                },
+                timeout=60,
+            )
+            raw = data["choices"][0]["message"]["content"]
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            return json.loads(match.group()) if match else None
+        except Exception as e:
+            logger.error(f"MoltBot: reminder parse failed: {e}")
+            return None
+
+    async def _reminder_loop(self):
+        await self._ensure_reminders_table()
+        while True:
+            try:
+                now = datetime.now(CPH_TZ).replace(tzinfo=None)
+                rows = await self.db.execute_query(
+                    "SELECT id, chat_id, text FROM reminders WHERE NOT sent AND remind_at <= %s",
+                    (now,)
+                )
+                for rid, chat_id, text in rows or []:
+                    # ponytail: sent=TRUE до отправки — потерять одно напоминание лучше, чем спамить каждую минуту при ошибке
+                    await self.db.execute_query(
+                        "UPDATE reminders SET sent = TRUE WHERE id = %s", (rid,)
+                    )
+                    await self.bot.send_message(chat_id, f"🔔 Напоминание: {text}")
+            except Exception as e:
+                logger.error(f"MoltBot: reminder loop error: {e}")
+            await asyncio.sleep(60)
+
     # ── Недельная аналитика ───────────────────────────────────────────────────
 
     async def _send_weekly_analytics(self, chat_id: int):
@@ -1629,6 +1698,59 @@ class MoltbotHandlers:
                 f"🏳️ Сдаётесь! Вот ответ:\n\n{active['answer']}\n\n"
                 f"Вопросов было задано: {active.get('questions_count', 0)}"
             )
+
+        @router.message(Command(commands=['ивент', 'напомни', 'event', 'remind']))
+        async def handle_event_create(message: Message):
+            parts = (message.text or '').split(maxsplit=1)
+            if len(parts) < 2:
+                await message.reply(
+                    "Напиши что и когда:\n/ивент позвать Юру играть в факторио завтра в 19:00"
+                )
+                return
+            waiting = await message.reply("⏳ Ставлю напоминание...")
+            parsed = await self._parse_reminder(parts[1])
+            if not parsed or 'error' in parsed or not parsed.get('remind_at'):
+                reason = (parsed or {}).get('error', '')
+                await waiting.edit_text(f"🤷 Не понял, когда напомнить. {reason}".strip())
+                return
+            try:
+                remind_at = datetime.strptime(parsed['remind_at'], '%Y-%m-%d %H:%M')
+            except ValueError:
+                await waiting.edit_text("🤷 Не смог разобрать дату, попробуй сформулировать иначе.")
+                return
+            text = parsed.get('text') or parts[1]
+            await self.db.execute_query(
+                "INSERT INTO reminders (chat_id, text, remind_at) VALUES (%s, %s, %s)",
+                (message.chat.id, text, remind_at)
+            )
+            await waiting.edit_text(
+                f"✅ Напомню {remind_at.strftime('%d.%m.%Y в %H:%M')}: {text}"
+            )
+
+        @router.message(Command(commands=['ивенты', 'events']))
+        async def handle_event_list(message: Message):
+            rows = await self.db.execute_query(
+                "SELECT id, remind_at, text FROM reminders "
+                "WHERE NOT sent AND chat_id = %s ORDER BY remind_at LIMIT 20",
+                (message.chat.id,)
+            )
+            if not rows:
+                await message.reply("📅 Нет запланированных ивентов.")
+                return
+            lines = [f"#{rid} • {dt.strftime('%d.%m %H:%M')} — {txt}" for rid, dt, txt in rows]
+            await message.reply("📅 Запланировано:\n" + "\n".join(lines))
+
+        @router.message(Command(commands=['ивент_удали', 'event_del']))
+        async def handle_event_delete(message: Message):
+            parts = (message.text or '').split(maxsplit=1)
+            if len(parts) < 2 or not parts[1].lstrip('#').isdigit():
+                await message.reply("Укажи номер из /ивенты: /ивент_удали 3")
+                return
+            await self.db.execute_query(
+                "DELETE FROM reminders WHERE id = %s AND chat_id = %s",
+                (int(parts[1].lstrip('#')), message.chat.id)
+            )
+            await message.reply("🗑 Удалил.")
 
         @router.message(Command(commands=['аналитика', 'analitika']))
         async def handle_analytics_command(message: Message):
