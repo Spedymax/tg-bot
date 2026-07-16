@@ -1345,6 +1345,25 @@ class MoltbotHandlers:
         except Exception:
             return []
 
+    async def _danetka_llm(self, prompt: str) -> str:
+        """Ollama, а если винда спит — raw Together (без persona)."""
+        try:
+            raw = await asyncio.to_thread(self._call_ollama_direct, prompt)
+            if raw.strip():
+                return raw
+        except Exception as e:
+            logger.warning(f"MoltBot: danetka ollama failed, falling back to Together: {e}")
+        data = await self._together_post(
+            {
+                "model": Settings.TOGETHER_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 600,
+                "temperature": 0.8,
+            },
+            timeout=120,
+        )
+        return data["choices"][0]["message"]["content"]
+
     async def _generate_danetka(self) -> dict | None:
         used = await self._get_used_situations()
         used_text = "\n".join(f"- {s[:80]}" for s in used) if used else "(нет)"
@@ -1361,7 +1380,7 @@ class MoltbotHandlers:
             f"- Не повторяй эти уже использованные ситуации:\n{used_text}"
         )
         try:
-            raw = await asyncio.to_thread(self._call_ollama_direct, prompt)
+            raw = await self._danetka_llm(prompt)
             clean = re.sub(r'<think>.*?(?:</think>|$)', '', raw, flags=re.DOTALL).strip()
             # If nothing outside think tags, search the full raw text
             search_in = clean if clean else raw
@@ -1406,7 +1425,7 @@ class MoltbotHandlers:
             "Верни только один вариант."
         )
         try:
-            result = (await asyncio.to_thread(self._call_ollama_direct, prompt)).strip()
+            result = (await self._danetka_llm(prompt)).strip()
             for v in ["УГАДАЛ! 🎉", "Близко! 🔥", "Да", "Нет", "Не важно"]:
                 if v.lower() in result.lower():
                     return v
