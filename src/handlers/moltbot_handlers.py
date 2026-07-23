@@ -955,47 +955,6 @@ class MoltbotHandlers:
         text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
         return text
 
-    async def _call_qwen_with_identity(self, sender_name: str, user_text: str,
-                                        chat_context: str, history: list[str] | None = None) -> str:
-        """Call Qwen directly with IDENTITY.md as system prompt, bypassing OpenClaw.
-        Used as fallback when Together.ai is unavailable."""
-        import httpx as _httpx
-        try:
-            from services.prompt_service import get_prompt_service
-            identity = await get_prompt_service().get_current_identity()
-        except Exception:
-            identity = ""
-        summary = _load_chat_summary()
-        system_msg = self._HARD_RULES + "\n" + identity
-        context_prefix = f"[Сообщение отправлено из: {chat_context}]\n" if chat_context else ""
-        summary_block = (f"=== ПАМЯТЬ ЧАТА (фон) ===\n{summary}\n"
-                         "(«внутряки» — чтобы понимать отсылки, сам без повода не вставляй)\n") if summary else ""
-        lore = _load_chat_lore()
-        lore_block = (f"=== ЗАКРЕПЛЁННЫЕ ВНУТРЯКИ (помни всегда) ===\n{lore}\n") if lore else ""
-        history_block = "\n".join(history) + "\n" if history else ""
-        user_msg = f"{context_prefix}{lore_block}{summary_block}{history_block}{self._POST_PROMPT}\n{sender_name}: {user_text}"
-
-        def _call():
-            r = _httpx.post(
-                f"{Settings.LOCAL_LLM_URL}/api/chat",
-                json={"model": Settings.LOCAL_LLM_MODEL,
-                      "think": False,
-                      "stream": False,
-                      "messages": [
-                          {"role": "system", "content": system_msg},
-                          {"role": "user", "content": user_msg},
-                      ]},
-                timeout=180,
-            )
-            r.raise_for_status()
-            import re as _re
-            text = r.json()["message"]["content"]
-            text = _re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=_re.DOTALL).strip()
-            text = text.split('<|endoftext|>')[0].split('<|im_start|>')[0].strip()
-            return text
-
-        return await asyncio.to_thread(_call)
-
     def _would_gemini_block(self, user_text: str) -> bool:
         """Ask Qwen whether Gemini would likely block this message due to safety filters."""
         prompt = (
@@ -1083,39 +1042,22 @@ class MoltbotHandlers:
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str,
                                   history: list[str] | None = None) -> str:
-        """Route: Together.ai primary → Brave Search (SEARCH:) → Qwen local (fallback)."""
-        if Settings.TOGETHER_API_KEY:
-            try:
-                logger.info(f"MoltBot: together.ai for: {user_text[:60]}")
-                reply = await self._call_together(sender_name, user_text, chat_context, history)
-                if reply and reply.strip():
-                    logger.info(f"MoltBot: routed got reply ({len(reply)} chars): {reply[:100]!r}")
-                    # Check for SEARCH: or INTERNET
-                    searched = await self._maybe_search(reply, sender_name, user_text, chat_context, history)
-                    if searched:
-                        logger.info(f"MoltBot: SEARCH resolved, returning: {searched[:100]!r}")
-                        return searched
-                    stripped = reply.strip()
-                    if stripped.upper() == "INTERNET":
-                        logger.info(f"MoltBot: INTERNET → gemini for: {user_text[:60]}")
-                        try:
-                            return await self._call_gemini_text(sender_name, user_text, chat_context, history)
-                        except Exception as ge:
-                            logger.warning(f"MoltBot: Gemini INTERNET fallback failed ({ge}), trying Qwen")
-                    else:
-                        return reply
-            except Exception as e:
-                logger.warning(f"MoltBot: Together.ai failed ({e}), falling back to Qwen")
-        # Fallback to local Qwen
-        reply = await self._call_qwen_with_identity(sender_name, user_text, chat_context, history)
-        _preview = repr(reply[:100]) if reply else 'None'
-        logger.info(f"MoltBot: Qwen fallback reply ({len(reply) if reply else 0} chars): {_preview}")
-        # Check for SEARCH: in Qwen reply too
-        if reply:
-            searched = await self._maybe_search(reply, sender_name, user_text, chat_context, history)
-            if searched:
-                logger.info(f"MoltBot: Qwen SEARCH resolved: {searched[:100]!r}")
-                return searched
+        """Route: Together.ai only → Brave Search (SEARCH:) / Gemini (INTERNET). No local fallback."""
+        if not Settings.TOGETHER_API_KEY:
+            raise _AIConnectionError("TOGETHER_API_KEY not set")
+        logger.info(f"MoltBot: together.ai for: {user_text[:60]}")
+        reply = await self._call_together(sender_name, user_text, chat_context, history)
+        if not reply or not reply.strip():
+            return reply
+        logger.info(f"MoltBot: routed got reply ({len(reply)} chars): {reply[:100]!r}")
+        # Check for SEARCH: or INTERNET
+        searched = await self._maybe_search(reply, sender_name, user_text, chat_context, history)
+        if searched:
+            logger.info(f"MoltBot: SEARCH resolved, returning: {searched[:100]!r}")
+            return searched
+        if reply.strip().upper() == "INTERNET":
+            logger.info(f"MoltBot: INTERNET → gemini for: {user_text[:60]}")
+            return await self._call_gemini_text(sender_name, user_text, chat_context, history)
         return reply
 
     async def _qwen_should_reply(self, sender_name: str, user_text: str,
