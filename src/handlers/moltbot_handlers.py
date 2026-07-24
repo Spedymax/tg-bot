@@ -339,7 +339,7 @@ class MoltbotHandlers:
                 prompt,
             ])
             result = response.text
-            logger.info(f"MoltBot: Gemini image analysis: {result[:200]}")
+            logger.info(f"MoltBot: Gemini image analysis: {result}")
             return result
         except Exception as e:
             logger.error(f"MoltBot: Gemini image analysis failed: {e}")
@@ -358,7 +358,7 @@ class MoltbotHandlers:
                 prompt,
             ])
             result = response.text
-            logger.info(f"MoltBot: Gemini animation analysis: {result[:200]}")
+            logger.info(f"MoltBot: Gemini animation analysis: {result}")
             return result
         except Exception as e:
             logger.error(f"MoltBot: Gemini animation analysis failed: {e}")
