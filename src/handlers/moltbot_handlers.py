@@ -345,6 +345,25 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: Gemini image analysis failed: {e}")
             return "[Не удалось проанализировать изображение]"
 
+    def _analyze_animation_with_gemini(self, animation_bytes: bytes, user_question: str) -> str:
+        """Send a GIF (Telegram animation, silent mp4) to Gemini and get a description / answer."""
+        if not self._gemini_model:
+            return "[Анализ гифки недоступен — Gemini не настроен]"
+        try:
+            prompt = "Это гифка (обычно мем или реакция, без звука). Опиши что на ней происходит."
+            if user_question:
+                prompt += f" Также ответь на вопрос: {user_question}"
+            response = self._gemini_model.generate_content([
+                {"mime_type": "video/mp4", "data": animation_bytes},
+                prompt,
+            ])
+            result = response.text
+            logger.info(f"MoltBot: Gemini animation analysis: {result[:200]}")
+            return result
+        except Exception as e:
+            logger.error(f"MoltBot: Gemini animation analysis failed: {e}")
+            return "[Не удалось проанализировать гифку]"
+
     async def _store_user_message(self, message):
         """Store a user message in the messages table (for analytics)."""
         try:
@@ -1932,4 +1951,55 @@ class MoltbotHandlers:
                 await message.reply("⚠️ Не могу подключиться к AI, попробуй позже")
             except Exception as e:
                 logger.error(f"MoltBot API error (photo): {e}")
+                await message.reply("Не могу связаться с AI. Попробуй позже.")
+
+        @router.message(StateFilter(None), F.animation, F.func(lambda m: (
+            m.caption_entities is not None
+            and any(e.type == 'mention' for e in m.caption_entities)
+        )))
+        async def handle_animation_mention(message: Message):
+            if not await self._is_bot_mentioned_in_caption(message):
+                return
+            sender_name = self._resolve_sender_name(message.from_user)
+            user_question = await self._extract_caption_text(message)
+            reply_ctx = await self._build_reply_context(message)
+            chat_context = self._get_chat_context(message)
+
+            history = None
+            if message.chat.type in ('group', 'supergroup'):
+                history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
+
+            try:
+                file = await self.bot.get_file(message.animation.file_id)
+                bio = await self.bot.download_file(file.file_path)
+                animation_bytes = bio.read()
+            except Exception as e:
+                logger.error(f"MoltBot: failed to download animation: {e}")
+                await message.reply("Не могу загрузить гифку. Попробуй ещё раз.")
+                return
+
+            animation_analysis = await asyncio.to_thread(
+                self._analyze_animation_with_gemini, animation_bytes, user_question
+            )
+
+            parts = []
+            if reply_ctx:
+                parts.append(reply_ctx)
+            parts.append(f"[Гифка: {animation_analysis}]")
+            if user_question:
+                parts.append(user_question)
+            combined_text = "\n".join(parts)
+
+            try:
+                async with ChatActionSender.typing(bot=self.bot, chat_id=message.chat.id):
+                    reply = await self._ask_moltbot_routed(sender_name, combined_text, chat_context, history)
+                if reply and reply.strip():
+                    sent = await self._send_long_reply(message, reply)
+                    await self._store_bot_reply(reply, sent.message_id, reply_to=message.message_id)
+                else:
+                    await message.reply("🤐 AI отказался отвечать на это сообщение")
+            except _AIConnectionError:
+                await message.reply("⚠️ Не могу подключиться к AI, попробуй позже")
+            except Exception as e:
+                logger.error(f"MoltBot API error (animation): {e}")
                 await message.reply("Не могу связаться с AI. Попробуй позже.")
