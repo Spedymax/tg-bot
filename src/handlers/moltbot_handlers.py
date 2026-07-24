@@ -1857,6 +1857,19 @@ class MoltbotHandlers:
                 except Exception as e:
                     logger.warning(f"MoltBot: reply photo analysis failed: {e}")
 
+            # New GIF in reply to bot — analyze via Gemini (Telegram GIFs can't carry a caption+mention, so this is the main entry point)
+            elif message.animation:
+                try:
+                    file = await self.bot.get_file(message.animation.file_id)
+                    bio = await self.bot.download_file(file.file_path)
+                    animation_bytes = bio.read()
+                    animation_analysis = await asyncio.to_thread(
+                        self._analyze_animation_with_gemini, animation_bytes, user_text
+                    )
+                    user_text = f"[Гифка: {animation_analysis}]\n{user_text}" if user_text else f"[Гифка: {animation_analysis}]"
+                except Exception as e:
+                    logger.warning(f"MoltBot: reply animation analysis failed: {e}")
+
             # If replying to a bot message that was about a photo, add context note (no re-analysis)
             replied_msg_id = message.reply_to_message.message_id
             photo_file_id = self._photo_context.get(replied_msg_id)
