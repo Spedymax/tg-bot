@@ -13,6 +13,8 @@ from aiogram import Router, F, Bot
 from aiogram.filters import Command, StateFilter
 from aiogram.types import Message
 from aiogram.utils.chat_action import ChatActionSender
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from config.settings import Settings
 from services.circuit_breaker import ollama_breaker, together_breaker
@@ -1484,6 +1486,19 @@ class MoltbotHandlers:
 
     # ── Недельная аналитика ───────────────────────────────────────────────────
 
+    def start_weekly_analytics_scheduler(self, chat_id: int):
+        """Schedule weekly analytics independently of the proactive-message loop
+        so disabling proactive messages can never silently take stats down with it."""
+        tz = ZoneInfo("Europe/Kiev")
+        self._analytics_scheduler = AsyncIOScheduler(timezone=tz)
+        self._analytics_scheduler.add_job(
+            self._send_weekly_analytics,
+            CronTrigger(day_of_week='sun', hour=21, minute=0, timezone=tz),
+            args=[chat_id],
+        )
+        self._analytics_scheduler.start()
+        logger.info(f"MoltBot: weekly analytics scheduler started for chat {chat_id} (Sun 21:00 Europe/Kiev)")
+
     async def _send_weekly_analytics(self, chat_id: int):
         try:
             total_rows = await self.db.execute_query(
@@ -1576,11 +1591,6 @@ class MoltbotHandlers:
                         await self._send_proactive_message(chat_id)
                     else:
                         logger.info(f"MoltBot: skipping {t} proactive — chat inactive")
-            # Weekly analytics: Sunday 21:00
-            weekly_key = f"{day_key}-weekly"
-            if now.weekday() == 6 and hhmm == "21:00" and weekly_key not in sent_today:
-                sent_today.add(weekly_key)
-                asyncio.create_task(self._send_weekly_analytics(chat_id))
             # Purge old day keys to avoid unbounded growth
             if len(sent_today) > 20:
                 sent_today = {k for k in sent_today if k.startswith(day_key)}

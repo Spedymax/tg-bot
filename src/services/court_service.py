@@ -29,20 +29,15 @@ class CourtService:
         )
         return rows[0][0] if rows else None
 
-    async def get_active_game(self, chat_id: int) -> dict | None:
-        """Вернуть активную игру для чата или None."""
-        rows = await self.db.execute_query(
-            "SELECT id, chat_id, defendant, crime, prosecutor_id, lawyer_id, witness_id, "
-            "prosecutor_cards, lawyer_cards, witness_cards, played_cards, current_round, "
-            "prosecutor_cards_left, lawyer_cards_left, witness_cards_left, status, "
-            "current_phase, last_judge_msg_id "
-            "FROM court_games WHERE chat_id = %s AND status NOT IN ('finished', 'aborted') "
-            "ORDER BY created_at DESC LIMIT 1",
-            (chat_id,),
-        )
-        if not rows:
-            return None
-        r = rows[0]
+    _GAME_COLUMNS = (
+        "id, chat_id, defendant, crime, prosecutor_id, lawyer_id, witness_id, "
+        "prosecutor_cards, lawyer_cards, witness_cards, played_cards, current_round, "
+        "prosecutor_cards_left, lawyer_cards_left, witness_cards_left, status, "
+        "current_phase, last_judge_msg_id, pending_action"
+    )
+
+    @staticmethod
+    def _row_to_game(r) -> dict:
         return {
             "id": r[0], "chat_id": r[1], "defendant": r[2], "crime": r[3],
             "prosecutor_id": r[4], "lawyer_id": r[5], "witness_id": r[6],
@@ -53,7 +48,20 @@ class CourtService:
             "status": r[15],
             "current_phase": r[16] or "prosecution",
             "last_judge_msg_id": r[17],
+            "pending_action": r[18],
         }
+
+    async def get_active_game(self, chat_id: int) -> dict | None:
+        """Вернуть активную игру для чата или None."""
+        rows = await self.db.execute_query(
+            f"SELECT {self._GAME_COLUMNS} "
+            "FROM court_games WHERE chat_id = %s AND status NOT IN ('finished', 'aborted') "
+            "ORDER BY created_at DESC LIMIT 1",
+            (chat_id,),
+        )
+        if not rows:
+            return None
+        return self._row_to_game(rows[0])
 
     async def assign_role(self, game_id: int, role: str, user_id: int):
         """Установить prosecutor_id / lawyer_id / witness_id."""
@@ -92,26 +100,27 @@ class CourtService:
 
     async def get_active_game_by_id(self, game_id: int) -> dict | None:
         rows = await self.db.execute_query(
-            "SELECT id, chat_id, defendant, crime, prosecutor_id, lawyer_id, witness_id, "
-            "prosecutor_cards, lawyer_cards, witness_cards, played_cards, current_round, "
-            "prosecutor_cards_left, lawyer_cards_left, witness_cards_left, status, "
-            "current_phase, last_judge_msg_id "
-            "FROM court_games WHERE id = %s", (game_id,),
+            f"SELECT {self._GAME_COLUMNS} FROM court_games WHERE id = %s", (game_id,),
         )
         if not rows:
             return None
-        r = rows[0]
-        return {
-            "id": r[0], "chat_id": r[1], "defendant": r[2], "crime": r[3],
-            "prosecutor_id": r[4], "lawyer_id": r[5], "witness_id": r[6],
-            "prosecutor_cards": r[7] or [], "lawyer_cards": r[8] or [],
-            "witness_cards": r[9] or [], "played_cards": r[10] or [],
-            "current_round": r[11], "prosecutor_cards_left": r[12],
-            "lawyer_cards_left": r[13], "witness_cards_left": r[14],
-            "status": r[15],
-            "current_phase": r[16] or "prosecution",
-            "last_judge_msg_id": r[17],
-        }
+        return self._row_to_game(rows[0])
+
+    async def list_in_progress_games(self) -> list[dict]:
+        """Все игры со статусом in_progress и незавершённым ожиданием — для восстановления после рестарта."""
+        rows = await self.db.execute_query(
+            f"SELECT {self._GAME_COLUMNS} FROM court_games "
+            "WHERE status = 'in_progress' AND pending_action IS NOT NULL",
+            (),
+        )
+        return [self._row_to_game(r) for r in (rows or [])]
+
+    async def set_pending_action(self, game_id: int, data: dict | None):
+        """Запомнить (или очистить) текущее ожидаемое от игрока действие."""
+        await self.db.execute_query(
+            "UPDATE court_games SET pending_action = %s WHERE id = %s",
+            (json.dumps(data) if data else None, game_id),
+        )
 
     async def advance_round(self, game_id: int, new_round: int):
         await self.db.execute_query("UPDATE court_games SET current_round=%s WHERE id=%s", (new_round, game_id))

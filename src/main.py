@@ -35,6 +35,7 @@ from handlers.health_alert_handlers import HealthAlertHandlers
 from handlers.moltbot_handlers import MoltbotHandlers
 from handlers.pet_handlers import PetHandlers
 from handlers.court_handlers import CourtHandlers
+from handlers.weekly_highlight_handlers import WeeklyHighlightHandlers
 
 json_handler = RotatingFileHandler('bot.log', maxBytes=10 * 1024 * 1024, backupCount=3)
 json_handler.setFormatter(JSONFormatter())
@@ -92,6 +93,9 @@ async def main():
     # Pre-populate bot_id so court filters work from first message
     me = await bot.get_me()
     court_h._bot_id = me.id
+    # Re-arm/resolve any court games left waiting on a human before this restart
+    asyncio.create_task(court_h.recover_pending_games())
+    weekly_highlight_h = WeeklyHighlightHandlers(bot, db_manager)
 
     # ── Load shop data (JSON assets) ──────────────────────────────────────────
     _assets = os.path.join(os.path.dirname(__file__), '..', 'assets', 'data')
@@ -124,6 +128,7 @@ async def main():
     dp.include_router(miniapp_h.router)
     dp.include_router(health_h.router)
     dp.include_router(pet_h.router)
+    dp.include_router(weekly_highlight_h.router)
 
     # ── Global error handler ──────────────────────────────────────────────────
     @dp.error()
@@ -140,6 +145,8 @@ async def main():
 
     # ── Proactive MoltBot scheduler ───────────────────────────────────────────
     moltbot_h.start_proactive_scheduler(Settings.CHAT_IDS['main'])
+    moltbot_h.start_weekly_analytics_scheduler(Settings.CHAT_IDS['main'])
+    weekly_highlight_h.start_scheduler(Settings.CHAT_IDS['main'])
 
     # ── Register Telegram command menu ───────────────────────────────────────
     await bot.set_my_commands([
