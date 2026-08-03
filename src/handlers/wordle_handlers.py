@@ -42,6 +42,22 @@ class WordleHandlers:
                 return
             await message.reply("🟩🟨⬜ Сегодняшний Wordle уже в игре!", reply_markup=self._build_markup())
 
+        @self.router.message(Command('wordle_test'))
+        async def wordle_test(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                return
+            text = (
+                "🧪 Тестовый Wordle — сегодняшнее слово, играется так же, как в группе "
+                "(одна попытка в день, общая для группы и этой тестовой ссылки)."
+            )
+            try:
+                await self.bot.send_message(message.from_user.id, text, reply_markup=self._build_markup())
+                if message.chat.type != 'private':
+                    await message.reply("Кинул в личку 🎮")
+            except Exception as e:
+                logger.warning(f"Wordle: failed to DM test link to {message.from_user.id}: {e}")
+                await message.reply("Не получилось написать в личку — напиши боту первым (/start) и попробуй снова.")
+
     def _build_markup(self) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🎮 Играть в Wordle", web_app=WebAppInfo(url=Settings.WORDLE_WEB_APP_URL))

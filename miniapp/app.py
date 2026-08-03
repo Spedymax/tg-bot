@@ -28,11 +28,11 @@ try:
     from database.player_service import PlayerService
     from services.wordle_logic import (
         score_guess, is_valid_guess, build_message_text, build_share_text,
-        WORD_LENGTH, MAX_ATTEMPTS,
+        word_for_date, WORD_LENGTH, MAX_ATTEMPTS,
     )
 except ImportError as e:
     Settings = DatabaseManager = PlayerService = None
-    score_guess = is_valid_guess = build_message_text = build_share_text = None
+    score_guess = is_valid_guess = build_message_text = build_share_text = word_for_date = None
     WORD_LENGTH, MAX_ATTEMPTS = 5, 6
 
 app = Flask(__name__)
@@ -530,10 +530,9 @@ def wordle_today():
     player_name = user.get('first_name') or user.get('username') or 'Игрок'
 
     today = _today_kyiv()
-    daily = run_async(db_manager.execute_query("SELECT word FROM wordle_daily WHERE date = %s", (today,)))
-    if not daily:
-        return jsonify({'success': False, 'error': 'not_ready'})
-    target = daily[0][0]
+    # Deterministic per-date word — computable without waiting on the daily
+    # group post, so the mini-app is playable (e.g. via a DM test link) any time.
+    target = word_for_date(today)
 
     game = _get_or_create_game(today, player_id, player_name)
     player = run_async(player_service.get_player(player_id))
@@ -567,14 +566,11 @@ def wordle_guess():
     player_name = user.get('first_name') or user.get('username') or 'Игрок'
 
     guess = (data.get('guess') or '').strip().lower()
-    if len(guess) != WORD_LENGTH or not re.fullmatch(r'[а-яё]+', guess):
+    if len(guess) != WORD_LENGTH or not re.fullmatch(r'[a-z]+', guess):
         return jsonify({'success': False, 'error': 'invalid_format'}), 400
 
     today = _today_kyiv()
-    daily = run_async(db_manager.execute_query("SELECT word FROM wordle_daily WHERE date = %s", (today,)))
-    if not daily:
-        return jsonify({'success': False, 'error': 'not_ready'}), 400
-    target = daily[0][0]
+    target = word_for_date(today)
 
     game = _get_or_create_game(today, player_id, player_name)
     if game['finished']:

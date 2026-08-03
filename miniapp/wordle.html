@@ -101,9 +101,9 @@ const initData = tg ? tg.initData : '';
 const WORD_LENGTH = 5;
 const MAX_ATTEMPTS = 6;
 const KB_LAYOUT = [
-  ['й','ц','у','к','е','н','г','ш','щ','з','х'],
-  ['ф','ы','в','а','п','р','о','л','д','ж','э'],
-  ['ENTER','я','ч','с','м','и','т','ь','б','ю','⌫'],
+  ['q','w','e','r','t','y','u','i','o','p'],
+  ['a','s','d','f','g','h','j','k','l'],
+  ['ENTER','z','x','c','v','b','n','m','⌫'],
 ];
 
 let board = [];      // finished rows: [{guess, marks}]
@@ -196,7 +196,7 @@ function handleKey(key){
   } else if (key === 'Backspace'){
     current = current.slice(0, -1);
     renderCurrentRow();
-  } else if (/^[а-яё]$/i.test(key) && current.length < WORD_LENGTH){
+  } else if (/^[a-z]$/i.test(key) && current.length < WORD_LENGTH){
     current += key.toLowerCase();
     renderCurrentRow();
   }
@@ -205,7 +205,7 @@ function handleKey(key){
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') handleKey('Enter');
   else if (e.key === 'Backspace') handleKey('Backspace');
-  else if (/^[а-яёÀ-ÿa-z]$/i.test(e.key) && e.key.length === 1) handleKey(e.key);
+  else if (/^[a-z]$/i.test(e.key) && e.key.length === 1) handleKey(e.key);
 });
 
 async function submitGuess(){

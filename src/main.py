@@ -171,6 +171,7 @@ async def main():
         BotCommand(command="sdayus",          description="Сдаться в данетке"),
         BotCommand(command="anekdot",         description="Случайный анекдот"),
         BotCommand(command="wordle",          description="Статус Wordle дня"),
+        BotCommand(command="wordle_test",     description="Тестовая ссылка в личку (адм)"),
         BotCommand(command="event",           description="Поставить ивент/напоминание"),
         BotCommand(command="events",          description="Список ивентов"),
         BotCommand(command="event_del",       description="Удалить ивент по номеру"),
