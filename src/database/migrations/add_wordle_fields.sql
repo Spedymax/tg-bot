@@ -1,0 +1,7 @@
+-- Add Wordle game fields to pisunchik_data table
+ALTER TABLE pisunchik_data
+ADD COLUMN IF NOT EXISTS wordle_streak INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS wordle_max_streak INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS wordle_wins INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS wordle_played INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS wordle_last_played_date TIMESTAMP WITH TIME ZONE DEFAULT NULL;

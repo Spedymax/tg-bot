@@ -20,6 +20,8 @@ ALLOWED_PLAYER_FIELDS = {
     'pet_ulta_used_date', 'pet_ulta_free_roll_pending', 'pet_ulta_oracle_pending',
     'pet_ulta_trivia_pending', 'pet_casino_extra_spins', 'pet_ulta_oracle_preview',
     'pet_death_pending_notify',
+    'wordle_streak', 'wordle_max_streak', 'wordle_wins', 'wordle_played',
+    'wordle_last_played_date',
 }
 
 # All datetime fields on the Player model (for serialization)
@@ -28,7 +30,7 @@ _DATETIME_FIELDS = {
     'casino_last_used', 'miniapp_last_spin_date',
     'pet_revives_reset_date', 'last_trivia_date',
     'pet_hunger_last_decay', 'pet_happiness_last_activity',
-    'pet_ulta_used_date',
+    'pet_ulta_used_date', 'wordle_last_played_date',
 }
 
 # Fields stored as JSON (lists/dicts) in the database
@@ -180,7 +182,9 @@ class PlayerService:
                                 pet_ulta_used_date = %s, pet_ulta_free_roll_pending = %s,
                                 pet_ulta_oracle_pending = %s, pet_ulta_trivia_pending = %s,
                                 pet_casino_extra_spins = %s, pet_ulta_oracle_preview = %s,
-                                pet_death_pending_notify = %s
+                                pet_death_pending_notify = %s,
+                                wordle_streak = %s, wordle_max_streak = %s, wordle_wins = %s,
+                                wordle_played = %s, wordle_last_played_date = %s
                             WHERE player_id = %s
                         """
                         await conn.execute(update_query, (
@@ -211,6 +215,11 @@ class PlayerService:
                             getattr(player, 'pet_casino_extra_spins', 0),
                             json.dumps(getattr(player, 'pet_ulta_oracle_preview', None)) if getattr(player, 'pet_ulta_oracle_preview', None) else None,
                             getattr(player, 'pet_death_pending_notify', False),
+                            getattr(player, 'wordle_streak', 0),
+                            getattr(player, 'wordle_max_streak', 0),
+                            getattr(player, 'wordle_wins', 0),
+                            getattr(player, 'wordle_played', 0),
+                            getattr(player, 'wordle_last_played_date', None),
                             player.player_id
                         ))
                     else:
@@ -227,8 +236,10 @@ class PlayerService:
                                 pet_happiness_last_activity, pet_ulta_used_date,
                                 pet_ulta_free_roll_pending, pet_ulta_oracle_pending,
                                 pet_ulta_trivia_pending, pet_casino_extra_spins, pet_ulta_oracle_preview,
-                                pet_death_pending_notify
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                pet_death_pending_notify,
+                                wordle_streak, wordle_max_streak, wordle_wins, wordle_played,
+                                wordle_last_played_date
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """
                         await conn.execute(insert_query, (
                             player.player_id, player.player_name, player.pisunchik_size, player.coins,
@@ -255,6 +266,11 @@ class PlayerService:
                             getattr(player, 'pet_casino_extra_spins', 0),
                             json.dumps(getattr(player, 'pet_ulta_oracle_preview', None)) if getattr(player, 'pet_ulta_oracle_preview', None) else None,
                             getattr(player, 'pet_death_pending_notify', False),
+                            getattr(player, 'wordle_streak', 0),
+                            getattr(player, 'wordle_max_streak', 0),
+                            getattr(player, 'wordle_wins', 0),
+                            getattr(player, 'wordle_played', 0),
+                            getattr(player, 'wordle_last_played_date', None),
                         ))
 
                 await self._cache_player(player)

@@ -87,6 +87,9 @@ class Settings:
     OLLAMA_IDLE_SLEEP_MINUTES = int(os.getenv('OLLAMA_IDLE_SLEEP_MINUTES') or '15')
     ADMIN_TELEGRAM_ID = int(os.getenv('ADMIN_TELEGRAM_ID') or '0')
 
+    # Wordle mini-app
+    WORDLE_WEB_APP_URL = os.getenv('WORDLE_WEB_APP_URL', 'https://casino.spedymax.org/miniapp/wordle')
+
     @classmethod
     def validate(cls):
         """Validate required settings at startup. Call before bot starts."""
