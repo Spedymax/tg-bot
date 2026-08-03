@@ -503,7 +503,8 @@ def _apply_wordle_reward(player_id, player_name, today, won, attempts):
         player.wordle_max_streak = max(getattr(player, 'wordle_max_streak', 0), new_streak)
         player.wordle_wins = getattr(player, 'wordle_wins', 0) + 1
         reward = max(10, (MAX_ATTEMPTS + 1 - attempts) * 15)
-        player.coins = float(getattr(player, 'coins', 0)) + reward
+        # pisunchik_data.coins is bigint — keep integer math, matching the casino routes above.
+        player.coins = int(getattr(player, 'coins', 0)) + reward
     else:
         player.wordle_streak = 0
 
