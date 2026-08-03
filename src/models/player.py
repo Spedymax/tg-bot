@@ -43,6 +43,13 @@ class Player:
     trivia_streak: int = 0
     last_trivia_date: Optional[datetime] = None
 
+    # Wordle system fields
+    wordle_streak: int = 0
+    wordle_max_streak: int = 0
+    wordle_wins: int = 0
+    wordle_played: int = 0
+    wordle_last_played_date: Optional[datetime] = None
+
     # Pet hunger/happiness stats
     pet_hunger: int = 100
     pet_happiness: int = 50
@@ -84,7 +91,7 @@ class Player:
         # Handle optional datetime fields stored as ISO strings
         for field_name in ['pet_revives_reset_date', 'last_trivia_date',
                            'pet_hunger_last_decay', 'pet_happiness_last_activity',
-                           'pet_ulta_used_date']:
+                           'pet_ulta_used_date', 'wordle_last_played_date']:
             if field_name in data and isinstance(data[field_name], str):
                 try:
                     data[field_name] = datetime.fromisoformat(data[field_name])
@@ -107,7 +114,7 @@ class Player:
         # Convert optional datetime fields to ISO strings
         for field_name in ['pet_revives_reset_date', 'last_trivia_date',
                            'pet_hunger_last_decay', 'pet_happiness_last_activity',
-                           'pet_ulta_used_date']:
+                           'pet_ulta_used_date', 'wordle_last_played_date']:
             if isinstance(data.get(field_name), datetime):
                 data[field_name] = data[field_name].isoformat()
 

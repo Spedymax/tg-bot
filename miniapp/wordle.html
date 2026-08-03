@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Wordle дня</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg: var(--tg-theme-bg-color, #17181c);
+    --fg: var(--tg-theme-text-color, #ffffff);
+    --hint: var(--tg-theme-hint-color, #8a8a8f);
+    --button: var(--tg-theme-button-color, #3390ec);
+    --button-text: var(--tg-theme-button-text-color, #ffffff);
+    --absent: #3a3a3c;
+    --present: #b59f3b;
+    --correct: #538d4e;
+    --border: #565758;
+  }
+  * { box-sizing: border-box; }
+  body{
+    margin:0; padding:16px; background:var(--bg); color:var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display:flex; flex-direction:column; align-items:center; min-height:100vh;
+  }
+  h1{ font-size:20px; margin:4px 0 2px; letter-spacing:2px; }
+  .subtitle{ color:var(--hint); font-size:13px; margin-bottom:14px; text-align:center; }
+  #board{ display:grid; grid-template-rows:repeat(6, 1fr); gap:6px; margin-bottom:18px; }
+  .row{ display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; }
+  .tile{
+    width:52px; height:52px; border:2px solid var(--border); border-radius:6px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:26px; font-weight:700; text-transform:uppercase;
+    transition: transform 0.15s ease, background-color 0.2s ease;
+  }
+  .tile.filled{ border-color:#8a8a8f; }
+  .tile.correct{ background:var(--correct); border-color:var(--correct); }
+  .tile.present{ background:var(--present); border-color:var(--present); }
+  .tile.absent{ background:var(--absent); border-color:var(--absent); }
+  .tile.pop{ transform:scale(1.08); }
+  .row.shake{ animation: shake 0.4s; }
+  @keyframes shake{
+    10%,90%{ transform: translateX(-2px); }
+    20%,80%{ transform: translateX(4px); }
+    30%,50%,70%{ transform: translateX(-8px); }
+    40%,60%{ transform: translateX(8px); }
+  }
+  #toast{
+    position:fixed; top:16px; left:50%; transform:translateX(-50%);
+    background:var(--fg); color:var(--bg); padding:8px 16px; border-radius:8px;
+    font-size:14px; font-weight:600; opacity:0; pointer-events:none;
+    transition: opacity 0.2s ease; z-index:20;
+  }
+  #toast.show{ opacity:1; }
+  #keyboard{ display:flex; flex-direction:column; gap:6px; width:100%; max-width:420px; }
+  .kb-row{ display:flex; gap:5px; justify-content:center; }
+  .key{
+    flex:1; min-width:0; height:44px; border:none; border-radius:6px;
+    background:#818384; color:#fff; font-size:13px; font-weight:600;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    user-select:none;
+  }
+  .key.wide{ flex:1.6; font-size:11px; }
+  .key.correct{ background:var(--correct); }
+  .key.present{ background:var(--present); }
+  .key.absent{ background:var(--absent); color:#777; }
+  #status{ text-align:center; margin:10px 0; min-height:20px; font-size:14px; color:var(--hint); }
+  #result{
+    display:none; flex-direction:column; align-items:center; gap:10px;
+    background:rgba(255,255,255,0.05); border-radius:12px; padding:16px 20px; margin-top:8px; width:100%; max-width:420px;
+  }
+  #result h2{ margin:0; font-size:18px; }
+  #shareBox{
+    width:100%; background:rgba(0,0,0,0.25); border-radius:8px; padding:10px;
+    font-family: monospace; font-size:16px; white-space:pre-line; text-align:center;
+  }
+  #copyBtn{
+    background:var(--button); color:var(--button-text); border:none; border-radius:8px;
+    padding:10px 20px; font-size:14px; font-weight:600; cursor:pointer;
+  }
+</style>
+</head>
+<body>
+  <h1>🟩🟨⬜ WORDLE ДНЯ</h1>
+  <div class="subtitle">Угадай слово из 5 букв за 6 попыток</div>
+  <div id="board"></div>
+  <div id="status"></div>
+  <div id="keyboard"></div>
+  <div id="result">
+    <h2 id="resultTitle"></h2>
+    <div id="shareBox"></div>
+    <button id="copyBtn">Скопировать результат</button>
+  </div>
+  <div id="toast"></div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+const initData = tg ? tg.initData : '';
+
+const WORD_LENGTH = 5;
+const MAX_ATTEMPTS = 6;
+const KB_LAYOUT = [
+  ['й','ц','у','к','е','н','г','ш','щ','з','х'],
+  ['ф','ы','в','а','п','р','о','л','д','ж','э'],
+  ['ENTER','я','ч','с','м','и','т','ь','б','ю','⌫'],
+];
+
+let board = [];      // finished rows: [{guess, marks}]
+let current = '';     // letters typed in the active row
+let finished = false;
+let rowEls = [];
+let keyEls = {};
+
+const boardEl = document.getElementById('board');
+const keyboardEl = document.getElementById('keyboard');
+const statusEl = document.getElementById('status');
+const resultEl = document.getElementById('result');
+const resultTitleEl = document.getElementById('resultTitle');
+const shareBoxEl = document.getElementById('shareBox');
+const toastEl = document.getElementById('toast');
+
+function buildBoard(){
+  boardEl.innerHTML = '';
+  rowEls = [];
+  for (let r = 0; r < MAX_ATTEMPTS; r++){
+    const row = document.createElement('div');
+    row.className = 'row';
+    const tiles = [];
+    for (let c = 0; c < WORD_LENGTH; c++){
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      row.appendChild(tile);
+      tiles.push(tile);
+    }
+    boardEl.appendChild(row);
+    rowEls.push({row, tiles});
+  }
+}
+
+function buildKeyboard(){
+  keyboardEl.innerHTML = '';
+  keyEls = {};
+  KB_LAYOUT.forEach(rowKeys => {
+    const kbRow = document.createElement('div');
+    kbRow.className = 'kb-row';
+    rowKeys.forEach(k => {
+      const btn = document.createElement('button');
+      btn.className = 'key' + (k === 'ENTER' || k === '⌫' ? ' wide' : '');
+      btn.textContent = k === 'ENTER' ? 'ВВОД' : k;
+      btn.addEventListener('click', () => handleKey(k === 'ENTER' ? 'Enter' : (k === '⌫' ? 'Backspace' : k)));
+      kbRow.appendChild(btn);
+      if (k !== 'ENTER' && k !== '⌫') keyEls[k] = btn;
+    });
+    keyboardEl.appendChild(kbRow);
+  });
+}
+
+function showToast(msg){
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  setTimeout(() => toastEl.classList.remove('show'), 1500);
+}
+
+function renderFinishedRow(index, guess, marks){
+  const {row, tiles} = rowEls[index];
+  for (let i = 0; i < WORD_LENGTH; i++){
+    tiles[i].textContent = guess[i];
+    tiles[i].classList.add('filled', marks[i]);
+    const letter = guess[i];
+    const rank = {absent:0, present:1, correct:2};
+    const el = keyEls[letter];
+    if (el){
+      const cur = el.classList.contains('correct') ? 'correct' : el.classList.contains('present') ? 'present' : el.classList.contains('absent') ? 'absent' : null;
+      if (!cur || rank[marks[i]] > rank[cur]) {
+        el.classList.remove('correct','present','absent');
+        el.classList.add(marks[i]);
+      }
+    }
+  }
+}
+
+function renderCurrentRow(){
+  if (finished) return;
+  const {tiles} = rowEls[board.length];
+  for (let i = 0; i < WORD_LENGTH; i++){
+    tiles[i].textContent = current[i] || '';
+    tiles[i].classList.toggle('filled', !!current[i]);
+  }
+}
+
+function handleKey(key){
+  if (finished) return;
+  if (key === 'Enter'){
+    submitGuess();
+  } else if (key === 'Backspace'){
+    current = current.slice(0, -1);
+    renderCurrentRow();
+  } else if (/^[а-яё]$/i.test(key) && current.length < WORD_LENGTH){
+    current += key.toLowerCase();
+    renderCurrentRow();
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handleKey('Enter');
+  else if (e.key === 'Backspace') handleKey('Backspace');
+  else if (/^[а-яёÀ-ÿa-z]$/i.test(e.key) && e.key.length === 1) handleKey(e.key);
+});
+
+async function submitGuess(){
+  if (current.length !== WORD_LENGTH){
+    shakeCurrentRow();
+    showToast('Слишком короткое слово');
+    return;
+  }
+  try {
+    const resp = await fetch('/miniapp/api/wordle/guess', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({init_data: initData, guess: current}),
+    });
+    const json = await resp.json();
+    if (!json.success){
+      shakeCurrentRow();
+      if (json.error === 'not_a_word') showToast('Такого слова нет в словаре');
+      else if (json.error === 'invalid_auth') showToast('Открой через кнопку в Telegram-чате');
+      else if (json.error === 'not_ready') showToast('Вордль дня ещё не готов');
+      else showToast('Ошибка, попробуй ещё раз');
+      return;
+    }
+    const data = json.data;
+    if (data.already_finished){
+      loadRestoredBoard(data);
+      return;
+    }
+    renderFinishedRow(board.length, current, data.marks);
+    board.push({guess: current, marks: data.marks});
+    current = '';
+    if (data.finished){
+      finished = true;
+      showResult(data.won, data.target, data.coins, data.wordle_streak);
+    }
+  } catch (e){
+    showToast('Сеть недоступна, попробуй ещё раз');
+  }
+}
+
+function shakeCurrentRow(){
+  const {row} = rowEls[board.length];
+  row.classList.add('shake');
+  setTimeout(() => row.classList.remove('shake'), 400);
+}
+
+function buildShareTextClient(won){
+  const label = won ? `${board.length}/${MAX_ATTEMPTS}` : `X/${MAX_ATTEMPTS}`;
+  const emoji = {correct:'🟩', present:'🟨', absent:'⬜'};
+  const grid = board.map(g => g.marks.map(m => emoji[m]).join('')).join('\n');
+  return `Wordle дня ${label}\n\n${grid}`;
+}
+
+function showResult(won, target, coins, streak){
+  statusEl.textContent = '';
+  resultEl.style.display = 'flex';
+  resultTitleEl.textContent = won ? '🎉 Разгадано!' : `😔 Слово было: ${target || ''}`;
+  const shareText = buildShareTextClient(won);
+  let extra = '';
+  if (coins != null) extra += `\n💰 Баланс: ${coins} BTC`;
+  if (streak != null) extra += `\n🔥 Стрик: ${streak}`;
+  shareBoxEl.textContent = shareText + extra;
+  document.getElementById('copyBtn').onclick = () => {
+    navigator.clipboard.writeText(shareText).then(() => showToast('Скопировано!'));
+  };
+}
+
+function loadRestoredBoard(data){
+  buildBoard();
+  buildKeyboard();
+  board = [];
+  (data.guesses || []).forEach((g, i) => {
+    renderFinishedRow(i, g.guess, g.marks);
+    board.push(g);
+  });
+  finished = !!data.finished;
+  if (finished){
+    showResult(data.won, data.target, data.coins, data.wordle_streak);
+  }
+}
+
+async function init(){
+  buildBoard();
+  buildKeyboard();
+  if (!initData){
+    statusEl.textContent = 'Открой эту страницу через кнопку в Telegram-чате.';
+    return;
+  }
+  try {
+    const resp = await fetch('/miniapp/api/wordle/today?init_data=' + encodeURIComponent(initData));
+    const json = await resp.json();
+    if (!json.success){
+      statusEl.textContent = json.error === 'not_ready'
+        ? 'Вордль дня ещё не готов, загляни после 10:00 🌅'
+        : 'Не получилось загрузить сегодняшний Wordle.';
+      return;
+    }
+    const data = json.data;
+    loadRestoredBoard(data);
+  } catch (e){
+    statusEl.textContent = 'Не получилось подключиться к серверу.';
+  }
+}
+
+init();
+</script>
+</body>
+</html>

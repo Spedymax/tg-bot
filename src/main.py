@@ -36,6 +36,8 @@ from handlers.moltbot_handlers import MoltbotHandlers
 from handlers.pet_handlers import PetHandlers
 from handlers.court_handlers import CourtHandlers
 from handlers.weekly_highlight_handlers import WeeklyHighlightHandlers
+from handlers.daily_prophecy_handlers import DailyProphecyHandlers
+from handlers.wordle_handlers import WordleHandlers
 
 json_handler = RotatingFileHandler('bot.log', maxBytes=10 * 1024 * 1024, backupCount=3)
 json_handler.setFormatter(JSONFormatter())
@@ -96,6 +98,8 @@ async def main():
     # Re-arm/resolve any court games left waiting on a human before this restart
     asyncio.create_task(court_h.recover_pending_games())
     weekly_highlight_h = WeeklyHighlightHandlers(bot, db_manager)
+    daily_prophecy_h = DailyProphecyHandlers(bot, db_manager)
+    wordle_h = WordleHandlers(bot, db_manager)
 
     # ── Load shop data (JSON assets) ──────────────────────────────────────────
     _assets = os.path.join(os.path.dirname(__file__), '..', 'assets', 'data')
@@ -129,6 +133,8 @@ async def main():
     dp.include_router(health_h.router)
     dp.include_router(pet_h.router)
     dp.include_router(weekly_highlight_h.router)
+    dp.include_router(daily_prophecy_h.router)
+    dp.include_router(wordle_h.router)
 
     # ── Global error handler ──────────────────────────────────────────────────
     @dp.error()
@@ -147,6 +153,8 @@ async def main():
     moltbot_h.start_proactive_scheduler(Settings.CHAT_IDS['main'])
     moltbot_h.start_weekly_analytics_scheduler(Settings.CHAT_IDS['main'])
     weekly_highlight_h.start_scheduler(Settings.CHAT_IDS['main'])
+    daily_prophecy_h.start_scheduler(Settings.CHAT_IDS['main'])
+    wordle_h.start_scheduler(Settings.CHAT_IDS['main'])
 
     # ── Register Telegram command menu ───────────────────────────────────────
     await bot.set_my_commands([
@@ -162,6 +170,7 @@ async def main():
         BotCommand(command="danetka",         description="Загадать данетку"),
         BotCommand(command="sdayus",          description="Сдаться в данетке"),
         BotCommand(command="anekdot",         description="Случайный анекдот"),
+        BotCommand(command="wordle",          description="Статус Wordle дня"),
         BotCommand(command="event",           description="Поставить ивент/напоминание"),
         BotCommand(command="events",          description="Список ивентов"),
         BotCommand(command="event_del",       description="Удалить ивент по номеру"),
