@@ -1489,7 +1489,7 @@ class MoltbotHandlers:
     def start_weekly_analytics_scheduler(self, chat_id: int):
         """Schedule weekly analytics independently of the proactive-message loop
         so disabling proactive messages can never silently take stats down with it."""
-        tz = ZoneInfo("Europe/Kiev")
+        tz = ZoneInfo("Europe/Kyiv")
         self._analytics_scheduler = AsyncIOScheduler(timezone=tz)
         self._analytics_scheduler.add_job(
             self._send_weekly_analytics,
@@ -1497,7 +1497,7 @@ class MoltbotHandlers:
             args=[chat_id],
         )
         self._analytics_scheduler.start()
-        logger.info(f"MoltBot: weekly analytics scheduler started for chat {chat_id} (Sun 21:00 Europe/Kiev)")
+        logger.info(f"MoltBot: weekly analytics scheduler started for chat {chat_id} (Sun 21:00 Europe/Kyiv)")
 
     async def _send_weekly_analytics(self, chat_id: int):
         try:

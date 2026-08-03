@@ -310,7 +310,7 @@ class WeeklyHighlightHandlers:
         """Normal path: voting closes the instant the 3rd person votes (see the
         callback handler). Monday 20:00 is just a backstop in case someone never
         gets around to voting — closes with whatever votes came in by then."""
-        tz = ZoneInfo("Europe/Kiev")
+        tz = ZoneInfo("Europe/Kyiv")
         self._scheduler = AsyncIOScheduler(timezone=tz)
         self._scheduler.add_job(
             self.post_weekly_highlight, CronTrigger(day_of_week='sun', hour=21, minute=30, timezone=tz),
@@ -323,5 +323,5 @@ class WeeklyHighlightHandlers:
         self._scheduler.start()
         logger.info(
             f"WeeklyHighlight: scheduler started for chat {chat_id} "
-            f"(post Sun 21:30, backstop close Mon 20:00 Europe/Kiev — normally closes as soon as all 3 vote)"
+            f"(post Sun 21:30, backstop close Mon 20:00 Europe/Kyiv — normally closes as soon as all 3 vote)"
         )
