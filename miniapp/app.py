@@ -484,8 +484,8 @@ def _refresh_wordle_message(today):
     ))
     rows = []
     for player_name, attempts, won, guesses in (games or []):
-        last_marks = guesses[-1]['marks'] if guesses else None
-        rows.append((player_name or 'Игрок', attempts, won, last_marks))
+        all_marks = [g['marks'] for g in (guesses or [])]
+        rows.append((player_name or 'Игрок', attempts, won, all_marks))
     text = build_message_text(rows)
     _telegram_edit_message(chat_id, message_id, text)
 

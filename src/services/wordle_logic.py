@@ -83,10 +83,11 @@ def build_share_text(d: date, attempts: int, won: bool, all_marks: list[list[str
     return f"Wordle дня {d.isoformat()} {result_label}\n\n{grid}"
 
 
-def build_message_text(rows: list[tuple[str, int, bool, list[str] | None]]) -> str:
-    """rows: list of (player_name, attempts, won, last_guess_marks) for players who
+def build_message_text(rows: list[tuple[str, int, bool, list[list[str]] | None]]) -> str:
+    """rows: list of (player_name, attempts, won, all_guess_marks) for players who
     have FINISHED today's puzzle — in-progress games are never shown, so nobody's
-    partial attempts leak into the group chat."""
+    partial attempts leak into the group chat. all_guess_marks holds only the
+    attempts actually made (no padding to MAX_ATTEMPTS)."""
     parts = [
         "🟩🟨⬜ <b>WORDLE ДНЯ</b> ⬜🟨🟩",
         "",
@@ -98,8 +99,10 @@ def build_message_text(rows: list[tuple[str, int, bool, list[str] | None]]) -> s
         parts.append("📊 Результаты: пока никто не сыграл")
     else:
         parts.append("📊 <b>Результаты дня:</b>")
-        for name, attempts, won, marks in rows:
-            grid = marks_to_emoji(marks) if marks else ""
+        for name, attempts, won, all_marks in rows:
             status = f"{attempts}/6" if won else "❌"
-            parts.append(f"{status} {grid} — <b>{name}</b>")
+            parts.append("")
+            parts.append(f"{status} — <b>{name}</b>")
+            if all_marks:
+                parts.append("\n".join(marks_to_emoji(m) for m in all_marks))
     return "\n".join(parts)

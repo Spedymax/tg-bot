@@ -1835,6 +1835,8 @@ class MoltbotHandlers:
             m.reply_to_message is not None
             and m.reply_to_message.from_user is not None
             and m.reply_to_message.from_user.is_bot
+            and m.pinned_message is None
+            and (m.from_user is None or not m.from_user.is_bot)
         )))
         async def handle_reply_to_bot(message: Message):
             await self._store_user_message(message)
