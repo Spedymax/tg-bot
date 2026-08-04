@@ -445,9 +445,12 @@ def _get_or_create_game(today, player_id, player_name):
 def _telegram_edit_message(chat_id, message_id, text):
     if not message_id or not Settings or not Settings.TELEGRAM_BOT_TOKEN:
         return
+    # web_app buttons are rejected by Telegram outside private chats (BUTTON_TYPE_INVALID) —
+    # this edits the pinned GROUP message, so it needs the same start-deep-link workaround
+    # used for the initial group post (see WordleHandlers._build_markup).
     markup = {
         "inline_keyboard": [[
-            {"text": "🎮 Играть в Wordle", "web_app": {"url": Settings.WORDLE_WEB_APP_URL}}
+            {"text": "🎮 Играть в Wordle", "url": f"https://t.me/{Settings.BOT_USERNAME}?start=wordle"}
         ]]
     }
     try:

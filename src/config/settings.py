@@ -89,6 +89,10 @@ class Settings:
 
     # Wordle mini-app
     WORDLE_WEB_APP_URL = os.getenv('WORDLE_WEB_APP_URL', 'https://casino.spedymax.org/miniapp/wordle')
+    # web_app inline buttons are only allowed in private chats (Telegram API restriction,
+    # BUTTON_TYPE_INVALID otherwise) — group messages use this deep-link instead, which
+    # opens a private chat with the bot and triggers the real web_app button there.
+    BOT_USERNAME = os.getenv('BOT_USERNAME', 'ggallmute2_bot')
 
     @classmethod
     def validate(cls):

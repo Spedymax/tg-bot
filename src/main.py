@@ -125,6 +125,9 @@ async def main():
     from handlers.prompt_handlers import prompt_router
     dp.include_router(prompt_router)
     dp.include_router(moltbot_h.router)
+    # wordle_h BEFORE game_h/admin_h: its CommandStart(deep_link=True) handler must see
+    # "/start wordle" before their unconditional Command('start') handlers swallow it.
+    dp.include_router(wordle_h.router)
     dp.include_router(game_h.router)
     dp.include_router(admin_h.router)
     dp.include_router(entertainment_h.router)
@@ -134,7 +137,6 @@ async def main():
     dp.include_router(pet_h.router)
     dp.include_router(weekly_highlight_h.router)
     dp.include_router(daily_prophecy_h.router)
-    dp.include_router(wordle_h.router)
 
     # ── Global error handler ──────────────────────────────────────────────────
     @dp.error()

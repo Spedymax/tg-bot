@@ -12,7 +12,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -32,6 +32,18 @@ class WordleHandlers:
         self._register()
 
     def _register(self):
+        @self.router.message(CommandStart(deep_link=True))
+        async def wordle_deep_link(message: Message, command: CommandObject):
+            # web_app buttons only work in private chats, so the group post links here
+            # instead (?start=wordle) — this handler fires once Telegram opens the
+            # resulting private chat, where the real web_app button is valid.
+            if command.args != 'wordle':
+                return
+            await message.answer(
+                "🟩🟨⬜ Открывай и угадывай сегодняшнее слово!",
+                reply_markup=self._build_markup(private=True),
+            )
+
         @self.router.message(Command('wordle'))
         async def wordle_status(message: Message):
             tz = ZoneInfo("Europe/Kyiv")
@@ -40,7 +52,8 @@ class WordleHandlers:
             if not row:
                 await message.reply("Вордль дня ещё не готов, загляни после 10:00 🌅")
                 return
-            await message.reply("🟩🟨⬜ Сегодняшний Wordle уже в игре!", reply_markup=self._build_markup())
+            private = message.chat.type == 'private'
+            await message.reply("🟩🟨⬜ Сегодняшний Wordle уже в игре!", reply_markup=self._build_markup(private=private))
 
         @self.router.message(Command('wordle_test'))
         async def wordle_test(message: Message):
@@ -51,17 +64,23 @@ class WordleHandlers:
                 "(одна попытка в день, общая для группы и этой тестовой ссылки)."
             )
             try:
-                await self.bot.send_message(message.from_user.id, text, reply_markup=self._build_markup())
+                await self.bot.send_message(message.from_user.id, text, reply_markup=self._build_markup(private=True))
                 if message.chat.type != 'private':
                     await message.reply("Кинул в личку 🎮")
             except Exception as e:
                 logger.warning(f"Wordle: failed to DM test link to {message.from_user.id}: {e}")
                 await message.reply("Не получилось написать в личку — напиши боту первым (/start) и попробуй снова.")
 
-    def _build_markup(self) -> InlineKeyboardMarkup:
-        return InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🎮 Играть в Wordle", web_app=WebAppInfo(url=Settings.WORDLE_WEB_APP_URL))
-        ]])
+    def _build_markup(self, private: bool) -> InlineKeyboardMarkup:
+        if private:
+            button = InlineKeyboardButton(text="🎮 Играть в Wordle", web_app=WebAppInfo(url=Settings.WORDLE_WEB_APP_URL))
+        else:
+            # Telegram rejects web_app buttons outside private chats (BUTTON_TYPE_INVALID) —
+            # deep-link into a private /start instead, see wordle_deep_link above.
+            button = InlineKeyboardButton(
+                text="🎮 Играть в Wordle", url=f"https://t.me/{Settings.BOT_USERNAME}?start=wordle",
+            )
+        return InlineKeyboardMarkup(inline_keyboard=[[button]])
 
     async def _ensure_tables(self):
         try:
@@ -119,7 +138,7 @@ class WordleHandlers:
             word = word_for_date(today)
             text = build_message_text([])
             sent = await self.bot.send_message(
-                chat_id, text, reply_markup=self._build_markup(), parse_mode='HTML',
+                chat_id, text, reply_markup=self._build_markup(private=False), parse_mode='HTML',
             )
             await self.db.execute_query(
                 "INSERT INTO wordle_daily (date, word, chat_id, message_id) "
@@ -135,10 +154,10 @@ class WordleHandlers:
             logger.error(f"Wordle: post_daily_wordle failed: {e}", exc_info=True)
 
     def start_scheduler(self, chat_id: int):
-        tz = ZoneInfo("Europe/Kyiv")
+        tz = ZoneInfo("Europe/Copenhagen")
         self._scheduler = AsyncIOScheduler(timezone=tz)
         self._scheduler.add_job(
             self.post_daily_wordle, CronTrigger(hour=10, minute=0, timezone=tz), args=[chat_id],
         )
         self._scheduler.start()
-        logger.info(f"Wordle: scheduler started for chat {chat_id} (post 10:00 Europe/Kyiv)")
+        logger.info(f"Wordle: scheduler started for chat {chat_id} (post 10:00 Europe/Copenhagen)")
