@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 # swap it for consistency with how the other two show up (real first names already).
 NAME_OVERRIDES = {"Spatifilum": "Юра"}
 
+# chat-lore.md's one entry is about "Эдик Коваленко" / его "торсионные генераторы" /
+# "Геническ" — used to detect if it showed up recently so we can cool it down
+# (see _lore_used_recently). Matches substrings, so "Генический"/"Геническа" etc. all hit.
+LORE_COOLDOWN_KEYWORDS = ("Коваленко", "торсион", "Генич")
+
 # Rotated daily so the delivery voice can't calcify into one predictable template —
 # but the CONTENT rule (concrete absurd mini-story with a twist, see EXAMPLE_PROPHECIES)
 # is the same regardless of voice.
@@ -93,6 +98,9 @@ COMMON_VOICE_RULES = (
     "положение) — используй только универсальные повседневные ситуации, которые подходят "
     "почти кому угодно: сон, еда, телефон/переписка, погода, настроение, случайные встречи, "
     "транспорт (метро/маршрутка/автобус, не личная машина), очереди, соседи. "
+    "СТРОГО ЗАПРЕЩЕНО использовать сценарий с кассой/терминалом/оплатой картой/мелочью на "
+    "кассе в ЛЮБОМ виде — эта тема уже настолько заезжена за последние дни, что стала общим "
+    "мемом чата про «то самое пророчество про кассу», найди принципиально другую сферу жизни. "
     f"Примеры нужного уровня конкретики, остроты и приземлённости, разного настроения "
     f"(не копируй буквально, придумывай новое):\n{EXAMPLE_PROPHECIES}"
 )
@@ -235,6 +243,13 @@ class DailyProphecyHandlers:
         except Exception:
             return ""
 
+    async def _lore_used_recently(self, chat_id: int, days: int = 5) -> bool:
+        """A flat per-day probability can still cluster by bad luck (it hit 3 of the
+        last 4 real days and people noticed — "Эдик не отпускает"). This hard-blocks
+        lore for a few days after it last actually appeared, on top of the roll."""
+        recent = await self._get_recent_prophecy_texts(chat_id, days=days, limit=100)
+        return any(kw in t for t in recent for kw in LORE_COOLDOWN_KEYWORDS)
+
     async def _get_recent_prophecy_texts(self, chat_id: int, days: int = 14, limit: int = 20) -> list[str]:
         """Flat list of individual past prophecy lines (not full rows) from the last
         N days, newest first, capped — fed back to the LLM so it stops repeating itself.
@@ -282,8 +297,11 @@ class DailyProphecyHandlers:
         history_block = ""
         if recent_texts:
             history_block = (
-                "Вот пророчества за последние дни — НЕ повторяй эти сюжеты и близкие к ним идеи, "
-                "придумай принципиально новые:\n" + "\n".join(f"- {t}" for t in recent_texts) + "\n\n"
+                "Вот пророчества за последние дни. ВАЖНО: избегай не только точного повтора "
+                "текста, но и повтора той же СИТУАЦИИ/СФЕРЫ ЖИЗНИ другими словами — если недавно "
+                "уже был, например, сюжет про очередь, про сломанную технику или про случайную "
+                "встречу, не делай ещё один такой же под другим соусом, возьми принципиально "
+                "другую область жизни:\n" + "\n".join(f"- {t}" for t in recent_texts) + "\n\n"
             )
         user_prompt = (
             (f"Инсайды и внутренние шутки этого чата (необязательно использовать):\n{lore}\n\n" if lore else "")
@@ -338,9 +356,12 @@ class DailyProphecyHandlers:
 
             # chat-lore.md currently holds a single running gag ("Эдик Коваленко") —
             # feeding it in on every single run makes the model lean on the one
-            # available callback constantly. Only offer it some of the time so it
-            # stays a rare treat instead of a daily crutch.
-            lore = self._load_lore() if random.random() < 0.3 else ""
+            # available callback constantly. Offer it rarely, AND only if it hasn't
+            # shown up in the last few days — a flat per-day roll alone can still
+            # cluster by bad luck (it hit 3 of 4 real days and people noticed).
+            lore = ""
+            if random.random() < 0.2 and not await self._lore_used_recently(chat_id):
+                lore = self._load_lore()
             recent_texts = await self._get_recent_prophecy_texts(chat_id)
             style, scene, prophecies = await self._generate_prophecies(per_person, lore, recent_texts)
 
