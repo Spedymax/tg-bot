@@ -71,6 +71,40 @@ FORMAT_FLAVORS = [
     "с явными подколками по поводу того, чьё пророчество абсурднее или обиднее остальных.",
 ]
 
+# Сфера сюжета НАЗНАЧАЕТСЯ каждому человеку заранее, а не выбирается моделью. Раньше
+# whitelist жил одной строкой внутри COMMON_VOICE_RULES ("сон, еда, телефон, погода...") —
+# модель стабильно брала оттуда два самых киногеничных пункта: за неделю 20 из 24 пророчеств
+# были про выпавший/самоотправивший-что-то телефон, почти все с жирной едой в маршрутке.
+# Позитивная инструкция ("твоя сфера — вот эта") держит разнообразие надёжнее любого запрета.
+LIFE_DOMAINS = [
+    "сон, будильник и утренний подъём",
+    "работа/учёба: созвон, дедлайн, начальник, коллеги",
+    "поход в аптеку, поликлинику или к врачу",
+    "спортзал, бег, попытка заняться собой",
+    "подъезд, лифт, домофон, соседи по этажу",
+    "курьер и доставка заказа",
+    "интернет, wi-fi, роутер, отключение света",
+    "деньги: банковское приложение, счёт, подписка, которую забыли отменить",
+    "бюрократия: документы, справки, очередь в госучреждении",
+    "парикмахерская или барбершоп",
+    "уборка, стирка, посуда, ремонт бытовой техники",
+    "магазин одежды и примерочная",
+    "погода: дождь, ветер, гололёд, жара",
+    "домашние животные — свои или чужие",
+    "родственники и семейный чат",
+    "дота/игры и стримы",
+    "случайная встреча со знакомым, которого не хотел видеть",
+    "свидание или попытка познакомиться",
+    "поездка: такси, поезд, аэропорт, отель",
+    "стройка, ремонт в квартире, мастер, который не пришёл",
+    "кафе, бар и попытка заказать что-то нормальное",
+    "мусор, консьерж, парковка, двор",
+    "школьные/студенческие воспоминания, всплывшие некстати",
+    "музыка в наушниках и уличные музыканты",
+    "спорт по телевизору, ставки, болельщики",
+    "попытка починить что-то своими руками",
+]
+
 LINKED_MODE_PROBABILITY = 0.4
 LINKED_MODE_INSTRUCTION = (
     "Сегодня особый режим: все три пророчества должны быть ЧАСТЯМИ ОДНОЙ цепочки событий — "
@@ -87,8 +121,8 @@ EXAMPLE_PROPHECIES = (
     "Сегодня в кафе к тебе подойдёт альтушка 10/10, но она разговаривает только на сербском.\n"
     "Сегодня коллеги наконец узнают, почему от тебя вечно пахнет вчерашним, и молча "
     "поставят освежитель воздуха тебе на стол — без единого слова, зато с осуждением во взгляде.\n"
-    "Сегодня тебе наконец ответят на то сообщение, которое ты писал три дня назад — да ещё "
-    "и с извинениями за молчание.\n"
+    "Сегодня в парикмахерской тебя пострижут ровно так, как ты просил, — первый раз за пять "
+    "лет, и ты полдня будешь ловить своё отражение в каждой витрине.\n"
     "Сегодня ты наконец выспишься по-настоящему, и день покажется процентов на тридцать "
     "менее отвратительным, чем обычно."
 )
@@ -105,7 +139,7 @@ COMMON_VOICE_RULES = (
     "Это чат друзей с чёрным, токсичным юмором и дружеским подстёбом — не смягчай и не "
     "цензурируй себя, резкая/подколистая шутка почти всегда лучше вежливой. "
     "Каждое пророчество — КОНКРЕТНАЯ мини-история про сегодня из ПРИЗЕМЛЁННОЙ повседневной "
-    "жизни: работа, транспорт, кафе, семья, телефон, соседи, погода, очередь в магазине. "
+    "жизни, в сфере, назначенной этому человеку ниже. "
     "СТРОГО ЗАПРЕЩЕНО: магия, сверхъестественные существа, инопланетяне, порталы, "
     "говорящие животные, воскрешение мёртвых, конец света в буквальном смысле — никакой "
     "фантастики, только то, что реально могло бы произойти с обычным человеком за день. "
@@ -116,12 +150,14 @@ COMMON_VOICE_RULES = (
     "фразы про судьбу и перемены типа «тебя ждут перемены» — это скучно и запрещено. "
     "НЕ придумывай про человека конкретные факты жизни, которых ты не знаешь и не видишь "
     "в его сообщениях (машина, ипотека, конкретная работа/должность, дети, семейное "
-    "положение) — используй только универсальные повседневные ситуации, которые подходят "
-    "почти кому угодно: сон, еда, телефон/переписка, погода, настроение, случайные встречи, "
-    "транспорт (метро/маршрутка/автобус, не личная машина), очереди, соседи. "
-    "СТРОГО ЗАПРЕЩЕНО использовать сценарий с кассой/терминалом/оплатой картой/мелочью на "
-    "кассе в ЛЮБОМ виде — эта тема уже настолько заезжена за последние дни, что стала общим "
-    "мемом чата про «то самое пророчество про кассу», найди принципиально другую сферу жизни. "
+    "положение) — держись универсальных ситуаций, которые подходят почти кому угодно, "
+    "внутри той сферы жизни, которая назначена этому человеку ниже. Сюжет ОБЯЗАН "
+    "происходить в назначенной сфере, не уводи его в другую. "
+    "СТРОГО ЗАПРЕЩЕНЫ (заезжено до состояния мема чата, ищи что угодно другое): касса/"
+    "терминал/оплата картой/мелочь на кассе; телефон как главный объект сюжета — выпал, "
+    "утонул, сам отправил сообщение/стикер/лайк, разбился экран; жирная еда, которая "
+    "пачкает одежду или в которую что-то падает (беляши, творог, бульон, рыба, чебуреки); "
+    "маршрутка/автобус как место действия. "
     f"Примеры нужного уровня конкретики, остроты и приземлённости, разного настроения "
     f"(не копируй буквально, придумывай новое):\n{EXAMPLE_PROPHECIES}"
 )
@@ -271,7 +307,16 @@ class DailyProphecyHandlers:
         recent = await self._get_recent_prophecy_texts(chat_id, days=days, limit=100)
         return any(kw in t for t in recent for kw in LORE_COOLDOWN_KEYWORDS)
 
-    async def _get_recent_prophecy_texts(self, chat_id: int, days: int = 14, limit: int = 20) -> list[str]:
+    async def _get_last_style(self, chat_id: int) -> str:
+        """doom_prophet came up 6 days out of 8 on a plain random.choice — with only four
+        voices that's enough repetition to read as "the bot has one mode"."""
+        rows = await self.db.execute_query(
+            "SELECT style FROM daily_prophecies WHERE chat_id = %s ORDER BY created_at DESC LIMIT 1",
+            (chat_id,),
+        )
+        return rows[0][0] if rows else ""
+
+    async def _get_recent_prophecy_texts(self, chat_id: int, days: int = 14, limit: int = 45) -> list[str]:
         """Flat list of individual past prophecy lines (not full rows) from the last
         N days, newest first, capped — fed back to the LLM so it stops repeating itself.
         `days` is a trusted internal value (never user input), so it's safe to interpolate
@@ -304,12 +349,29 @@ class DailyProphecyHandlers:
 
     async def _generate_prophecies(
         self, per_person: list[tuple[int, str, str]], lore: str, recent_texts: list[str] | None = None,
+        exclude_style: str = "",
     ) -> tuple[dict, str, list[dict]]:
         """Pure LLM-generation step, separated from the DB fetch so tests can feed
         synthetic (user_id, name, yesterday_text) rows without touching real chat history.
         Returns (style, scene_text, prophecies)."""
-        style = random.choice(PROPHET_STYLES)
+        pool = [s for s in PROPHET_STYLES if s["key"] != exclude_style] or PROPHET_STYLES
+        style = random.choice(pool)
         names = [name for _, name, _ in per_person]
+        # In linked mode all three prophecies are one chain of events, so per-person
+        # domains would fight the chain — hand out a single shared domain instead.
+        linked = random.random() < LINKED_MODE_PROBABILITY
+        if linked:
+            domain_block = (
+                f"Сфера жизни, в которой сегодня разворачивается вся цепочка событий: "
+                f"{random.choice(LIFE_DOMAINS)}\n\n"
+            )
+        else:
+            domains = (random.sample(LIFE_DOMAINS, len(names)) if len(names) <= len(LIFE_DOMAINS)
+                       else random.choices(LIFE_DOMAINS, k=len(names)))
+            domain_block = (
+                "Сфера жизни на сегодня для каждого — сюжет ОБЯЗАН развернуться именно в ней:\n"
+                + "\n".join(f"- {n}: {d}" for n, d in zip(names, domains)) + "\n\n"
+            )
 
         block = "\n".join(
             f"{name}: {text or '(гробовое молчание, вчера не написал ни слова)'}"
@@ -325,13 +387,14 @@ class DailyProphecyHandlers:
                 "другую область жизни:\n" + "\n".join(f"- {t}" for t in recent_texts) + "\n\n"
             )
         format_flavor = random.choice(FORMAT_FLAVORS)
-        linked_instruction = LINKED_MODE_INSTRUCTION if random.random() < LINKED_MODE_PROBABILITY else ""
+        linked_instruction = LINKED_MODE_INSTRUCTION if linked else ""
 
         user_prompt = (
             (f"Инсайды и внутренние шутки этого чата (необязательно использовать):\n{lore}\n\n" if lore else "")
             + f"Вот что вчера писал каждый (необязательный контекст для лёгкой персонализации, "
             + f"не обязан быть буквально связан с пророчеством):\n{block}\n\n"
             + history_block
+            + domain_block
             + linked_instruction
             + "Сначала опиши в 1-2 предложениях загадочную сцену — как вы (трое друзей, "
             + "от второго лица «вы») наткнулись именно сегодня на этого пророка, в обстановке, "
@@ -388,7 +451,10 @@ class DailyProphecyHandlers:
             if random.random() < 0.2 and not await self._lore_used_recently(chat_id):
                 lore = self._load_lore()
             recent_texts = await self._get_recent_prophecy_texts(chat_id)
-            style, scene, prophecies = await self._generate_prophecies(per_person, lore, recent_texts)
+            last_style = await self._get_last_style(chat_id)
+            style, scene, prophecies = await self._generate_prophecies(
+                per_person, lore, recent_texts, exclude_style=last_style
+            )
 
             if not prophecies:
                 logger.error("DailyProphecy: could not parse any prophecy, skipping post")
