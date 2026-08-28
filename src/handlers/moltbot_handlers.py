@@ -17,7 +17,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from config.settings import Settings
-from services.circuit_breaker import ollama_breaker, together_breaker
+from services.circuit_breaker import ollama_breaker, together_breaker, openrouter_breaker
 
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CHAT_SUMMARY_PATH = os.path.join(_BASE_DIR, 'data', 'chat-summary.md')
@@ -512,6 +512,47 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: Together.ai simple call failed: {e}")
             raise _AIConnectionError(str(e))
 
+    async def _call_openrouter_simple(self, prompt: str) -> str:
+        """Call OpenRouter (Grok) with a raw prompt + IDENTITY. Primary for proactive/probabilistic messages."""
+        if not Settings.OPENROUTER_API_KEY:
+            raise _AIConnectionError("OPENROUTER_API_KEY not set")
+        if not openrouter_breaker.allow_request():
+            raise _AIConnectionError("openrouter circuit breaker open")
+        try:
+            from services.prompt_service import get_prompt_service
+            identity = await get_prompt_service().get_current_identity()
+        except Exception:
+            identity = ""
+        system_msg = "\n\n".join([self._HARD_RULES, identity])
+        try:
+            data = await self._openrouter_post(
+                {
+                    "model": Settings.OPENROUTER_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_msg},
+                        {"role": "system", "content": self._POST_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "max_tokens": 500,
+                    "temperature": 0.8,
+                },
+                timeout=120,
+            )
+            openrouter_breaker.record_success()
+            return self._clean_persona_reply(data["choices"][0]["message"]["content"])
+        except Exception as e:
+            openrouter_breaker.record_failure()
+            logger.warning(f"MoltBot: OpenRouter simple call failed: {e}")
+            raise
+
+    async def _call_persona_simple(self, prompt: str) -> str:
+        """Primary entry point for proactive/probabilistic messages: OpenRouter/Grok first, Together.ai on failure."""
+        try:
+            return await self._call_openrouter_simple(prompt)
+        except Exception as e:
+            logger.info(f"MoltBot: falling back to Together.ai (simple) after OpenRouter failure ({e})")
+            return await self._call_together_simple(prompt)
+
     def _call_ollama_direct(self, content: str, bot=None, message=None) -> str:
         """Call Ollama directly. Routes through OllamaWakeManager for auto-wake.
         This is a sync method — wrap with asyncio.to_thread when calling from async context."""
@@ -611,7 +652,7 @@ class MoltbotHandlers:
                 "Напиши одно короткое сообщение как участник разговора.]"
             )
 
-            reply = await self._call_together_simple(user_content)
+            reply = await self._call_persona_simple(user_content)
 
             # Reply to the most recent stored message if we have its Telegram message_id
             reply_to = None
@@ -918,11 +959,9 @@ class MoltbotHandlers:
         messages.append({"role": "user", "content": f"{sender_name}: {user_text}"})
         return messages
 
-    async def _call_together(self, sender_name: str, user_text: str,
-                             chat_context: str, history: list[str] | None = None) -> str:
-        """Call Together.ai with IDENTITY.md as system prompt and proper multi-turn."""
-        if not Settings.TOGETHER_API_KEY:
-            raise _AIConnectionError("TOGETHER_API_KEY not set")
+    async def _build_persona_messages(self, sender_name: str, user_text: str,
+                                      chat_context: str, history: list[str] | None) -> list[dict]:
+        """Build the system+history+user message list shared by every persona-chat provider."""
         try:
             from services.prompt_service import get_prompt_service
             identity = await get_prompt_service().get_current_identity()
@@ -960,7 +999,21 @@ class MoltbotHandlers:
         else:
             messages.append({"role": "system", "content": self._POST_PROMPT})
             messages.extend(history_msgs)
+        return messages
 
+    @staticmethod
+    def _clean_persona_reply(text: str) -> str:
+        text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL).strip()
+        text = re.sub(r'\*[^*]{2,80}\*', '', text)
+        text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
+        return text
+
+    async def _call_together(self, sender_name: str, user_text: str,
+                             chat_context: str, history: list[str] | None = None) -> str:
+        """Call Together.ai with IDENTITY.md as system prompt and proper multi-turn."""
+        if not Settings.TOGETHER_API_KEY:
+            raise _AIConnectionError("TOGETHER_API_KEY not set")
+        messages = await self._build_persona_messages(sender_name, user_text, chat_context, history)
         data = await self._together_post(
             {
                 "model": Settings.TOGETHER_MODEL,
@@ -970,11 +1023,78 @@ class MoltbotHandlers:
             },
             timeout=120,
         )
-        text = data["choices"][0]["message"]["content"]
-        text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL).strip()
-        text = re.sub(r'\*[^*]{2,80}\*', '', text)
-        text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
-        return text
+        return self._clean_persona_reply(data["choices"][0]["message"]["content"])
+
+    async def _openrouter_post(self, payload: dict, timeout: float) -> dict:
+        """POST to OpenRouter (non-streaming) with retry on 5xx/429 and transient errors."""
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {Settings.OPENROUTER_API_KEY}"}
+        delays = [0, 1.5, 3.0]
+        last_exc: Exception | None = None
+        async with httpx.AsyncClient() as client:
+            for attempt, delay in enumerate(delays, start=1):
+                if delay:
+                    await asyncio.sleep(delay)
+                try:
+                    r = await client.post(url, headers=headers, json=payload, timeout=timeout)
+                    if r.status_code in (429, 502, 503, 504):
+                        last_exc = httpx.HTTPStatusError(
+                            f"OpenRouter {r.status_code}", request=r.request, response=r
+                        )
+                        logger.warning(f"MoltBot: OpenRouter {r.status_code}, retry {attempt}/3")
+                        continue
+                    if r.status_code != 200:
+                        raise _AIConnectionError(f"OpenRouter {r.status_code}: {r.text[:300]}")
+                    data = r.json()
+                    if "choices" not in data:
+                        raise _AIConnectionError(f"OpenRouter bad response: {str(data)[:300]}")
+                    return data
+                except (httpx.TransportError, httpx.TimeoutException) as e:
+                    last_exc = e
+                    logger.warning(f"MoltBot: OpenRouter transient error ({e!r}), retry {attempt}/3")
+                    continue
+        raise last_exc if last_exc else _AIConnectionError("OpenRouter retry exhausted")
+
+    async def _call_openrouter(self, sender_name: str, user_text: str,
+                               chat_context: str, history: list[str] | None = None) -> str:
+        """Call OpenRouter (Grok by default) — primary persona-chat model.
+
+        Grok was picked over Together's Qwen after a direct A/B test: on a real
+        chat scene where the bot got called out for dodging ("а че ты woke такой"),
+        Qwen/Llama kept deflecting ("это спам/шиза") instead of giving an actual
+        opinion, while Grok gave a real take without moralizing. See v25 identity
+        test in chat 2026-08-14/17.
+        """
+        if not Settings.OPENROUTER_API_KEY:
+            raise _AIConnectionError("OPENROUTER_API_KEY not set")
+        if not openrouter_breaker.allow_request():
+            raise _AIConnectionError("openrouter circuit breaker open")
+        messages = await self._build_persona_messages(sender_name, user_text, chat_context, history)
+        try:
+            data = await self._openrouter_post(
+                {
+                    "model": Settings.OPENROUTER_MODEL,
+                    "messages": messages,
+                    "max_tokens": 3000,
+                    "temperature": 0.8,
+                },
+                timeout=120,
+            )
+            openrouter_breaker.record_success()
+            return self._clean_persona_reply(data["choices"][0]["message"]["content"])
+        except Exception as e:
+            openrouter_breaker.record_failure()
+            logger.warning(f"MoltBot: OpenRouter call failed: {e}")
+            raise
+
+    async def _call_persona(self, sender_name: str, user_text: str,
+                            chat_context: str, history: list[str] | None = None) -> str:
+        """Primary persona-chat entry point: OpenRouter/Grok first, Together.ai on failure."""
+        try:
+            return await self._call_openrouter(sender_name, user_text, chat_context, history)
+        except Exception as e:
+            logger.info(f"MoltBot: falling back to Together.ai after OpenRouter failure ({e})")
+            return await self._call_together(sender_name, user_text, chat_context, history)
 
     def _would_gemini_block(self, user_text: str) -> bool:
         """Ask Qwen whether Gemini would likely block this message due to safety filters."""
@@ -1050,7 +1170,7 @@ class MoltbotHandlers:
             )
             augmented_text = f"{user_text}\n\n{search_context}"
             try:
-                return await self._call_together(sender_name, augmented_text, chat_context, history)
+                return await self._call_persona(sender_name, augmented_text, chat_context, history)
             except Exception as e:
                 logger.warning(f"MoltBot: re-call after search failed: {e}")
         # Search failed or no results — try Gemini
@@ -1063,11 +1183,11 @@ class MoltbotHandlers:
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str,
                                   history: list[str] | None = None) -> str:
-        """Route: Together.ai only → Brave Search (SEARCH:) / Gemini (INTERNET). No local fallback."""
-        if not Settings.TOGETHER_API_KEY:
-            raise _AIConnectionError("TOGETHER_API_KEY not set")
-        logger.info(f"MoltBot: together.ai for: {user_text[:60]}")
-        reply = await self._call_together(sender_name, user_text, chat_context, history)
+        """Route: OpenRouter/Grok → Together.ai fallback → Brave Search (SEARCH:) / Gemini (INTERNET)."""
+        if not Settings.OPENROUTER_API_KEY and not Settings.TOGETHER_API_KEY:
+            raise _AIConnectionError("Neither OPENROUTER_API_KEY nor TOGETHER_API_KEY set")
+        logger.info(f"MoltBot: persona call for: {user_text[:60]}")
+        reply = await self._call_persona(sender_name, user_text, chat_context, history)
         if not reply or not reply.strip():
             return reply
         logger.info(f"MoltBot: routed got reply ({len(reply)} chars): {reply[:100]!r}")
@@ -1150,7 +1270,7 @@ class MoltbotHandlers:
                     "1-2 предложения максимум. Не представляйся, не начинай с обращения.\n"
                     "Если ни одно сообщение не стоит ответа — верни пустую строку."
                 )
-                reply = await self._call_together_simple(prompt)
+                reply = await self._call_persona_simple(prompt)
                 logger.info(f"MoltBot: cold start probabilistic for chat {chat_id}")
             else:
                 # Warm session: Qwen filter → Claude response
@@ -1168,7 +1288,7 @@ class MoltbotHandlers:
                     "1-2 предложения максимум. Не представляйся, не начинай с обращения.\n"
                     "Если передумал — верни пустую строку.]"
                 )
-                reply = await self._call_together_simple(prompt)
+                reply = await self._call_persona_simple(prompt)
                 logger.info(f"MoltBot: warm session probabilistic for chat {chat_id}")
 
             reply = reply.strip()
@@ -1182,7 +1302,7 @@ class MoltbotHandlers:
                 results = await self._brave_search(search_q)
                 if results:
                     augmented = f"{prompt}\n\n[Результаты поиска '{search_q}':\n{results}\nОтвечай коротко.]"
-                    reply = await self._call_together_simple(augmented)
+                    reply = await self._call_persona_simple(augmented)
                     reply = reply.strip()
                     if not reply or self._extract_search_query(reply):
                         return False  # avoid infinite loop

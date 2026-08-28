@@ -74,3 +74,4 @@ class CircuitBreaker:
 ollama_breaker = CircuitBreaker("ollama", failure_threshold=3, recovery_timeout=120)
 gemini_breaker = CircuitBreaker("gemini", failure_threshold=5, recovery_timeout=60)
 together_breaker = CircuitBreaker("together", failure_threshold=3, recovery_timeout=120)
+openrouter_breaker = CircuitBreaker("openrouter", failure_threshold=3, recovery_timeout=120)

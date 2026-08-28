@@ -72,9 +72,17 @@ class Settings:
     LOCAL_LLM_URL = os.getenv('LOCAL_LLM_URL', 'http://192.168.1.3:11434')
     LOCAL_LLM_MODEL = os.getenv('LOCAL_LLM_MODEL', 'qwen3.5-uncensored')
 
-    # Together.ai (NSFW-capable model, used when Gemini would block)
+    # Together.ai (NSFW-capable model, used when Gemini would block) — kept as fallback
+    # behind OpenRouter/Grok, which was tested to give direct opinions instead of
+    # deflecting ("это спам/шиза") on race/politics topics per the persona's
+    # "no taboos, always have an opinion" rule.
     TOGETHER_API_KEY = os.getenv('TOGETHER_API_KEY')
     TOGETHER_MODEL = os.getenv('TOGETHER_MODEL', 'Qwen/Qwen3-235B-A22B-Instruct-2507-tput')
+
+    # OpenRouter (primary persona-chat model — Grok, less prone to deflecting on
+    # edgy topics than Qwen/Together; Together.ai above is the fallback on failure)
+    OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
+    OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'x-ai/grok-4.6')
 
     # Brave Search API
     BRAVE_API_KEY = os.getenv('BRAVE_API_KEY')
