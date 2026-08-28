@@ -53,7 +53,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def main():
+async def _main():
     Settings.validate()
 
     # ── Core services (async database pool + Redis) ──────────────────────────
@@ -203,6 +203,21 @@ async def main():
         await redis.aclose()
         await db_manager.close_all_connections()
         logger.info("Shutdown complete")
+
+
+async def main():
+    try:
+        await _main()
+    except Exception:
+        # ponytail: psycopg pool workers ignore cancellation, so a crash during
+        # startup leaves asyncio.run() hanging in _cancel_all_tasks forever. The PID
+        # stays alive, the dashboard monitor counts it as running and never restarts
+        # it (bot was dead 4h on 2026-08-26 after an openssl/postgres upgrade).
+        # Log the traceback (it is lost otherwise), flush, then hard-exit so
+        # monitor_loop picks us up within 5s.
+        logger.exception("Fatal error in main(), exiting for restart")
+        logging.shutdown()
+        os._exit(1)
 
 
 if __name__ == "__main__":
