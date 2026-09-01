@@ -25,6 +25,24 @@ CHAT_SUMMARY_PATH = os.path.join(_BASE_DIR, 'data', 'chat-summary.md')
 CHAT_LORE_PATH = os.path.join(_BASE_DIR, 'data', 'chat-lore.md')
 STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "moltbot_state.json")
 
+# Live-switchable reasoning depth for the OpenRouter/Grok persona model.
+# "low" is the everyday default (fast, cheap, same tone); people bump it to
+# "high" from the chat for a serious talk. After REASONING_RESET_AFTER of chat
+# silence it falls back to the default on its own.
+REASONING_LEVELS = ("low", "medium", "high")
+REASONING_DEFAULT = "low"
+REASONING_RESET_AFTER = timedelta(hours=3)
+_REASONING_ALIASES = {
+    "low": "low", "lo": "low", "лоу": "low", "мало": "low", "выкл": "low", "off": "low", "норм": "low",
+    "medium": "medium", "mid": "medium", "med": "medium", "мид": "medium", "средне": "medium", "средний": "medium",
+    "high": "high", "hi": "high", "хай": "high", "макс": "high", "max": "high", "много": "high", "серьёзно": "high", "серьезно": "high",
+}
+
+
+def _parse_reasoning_level(arg: str) -> str | None:
+    """Map a user-typed level ("high", "хай", "макс", ...) to low/medium/high, or None."""
+    return _REASONING_ALIASES.get((arg or "").strip().lower())
+
 
 class _AIConnectionError(Exception):
     """Raised when AI backend is unreachable or timed out."""
@@ -122,6 +140,8 @@ class MoltbotHandlers:
         self._active_danetka: dict[int, dict] = {}
         self._photo_context: dict[int, str] = {}  # bot_reply_msg_id → original photo file_id
         self._prob_session_start: dict[int, datetime] = {}  # chat_id → when probabilistic session started
+        self._reasoning_effort: str = REASONING_DEFAULT
+        self._reasoning_last_activity: datetime | None = None  # last chat activity seen (for auto-reset)
         self._load_state()
         self._init_gemini()
         asyncio.ensure_future(self._ensure_danetki_table())
@@ -137,6 +157,10 @@ class MoltbotHandlers:
                 data = json.load(f)
             for chat_id_str, ts in data.get("history_reset_time", {}).items():
                 self._history_reset_time[int(chat_id_str)] = datetime.fromisoformat(ts)
+            if data.get("reasoning_effort") in REASONING_LEVELS:
+                self._reasoning_effort = data["reasoning_effort"]
+            if data.get("reasoning_last_activity"):
+                self._reasoning_last_activity = datetime.fromisoformat(data["reasoning_last_activity"])
             logger.info(f"MoltBot: loaded state for {len(self._history_reset_time)} chat(s)")
         except FileNotFoundError:
             pass  # first run, nothing to load
@@ -150,6 +174,10 @@ class MoltbotHandlers:
                 "history_reset_time": {
                     str(k): v.isoformat() for k, v in self._history_reset_time.items()
                 },
+                "reasoning_effort": self._reasoning_effort,
+                "reasoning_last_activity": (
+                    self._reasoning_last_activity.isoformat() if self._reasoning_last_activity else None
+                ),
             }
             with open(STATE_PATH, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
@@ -157,6 +185,40 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: could not save state: {e}")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _touch_reasoning_activity(self) -> None:
+        """Record chat activity; the auto-reset countdown for reasoning depth starts from here."""
+        self._reasoning_last_activity = datetime.now(timezone.utc)
+
+    def _current_reasoning_effort(self) -> str:
+        """Effective reasoning level for the next persona call.
+
+        Lazily falls back to REASONING_DEFAULT once the chat has been silent for
+        REASONING_RESET_AFTER — no timer needed, the check runs on every call.
+        """
+        if self._reasoning_effort != REASONING_DEFAULT and self._reasoning_last_activity is not None:
+            idle = datetime.now(timezone.utc) - self._reasoning_last_activity
+            if idle >= REASONING_RESET_AFTER:
+                logger.info(f"MoltBot: reasoning {self._reasoning_effort} → {REASONING_DEFAULT} "
+                            f"after {idle} of chat silence")
+                self._reasoning_effort = REASONING_DEFAULT
+                self._save_state()
+        return self._reasoning_effort
+
+    def _set_reasoning_effort(self, level: str) -> None:
+        if level not in REASONING_LEVELS:
+            raise ValueError(f"bad reasoning level: {level}")
+        self._reasoning_effort = level
+        self._touch_reasoning_activity()
+        self._save_state()
+        logger.info(f"MoltBot: reasoning effort set to {level}")
+
+    def _reasoning_reset_in(self) -> timedelta | None:
+        """Time left until auto-reset, or None when already at the default."""
+        if self._reasoning_effort == REASONING_DEFAULT or self._reasoning_last_activity is None:
+            return None
+        left = REASONING_RESET_AFTER - (datetime.now(timezone.utc) - self._reasoning_last_activity)
+        return max(left, timedelta(0))
 
     async def _get_bot_username(self) -> str:
         if not self._bot_username:
@@ -368,6 +430,7 @@ class MoltbotHandlers:
 
     async def _store_user_message(self, message):
         """Store a user message in the messages table (for analytics)."""
+        self._touch_reasoning_activity()
         try:
             if message.text and message.from_user and not message.from_user.is_bot:
                 name = message.from_user.first_name or message.from_user.username or 'Аноним'
@@ -535,6 +598,7 @@ class MoltbotHandlers:
                     ],
                     "max_tokens": 500,
                     "temperature": 0.8,
+                    "reasoning": {"effort": self._current_reasoning_effort()},
                 },
                 timeout=120,
             )
@@ -1081,6 +1145,7 @@ class MoltbotHandlers:
                     "messages": messages,
                     "max_tokens": 3000,
                     "temperature": 0.8,
+                    "reasoning": {"effort": self._current_reasoning_effort()},
                 },
                 timeout=120,
             )
@@ -1885,6 +1950,37 @@ class MoltbotHandlers:
             self._save_state()
             logger.info(f"MoltBot: history reset for ALL chats ({len(all_chat_ids)}) by {message.from_user.id}")
             await message.reply(f"⚙️ Контекст сброшен во всех чатах ({len(all_chat_ids)}). Чистый лист.")
+
+        @router.message(Command(commands=['reasoning', 'ризонинг', 'думай']))
+        async def handle_reasoning(message: Message):
+            """Everyone in the chat may switch how hard Grok thinks: low for banter, high for a serious talk."""
+            parts = (message.text or "").split(maxsplit=1)
+            arg = parts[1] if len(parts) > 1 else ""
+            current = self._current_reasoning_effort()
+            if not arg.strip():
+                left = self._reasoning_reset_in()
+                tail = ""
+                if left is not None:
+                    mins = int(left.total_seconds() // 60)
+                    tail = f"\nСброс на {REASONING_DEFAULT} через {mins // 60}ч {mins % 60:02d}м тишины в чате."
+                await message.reply(
+                    f"🧠 Ризонинг сейчас: {current}{tail}\n"
+                    "Поменять: /reasoning low | medium | high"
+                )
+                return
+            level = _parse_reasoning_level(arg)
+            if level is None:
+                await message.reply(f"Не понял «{arg.strip()}». Варианты: low, medium, high.")
+                return
+            self._set_reasoning_effort(level)
+            hours = int(REASONING_RESET_AFTER.total_seconds() // 3600)
+            if level == REASONING_DEFAULT:
+                await message.reply(f"🧠 Ризонинг: {level}. Обычный режим, думаю быстро.")
+            else:
+                await message.reply(
+                    f"🧠 Ризонинг: {level}. Думаю глубже, отвечаю медленнее. "
+                    f"Через {hours}ч тишины в чате сам вернусь на {REASONING_DEFAULT}."
+                )
 
         @router.message(Command(commands=['memory', 'память']))
         async def handle_memory_view(message: Message):
