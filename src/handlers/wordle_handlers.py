@@ -136,7 +136,19 @@ class WordleHandlers:
                     logger.warning(f"Wordle: failed to unpin previous message: {e}")
 
             word = word_for_date(today)
-            text = build_message_text([])
+            # Include games already finished for this date (normally none, but a
+            # missed post day or legacy early-morning games would otherwise be
+            # silently dropped from the fresh message).
+            games = await self.db.execute_query(
+                "SELECT player_name, attempts, won, guesses FROM wordle_games "
+                "WHERE date = %s AND finished = TRUE ORDER BY finished_at ASC",
+                (today,),
+            )
+            rows = [
+                (name or 'Игрок', attempts, won, [g['marks'] for g in (guesses or [])])
+                for name, attempts, won, guesses in (games or [])
+            ]
+            text = build_message_text(rows)
             sent = await self.bot.send_message(
                 chat_id, text, reply_markup=self._build_markup(private=False), parse_mode='HTML',
             )
