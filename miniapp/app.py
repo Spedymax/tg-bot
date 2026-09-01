@@ -390,6 +390,25 @@ def _today_kyiv():
     return datetime.now(ZoneInfo("Europe/Kyiv")).date()
 
 
+def _current_puzzle():
+    """Date and word of the active puzzle = the most recently POSTED daily
+    (wordle_daily), not the raw calendar date. Between midnight and the ~11:00
+    Kyiv group post the pinned message everyone opens is still yesterday's, so
+    serving word_for_date(today) in that window makes players silently burn the
+    new day's attempt on a puzzle nobody has posted yet — and their result is
+    dropped by _refresh_wordle_message because the wordle_daily row for the new
+    date doesn't exist. Using the stored word also survives answer-list edits
+    shifting word_for_date indices. Falls back to the calendar date only before
+    the first daily has ever been posted."""
+    row = run_async(db_manager.execute_query(
+        "SELECT date, word FROM wordle_daily ORDER BY date DESC LIMIT 1", ()
+    ))
+    if row:
+        return row[0][0], row[0][1]
+    today = _today_kyiv()
+    return today, word_for_date(today)
+
+
 def _validate_init_data(init_data: str, max_age_seconds: int = 86400):
     """Validate Telegram WebApp initData per the documented HMAC scheme, so a
     guess/result can never be attributed to the wrong Telegram user. Returns the
@@ -532,10 +551,7 @@ def wordle_today():
     player_id = user['id']
     player_name = user.get('first_name') or user.get('username') or 'Игрок'
 
-    today = _today_kyiv()
-    # Deterministic per-date word — computable without waiting on the daily
-    # group post, so the mini-app is playable (e.g. via a DM test link) any time.
-    target = word_for_date(today)
+    today, target = _current_puzzle()
 
     game = _get_or_create_game(today, player_id, player_name)
     player = run_async(player_service.get_player(player_id))
@@ -572,8 +588,7 @@ def wordle_guess():
     if len(guess) != WORD_LENGTH or not re.fullmatch(r'[a-z]+', guess):
         return jsonify({'success': False, 'error': 'invalid_format'}), 400
 
-    today = _today_kyiv()
-    target = word_for_date(today)
+    today, target = _current_puzzle()
 
     game = _get_or_create_game(today, player_id, player_name)
     if game['finished']:
