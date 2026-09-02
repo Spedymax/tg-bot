@@ -339,6 +339,14 @@ class TriviaHandlers:
                         player.add_item('pet_food_basic')
                         await self.bot.send_message(chat_id, f"🍖 {player.player_name} получил +1 корм для питомца!", disable_notification=True)
 
+                    try:
+                        from services.boss_service import get_boss_service
+                        _boss = get_boss_service()
+                        if _boss:
+                            await _boss.deal_damage(user_id, player.player_name, 'trivia')
+                    except Exception as _e:
+                        logger.warning(f"Boss hook (trivia) failed: {_e}")
+
                     self._maybe_send_death_notice(chat_id, player)
                     await self.player_service.save_player(player)
             else:

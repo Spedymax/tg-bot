@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -32,7 +32,7 @@ class WordleHandlers:
         self._register()
 
     def _register(self):
-        @self.router.message(CommandStart(deep_link=True))
+        @self.router.message(CommandStart(deep_link=True, magic=F.args == 'wordle'))
         async def wordle_deep_link(message: Message, command: CommandObject):
             # web_app buttons only work in private chats, so the group post links here
             # instead (?start=wordle) — this handler fires once Telegram opens the

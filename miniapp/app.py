@@ -30,8 +30,10 @@ try:
         score_guess, is_valid_guess, build_message_text, build_share_text,
         word_for_date, WORD_LENGTH, MAX_ATTEMPTS,
     )
+    from services.boss_service import get_boss_service
 except ImportError as e:
     Settings = DatabaseManager = PlayerService = None
+    get_boss_service = None
     score_guess = is_valid_guess = build_message_text = build_share_text = word_for_date = None
     WORD_LENGTH, MAX_ATTEMPTS = 5, 6
 
@@ -69,6 +71,8 @@ if db_manager and player_service:
     try:
         run_async(db_manager.init_pool())
         logger.info("Async DB connection pool opened")
+        if get_boss_service:
+            get_boss_service(db_manager)  # boss event hooks (Pudginio) share this pool
     except Exception as e:
         logger.error(f"Failed to open DB pool, falling back to in-memory: {e}")
         db_manager = None
@@ -527,6 +531,12 @@ def _apply_wordle_reward(player_id, player_name, today, won, attempts):
         reward = max(10, (MAX_ATTEMPTS + 1 - attempts) * 15)
         # pisunchik_data.coins is bigint — keep integer math, matching the casino routes above.
         player.coins = int(getattr(player, 'coins', 0)) + reward
+        try:
+            _boss = get_boss_service() if get_boss_service else None
+            if _boss:
+                run_async(_boss.deal_damage(player_id, player_name, 'wordle', 20 + 5 * (MAX_ATTEMPTS - attempts)))
+        except Exception as _e:
+            logger.warning(f"Boss hook (wordle) failed: {_e}")
     else:
         player.wordle_streak = 0
 

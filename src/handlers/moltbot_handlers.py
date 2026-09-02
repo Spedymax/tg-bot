@@ -989,11 +989,23 @@ class MoltbotHandlers:
 
     _HARD_RULES = ""
 
-    _POST_PROMPT = (
+    _POST_PROMPT_BASE = (
         "(Тон: ты дружелюбный свой, а не уставший злой сосед. Стёб — по-доброму и со смехом, "
         "не огрызайся и не отгоняй людей («не тегай», «не ной», «сам ищи» — так не отвечай). "
         "Просят помочь — помоги, подкол только сверху ответа, а не вместо него.)"
     )
+
+    @property
+    def _POST_PROMPT(self) -> str:
+        """Post-prompt plus whatever the boss event wants to inject (Pudginio hijack,
+        MVP respect). The injection is a sync cache refreshed by BossHandlers' tick."""
+        try:
+            from services.boss_service import get_boss_service
+            _boss = get_boss_service()
+            inj = _boss.persona_injection if _boss else ""
+        except Exception:
+            inj = ""
+        return f"{self._POST_PROMPT_BASE}\n\n{inj}" if inj else self._POST_PROMPT_BASE
 
     # Bot names used to identify assistant messages in history
     _BOT_NAMES = {"Кеша", "Иннокентий", "Лолита", "Ло", "Лола", "Jarvis"}

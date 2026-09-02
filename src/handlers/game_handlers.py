@@ -151,6 +151,14 @@ class GameHandlers:
             await self._maybe_send_death_notice(message.chat.id, player)
             await self.player_service.save_player(player)
 
+            try:
+                from services.boss_service import get_boss_service
+                _boss = get_boss_service()
+                if _boss:
+                    await _boss.deal_damage(player_id, player.player_name, 'pisunchik')
+            except Exception as _e:
+                logger.warning(f"Boss hook (pisunchik) failed: {_e}")
+
             pet_badge = await _pet_svc.get_pet_badge(player)
 
             reply_message = (

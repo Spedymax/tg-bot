@@ -322,6 +322,13 @@ class QuizScheduler:
             player_scores = await self._get_player_scores_for_chat(self.target_chat_id)
 
             message = self._format_daily_answers(questions, player_scores)
+            try:
+                from services.boss_service import get_boss_service
+                _boss = get_boss_service()
+                if _boss:
+                    message += await _boss.summary_block()
+            except Exception as _e:
+                logger.warning(f"Boss summary in daily answers failed: {_e}")
             await self._send_long_message(self.target_chat_id, message)
             logger.info(f"Daily answers broadcast sent successfully ({len(questions)} questions)")
 
