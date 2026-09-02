@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import random
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -126,11 +127,13 @@ class BossHandlers:
 
         @self.router.message(Command('pudge_intro_test'))
         async def pudge_intro_test(message: Message):
-            """Preview the intro in the admin's DM, without pauses."""
+            """Preview the intro in the admin's DM with the real pacing (add `fast` to skip pauses)."""
             if not self._is_admin(message):
                 return
             ctx = await self._intro_context(DEFAULT_DAYS)
-            await self.play_scene(message.from_user.id, self.content.get('boss_intro', []), ctx, fast=True)
+            fast = 'fast' in (message.text or '')
+            await self.play_scene(message.from_user.id, self.content.get('boss_intro', []), ctx, fast=fast,
+                                  image_trigger="ПУДЖИНИО-ФАМОЗА'")
 
         @self.router.message(Command('pudge_merchant_test'))
         async def pudge_merchant_test(message: Message):
@@ -221,9 +224,13 @@ class BossHandlers:
             if fast:
                 await asyncio.sleep(0.05)
             elif 'вспышка' in line.lower() or 'ослепляет' in line.lower():
-                await asyncio.sleep(3)
+                await asyncio.sleep(3.5)
             elif line.strip() in ('...', '.....'):
-                await asyncio.sleep(2)
+                await asyncio.sleep(2.5)
+            elif re.search(r"[А-ЯЁ]{3,}(?:[ ,.!?-]+[А-ЯЁ]{3,}){1,}", line) or line.startswith('*'):
+                await asyncio.sleep(3)          # shouted lines and *event markers* need to land
+            elif len(line) > 110:
+                await asyncio.sleep(2.6)        # long line: give people time to read it
             elif i < len(lines) - 1:
                 await asyncio.sleep(1.8)
 

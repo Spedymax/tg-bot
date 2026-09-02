@@ -2,165 +2,244 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Данж Пуджинио</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg: var(--tg-theme-bg-color, #15161a);
-    --card: var(--tg-theme-secondary-bg-color, #1f2026);
-    --fg: var(--tg-theme-text-color, #f2f2f2);
-    --hint: var(--tg-theme-hint-color, #8a8a8f);
-    --button: var(--tg-theme-button-color, #3390ec);
-    --button-text: var(--tg-theme-button-text-color, #ffffff);
-    --hp: #d9534f; --hp-bg: #3a2426; --gold: #e0b341; --enemy: #9b59b6; --ok: #538d4e; --bad: #b0413e;
+    --stone:#2a2622; --stone-dark:#17140f; --stone-light:#3d3630; --mortar:#0c0a08;
+    --gold:#d8a838; --gold-dim:#8a6a22; --parch:#e6d3a3; --parch-dark:#c9b27e; --ink:#2b1d0e;
+    --hp:#c62e2e; --hp-dark:#5a1414; --enemy:#8b3fb8; --enemy-dark:#3a1a4d; --ok:#5aa85a; --torch:#ff9a2e;
+    --fg:#e8dcc4; --hint:#9c8f78;
+    --pixel:'Press Start 2P', monospace; --body:'Rubik', -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --bar-h: 118px;
   }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  body{ margin:0; padding:12px 12px 24px; background:var(--bg); color:var(--fg);
-        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; touch-action:manipulation; }
-  header{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
-  header h1{ font-size:18px; margin:0; letter-spacing:1px; }
-  header .sub{ color:var(--hint); font-size:12px; }
-  .map{ display:flex; gap:4px; margin:6px 0 10px; }
-  .map span{ flex:1; height:6px; border-radius:3px; background:#333; }
-  .map span.done{ background:var(--ok); }
-  .map span.current{ background:var(--button); box-shadow:0 0 6px var(--button); }
-  .map span.boss{ border:1px solid var(--gold); }
-  .stats{ display:grid; grid-template-columns:1fr auto; gap:6px 10px; align-items:center; background:var(--card);
-          border-radius:12px; padding:10px 12px; margin-bottom:10px; font-size:14px; }
-  .bar{ position:relative; height:14px; background:var(--hp-bg); border-radius:7px; overflow:hidden; }
-  .bar i{ position:absolute; left:0; top:0; bottom:0; background:var(--hp); transition:width .35s ease; }
-  .bar.enemy{ background:#2b2233; } .bar.enemy i{ background:var(--enemy); }
-  .bar b{ position:absolute; inset:0; font-size:10px; line-height:14px; text-align:center; font-weight:600; color:#fff; text-shadow:0 0 2px #000; }
-  .chips{ display:flex; gap:10px; font-size:13px; white-space:nowrap; }
-  .card{ background:var(--card); border-radius:14px; padding:14px; margin-bottom:10px; min-height:150px; }
-  .card .top{ display:flex; gap:12px; align-items:center; }
-  .card .emoji{ font-size:44px; line-height:1; filter:drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
-  .card h2{ margin:0; font-size:17px; }
-  .card .room{ color:var(--hint); font-size:12px; }
-  .card p{ margin:8px 0 0; font-size:14px; line-height:1.4; white-space:pre-wrap; }
-  .card p.flavor{ color:var(--hint); font-style:italic; font-size:13px; }
-  .enemybox{ margin-top:10px; }
-  .enemybox .row{ display:flex; justify-content:space-between; font-size:12px; color:var(--hint); margin-bottom:3px; }
-  .actions{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
-  .actions button{ padding:13px 10px; border:0; border-radius:12px; background:var(--button); color:var(--button-text);
-                   font-size:14px; font-weight:600; cursor:pointer; }
-  .actions button:disabled{ opacity:.4; }
-  .actions button.wide{ grid-column:1 / -1; }
-  .actions button.busy{ opacity:.6; }
-  .log{ background:var(--card); border-radius:12px; padding:10px 12px; font-size:13px; line-height:1.45; color:var(--hint); }
-  .log div{ padding:2px 0; border-bottom:1px solid rgba(255,255,255,.04); }
-  .log div:last-child{ color:var(--fg); border:0; }
-  .end{ background:var(--card); border-radius:14px; padding:16px; margin-bottom:10px; text-align:center; }
-  .end h2{ margin:0 0 8px; }
-  .end .others{ text-align:left; margin-top:12px; font-size:14px; line-height:1.6; }
-  .end .boss{ margin-top:12px; font-size:13px; color:var(--hint); }
+  html,body{ height:100%; }
+  body{
+    margin:0; color:var(--fg); font-family:var(--body); font-size:15px; line-height:1.4;
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(255,150,40,.10), transparent 55%),
+      radial-gradient(ellipse at 50% 100%, rgba(0,0,0,.6), transparent 60%),
+      repeating-linear-gradient(0deg, var(--mortar) 0 2px, transparent 2px 46px),
+      repeating-linear-gradient(90deg, var(--mortar) 0 2px, transparent 2px 92px),
+      linear-gradient(180deg, #221e19, #15120e);
+    background-attachment: fixed;
+    padding: 10px 12px calc(var(--bar-h) + env(safe-area-inset-bottom, 0px) + 14px);
+    touch-action:manipulation; overflow-x:hidden;
+  }
+  body::before{ /* stone noise */
+    content:''; position:fixed; inset:0; pointer-events:none; opacity:.35; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.45 0 0 0 0 0.4 0 0 0 .6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+  body::after{ /* vignette */
+    content:''; position:fixed; inset:0; pointer-events:none; z-index:1;
+    background:radial-gradient(ellipse at 50% 45%, transparent 45%, rgba(0,0,0,.75) 100%);
+  }
+  .torch{ position:fixed; top:6px; font-size:26px; z-index:2; filter:drop-shadow(0 0 10px var(--torch)); animation:flicker 1.6s infinite; }
+  .torch.l{ left:8px; } .torch.r{ right:8px; animation-delay:.7s; }
+  .torch::after{ content:''; position:absolute; left:50%; top:60%; width:180px; height:180px; transform:translate(-50%,-30%);
+                 background:radial-gradient(circle, rgba(255,150,40,.22), transparent 70%); animation:glow 1.6s infinite; pointer-events:none; }
+  @keyframes flicker{ 0%,100%{ transform:scale(1) rotate(-2deg); opacity:1 } 30%{ transform:scale(1.08) rotate(2deg); opacity:.85 } 60%{ transform:scale(.96) rotate(-1deg); opacity:.95 } }
+  @keyframes glow{ 0%,100%{ opacity:.9 } 50%{ opacity:.55 } }
+
+  .wrap{ position:relative; z-index:2; max-width:520px; margin:0 auto; }
+  header{ text-align:center; padding:6px 30px 4px; }
+  header h1{ font-family:var(--pixel); font-size:13px; letter-spacing:1px; margin:0; color:var(--gold);
+             text-shadow:0 0 12px rgba(216,168,56,.5), 2px 2px 0 #000; }
+  header .sub{ font-family:var(--pixel); font-size:8px; color:var(--hint); margin-top:6px; }
+
+  /* corridor map */
+  .map{ display:flex; gap:3px; margin:10px 0 10px; padding:6px; background:var(--stone-dark); border:2px solid #000; border-radius:4px;
+        box-shadow: inset 0 0 0 1px var(--stone-light), 0 2px 0 #000; }
+  .map span{ flex:1; aspect-ratio:1; display:flex; align-items:center; justify-content:center; font-size:14px;
+             background:linear-gradient(180deg, var(--stone-light), var(--stone)); border:1px solid #000; border-radius:2px; color:#5a5148; }
+  .map span.done{ background:linear-gradient(180deg,#3e5a3a,#2b3f28); color:#dfe8d0; }
+  .map span.current{ background:linear-gradient(180deg,#8a6a22,#5e4614); color:#fff; box-shadow:0 0 10px rgba(216,168,56,.7); animation:pulse 1.2s infinite; }
+  .map span.boss{ border-color:var(--gold-dim); }
+  @keyframes pulse{ 50%{ box-shadow:0 0 3px rgba(216,168,56,.4) } }
+
+  /* stone panels */
+  .slab{ background:linear-gradient(180deg, var(--stone-light), var(--stone) 30%, var(--stone-dark)); border:2px solid #000; border-radius:6px;
+         box-shadow: inset 0 1px 0 rgba(255,255,255,.08), inset 0 -2px 0 rgba(0,0,0,.6), 0 3px 0 #000, 0 8px 16px rgba(0,0,0,.5); }
+  .stats{ padding:10px 12px; margin-bottom:10px; display:grid; grid-template-columns:1fr auto; gap:8px 12px; align-items:center; }
+  .bar{ position:relative; height:18px; background:var(--hp-dark); border:2px solid #000; border-radius:3px; overflow:hidden;
+        box-shadow: inset 0 2px 4px rgba(0,0,0,.7); }
+  .bar i{ position:absolute; left:0; top:0; bottom:0; background:linear-gradient(180deg,#e04646,var(--hp) 50%,#8d1e1e); transition:width .4s ease;
+          background-size:8px 100%; }
+  .bar i::after{ content:''; position:absolute; inset:0; background:repeating-linear-gradient(90deg, transparent 0 9px, rgba(0,0,0,.25) 9px 10px); }
+  .bar.enemy{ background:var(--enemy-dark); } .bar.enemy i{ background:linear-gradient(180deg,#b06be0,var(--enemy) 50%,#5a2a7a); }
+  .bar b{ position:absolute; inset:0; font-family:var(--pixel); font-size:8px; line-height:14px; text-align:center; color:#fff; text-shadow:1px 1px 0 #000; }
+  .chips{ display:flex; gap:9px; font-family:var(--pixel); font-size:9px; white-space:nowrap; color:var(--fg); text-shadow:1px 1px 0 #000; }
+  .chips .g{ color:var(--gold); }
+
+  /* room scene */
+  .scene{ padding:0; margin-bottom:10px; overflow:hidden; }
+  .scene .door{ position:relative; padding:18px 14px 14px; text-align:center;
+     background:
+       radial-gradient(ellipse at 50% 30%, rgba(255,150,40,.16), transparent 60%),
+       linear-gradient(180deg, #0f0d0a, #1b1712);
+     border-bottom:2px solid #000; }
+  .scene .door .roomno{ font-family:var(--pixel); font-size:8px; color:var(--hint); letter-spacing:1px; }
+  .scene .door .emoji{ font-size:64px; line-height:1.1; margin:8px 0 6px; filter:drop-shadow(0 6px 10px rgba(0,0,0,.8)); animation:idle 3s ease-in-out infinite; }
+  @keyframes idle{ 50%{ transform:translateY(-4px) } }
+  .scene .door h2{ font-family:var(--pixel); font-size:11px; margin:0; color:var(--gold); text-shadow:2px 2px 0 #000; line-height:1.6; }
+  .enemybox{ margin:10px auto 0; max-width:320px; text-align:left; }
+  .enemybox .row{ display:flex; justify-content:space-between; font-family:var(--pixel); font-size:7px; color:var(--hint); margin-bottom:4px; }
+  .parch{ margin:10px; padding:12px 14px; color:var(--ink); font-size:14.5px;
+          background:linear-gradient(180deg, var(--parch), var(--parch-dark)); border:2px solid #4a3418; border-radius:3px;
+          box-shadow: inset 0 0 18px rgba(74,52,24,.35), 0 2px 0 #000; white-space:pre-wrap; }
+  .parch .flavor{ font-style:italic; color:#6a512c; font-size:13px; margin-bottom:8px; }
+
+  /* chronicle */
+  .log{ padding:10px 12px; font-size:13.5px; color:var(--hint); }
+  .log .t{ font-family:var(--pixel); font-size:8px; color:var(--gold-dim); margin-bottom:6px; letter-spacing:1px; }
+  .log div.e{ padding:3px 0; border-bottom:1px solid rgba(255,255,255,.05); }
+  .log div.e:last-child{ color:var(--fg); border:0; }
+
+  /* action bar */
+  .bar-actions{ position:fixed; left:0; right:0; bottom:0; z-index:5; padding:10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+     background:linear-gradient(180deg, var(--stone-light), var(--stone) 25%, var(--stone-dark)); border-top:3px solid #000;
+     box-shadow: inset 0 2px 0 rgba(255,255,255,.08), 0 -8px 20px rgba(0,0,0,.6); }
+  .bar-actions .in{ max-width:520px; margin:0 auto; display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .btn{ padding:13px 8px; min-height:48px; border:2px solid #000; border-radius:4px; color:var(--fg); font-family:var(--pixel); font-size:9px; line-height:1.5;
+        background:linear-gradient(180deg,#5a4f43,#3a322b 60%,#2a241f); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 3px 0 #000; cursor:pointer; text-shadow:1px 1px 0 #000; }
+  .btn:active{ transform:translateY(3px); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 0 0 #000; }
+  .btn:disabled{ opacity:.35; }
+  .btn.busy{ opacity:.6; }
+  .btn.wide{ grid-column:1 / -1; }
+  .btn.gold{ background:linear-gradient(180deg,#c9a03a,#8a6a22 60%,#5e4614); color:#fff8e6; }
+  .btn.red{ background:linear-gradient(180deg,#a83a3a,#6b1f1f 60%,#4a1414); }
+  .btn.blue{ background:linear-gradient(180deg,#3f5f8a,#28405f 60%,#1b2c44); }
+  .btn.green{ background:linear-gradient(180deg,#4f8a45,#2f5a2a 60%,#1f3d1b); }
+  .btn.purple{ background:linear-gradient(180deg,#7a4a9a,#4a2a62 60%,#2e1a40); }
+
+  /* end */
+  .end{ padding:16px; margin-bottom:10px; text-align:center; }
+  .end h2{ font-family:var(--pixel); font-size:12px; margin:6px 0 10px; color:var(--gold); text-shadow:2px 2px 0 #000; line-height:1.7; }
+  .end .big{ font-size:70px; filter:drop-shadow(0 6px 10px rgba(0,0,0,.8)); }
+  .end .others{ text-align:left; margin-top:12px; font-size:14px; line-height:1.7; }
+  .end .boss{ margin-top:12px; font-family:var(--pixel); font-size:8px; color:var(--hint); line-height:1.8; }
+
   .hidden{ display:none !important; }
-  .shake{ animation:shake .35s; } @keyframes shake{ 0%,100%{transform:translateX(0)} 25%{transform:translateX(-5px)} 75%{transform:translateX(5px)} }
-  .err{ color:var(--bad); text-align:center; padding:30px 10px; }
+  .flash{ position:fixed; inset:0; z-index:4; pointer-events:none; opacity:0; transition:opacity .35s; }
+  .flash.hit{ background:radial-gradient(ellipse, transparent 40%, rgba(200,30,30,.55)); opacity:1; transition:none; }
+  .flash.heal{ background:radial-gradient(ellipse, transparent 40%, rgba(60,180,80,.45)); opacity:1; transition:none; }
+  .shake{ animation:shake .35s; } @keyframes shake{ 0%,100%{transform:translateX(0)} 20%{transform:translateX(-6px)} 40%{transform:translateX(6px)} 60%{transform:translateX(-4px)} 80%{transform:translateX(4px)} }
+  .err{ color:var(--fg); text-align:center; padding:60px 16px; font-family:var(--pixel); font-size:9px; line-height:2; }
 </style>
 </head>
 <body>
-<header>
-  <h1>🏰 ДАНЖ ПУДЖИНИО</h1>
-  <span class="sub" id="date"></span>
-</header>
-<div class="map" id="map"></div>
+<div class="torch l">🔥</div><div class="torch r">🔥</div>
+<div class="flash" id="flash"></div>
 
-<div class="stats" id="stats">
-  <div class="bar" id="hpbar"><i></i><b></b></div>
-  <div class="chips" id="chips"></div>
+<div class="wrap" id="wrap">
+  <header>
+    <h1>ДАНЖ ПУДЖИНИО</h1>
+    <div class="sub" id="date"></div>
+  </header>
+  <div class="map" id="map"></div>
+
+  <div class="slab stats" id="stats">
+    <div class="bar" id="hpbar"><i></i><b></b></div>
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <div class="slab end hidden" id="end"></div>
+  <div class="slab scene" id="scene"></div>
+  <div class="slab log" id="log"></div>
 </div>
 
-<div class="end hidden" id="end"></div>
-<div class="card" id="card"></div>
-<div class="actions" id="actions"></div>
-<div class="log" id="log"></div>
+<div class="bar-actions"><div class="in" id="actions"></div></div>
 
 <script>
 (function(){
   const tg = window.Telegram && window.Telegram.WebApp;
-  if (tg) { try { tg.ready(); tg.expand(); } catch(e){} }
+  if (tg) { try { tg.ready(); tg.expand(); tg.setHeaderColor('#17140f'); tg.setBackgroundColor('#17140f'); } catch(e){} }
   const initData = (tg && tg.initData) || '';
   const $ = id => document.getElementById(id);
-  let busy = false;
-  let lastHp = null;
+  let busy = false, lastHp = null;
 
-  const TYPE_EMOJI = {fight:'⚔️', boss:'🗿', riddle:'🧩', puzzle:'🧩', npc:'👻', treasure:'💰', trap:'⚠️', rest:'🔥', merchant:'🎩'};
+  const TYPE_ICON = {fight:'⚔️', boss:'🗿', riddle:'🧩', puzzle:'🧩', npc:'👻', treasure:'💰', trap:'⚠️', rest:'🔥', merchant:'🎩'};
+  const BTN_CLASS = id => {
+    if (id === 'attack') return 'red'; if (id === 'defend') return 'blue'; if (id === 'special') return 'gold';
+    if (id === 'potion' || id === 'rest') return 'green'; if (id === 'next') return 'gold wide'; if (id === 'leave') return 'wide';
+    if (id.startsWith('buy:')) return 'purple'; return '';
+  };
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function flash(kind){ const f = $('flash'); f.className = 'flash ' + kind; setTimeout(() => { f.className = 'flash'; }, 60); }
 
   function render(payload){
-    const v = payload.view, p = v.player;
+    const v = payload.view, p = v.player, r = v.room;
     $('date').textContent = payload.date || '';
 
-    // map
-    $('map').innerHTML = v.map.map((m,i) => `<span class="${m.done?'done':''} ${m.current?'current':''} ${i===9?'boss':''}" title="${TYPE_EMOJI[m.type]||''}"></span>`).join('');
+    $('map').innerHTML = v.map.map((m,i) => {
+      const cls = (m.done ? 'done' : '') + (m.current ? ' current' : '') + (i === 9 ? ' boss' : '');
+      const icon = (m.done || m.current || i === 9) ? (TYPE_ICON[m.type] || '❔') : '·';
+      return `<span class="${cls}">${icon}</span>`;
+    }).join('');
 
-    // stats
     const hpPct = Math.round(100 * p.hp / p.max_hp);
     $('hpbar').querySelector('i').style.width = hpPct + '%';
-    $('hpbar').querySelector('b').textContent = `❤️ ${p.hp} / ${p.max_hp}`;
-    if (lastHp !== null && p.hp < lastHp) { $('stats').classList.remove('shake'); void $('stats').offsetWidth; $('stats').classList.add('shake'); }
+    $('hpbar').querySelector('b').textContent = `HP ${p.hp}/${p.max_hp}`;
+    if (lastHp !== null && p.hp < lastHp) { flash('hit'); $('wrap').classList.remove('shake'); void $('wrap').offsetWidth; $('wrap').classList.add('shake'); if (tg) try{ tg.HapticFeedback.impactOccurred('heavy'); }catch(e){} }
+    if (lastHp !== null && p.hp > lastHp) flash('heal');
     lastHp = p.hp;
-    $('chips').innerHTML = `<span>⚔️ ${p.atk}</span><span style="color:var(--gold)">💰 ${p.gold}</span><span>🧪 ${p.potions}</span>${p.shield ? '<span>🛡️</span>' : ''}`;
+    $('chips').innerHTML = `<span>⚔${p.atk}</span><span class="g">◈${p.gold}</span><span>⚗${p.potions}</span>${p.shield ? '<span>🛡</span>' : ''}`;
 
-    // room card
-    const r = v.room;
-    let html = `<div class="top"><div class="emoji">${r.emoji || TYPE_EMOJI[r.type] || '❔'}</div>
-      <div><div class="room">Комната ${r.number} из ${v.rooms_total}</div><h2>${esc(r.title || '')}</h2></div></div>`;
-    if (r.flavor && v.phase === 'room') html += `<p class="flavor">${esc(r.flavor)}</p>`;
-    if (r.text) html += `<p>${esc(r.text)}</p>`;
+    let html = `<div class="door"><div class="roomno">КОМНАТА ${r.number} / ${v.rooms_total}</div>
+      <div class="emoji">${r.emoji || TYPE_ICON[r.type] || '❔'}</div><h2>${esc(r.title || '')}</h2>`;
     if (r.enemy) {
       const ep = Math.round(100 * r.enemy.hp / r.enemy.max_hp);
-      html += `<div class="enemybox"><div class="row"><span>${esc(r.enemy.name)}</span><span>атака ${r.enemy.atk}</span></div>
-        <div class="bar enemy"><i style="width:${ep}%"></i><b>${r.enemy.hp} / ${r.enemy.max_hp}</b></div></div>`;
+      html += `<div class="enemybox"><div class="row"><span>ВРАГ</span><span>АТК ${r.enemy.atk}</span></div>
+        <div class="bar enemy"><i style="width:${ep}%"></i><b>${r.enemy.hp}/${r.enemy.max_hp}</b></div></div>`;
     }
-    $('card').innerHTML = html;
+    html += `</div>`;
+    if (r.text || (r.flavor && v.phase === 'room')) {
+      html += `<div class="parch">${r.flavor && v.phase === 'room' ? `<div class="flavor">${esc(r.flavor)}</div>` : ''}${esc(r.text || '')}</div>`;
+    }
+    $('scene').innerHTML = html;
 
-    // actions
     const acts = v.actions || [];
     $('actions').innerHTML = acts.map(a =>
-      `<button data-id="${esc(a.id)}" ${a.disabled ? 'disabled' : ''} class="${acts.length === 1 || a.id === 'leave' || a.id === 'next' ? 'wide' : ''}">${esc(a.label)}</button>`
-    ).join('');
-    $('actions').querySelectorAll('button').forEach(b => b.addEventListener('click', () => act(b.dataset.id)));
+      `<button class="btn ${BTN_CLASS(a.id)} ${acts.length === 1 ? 'wide' : ''}" data-id="${esc(a.id)}" ${a.disabled ? 'disabled' : ''}>${esc(a.label)}</button>`
+    ).join('') || `<button class="btn wide" disabled>ДАНЖ ЗАКРЫТ ДО ЗАВТРА</button>`;
+    $('actions').querySelectorAll('button[data-id]').forEach(b => b.addEventListener('click', () => act(b.dataset.id)));
 
-    // log
-    $('log').innerHTML = (v.log || []).map(l => `<div>${esc(l)}</div>`).join('') || '<div>…</div>';
+    $('log').innerHTML = `<div class="t">ХРОНИКА</div>` + ((v.log || []).map(l => `<div class="e">${esc(l)}</div>`).join('') || '<div class="e">…</div>');
 
-    // end screen
     const end = $('end');
     if (v.phase === 'dead' || v.phase === 'won') {
-      const title = v.phase === 'won' ? '👑 Мини-Пуджик убит!' : '💀 Вы погибли';
-      const sub = v.phase === 'won' ? 'Все 10 комнат пройдены. Завтра — новый данж.' : `Пройдено комнат: ${v.rooms_cleared} из ${v.rooms_total}. Завтра — новый данж.`;
-      let others = (payload.others || []).map(o => `<div>${esc(o.line)}</div>`).join('');
-      let boss = payload.boss ? `<div class="boss">🗿 Пуджинио-Фамоза: ${payload.boss.hp} / ${payload.boss.max_hp} HP${payload.boss.rage ? ' · ЯРОСТЬ' : ''}</div>` : '';
-      end.innerHTML = `<h2>${title}</h2><div>${sub}</div><div class="others">${others}</div>${boss}`;
-      end.classList.remove('hidden');
-      $('card').classList.add('hidden');
-      if (tg) { try { tg.HapticFeedback.notificationOccurred(v.phase === 'won' ? 'success' : 'error'); } catch(e){} }
-    } else {
-      end.classList.add('hidden');
-      $('card').classList.remove('hidden');
-    }
+      const won = v.phase === 'won';
+      const others = (payload.others || []).map(o => `<div>${esc(o.line)}</div>`).join('');
+      const boss = payload.boss ? `<div class="boss">ПУДЖИНИО-ФАМОЗА<br>${payload.boss.hp} / ${payload.boss.max_hp} HP${payload.boss.rage ? '<br>ЯРОСТЬ' : ''}</div>` : '';
+      end.innerHTML = `<div class="big">${won ? '👑' : '💀'}</div><h2>${won ? 'МИНИ-ПУДЖИК УБИТ' : 'ВЫ ПОГИБЛИ'}</h2>
+        <div>${won ? 'Все 10 комнат пройдены. Завтра — новый данж.' : `Пройдено комнат: ${v.rooms_cleared} из ${v.rooms_total}. Завтра — новый данж.`}</div>
+        <div class="others">${others}</div>${boss}`;
+      end.classList.remove('hidden'); $('scene').classList.add('hidden');
+      if (tg) try { tg.HapticFeedback.notificationOccurred(won ? 'success' : 'error'); } catch(e){}
+    } else { end.classList.add('hidden'); $('scene').classList.remove('hidden'); }
   }
 
-  function fail(msg){ document.body.innerHTML = `<div class="err">${esc(msg)}</div>`; }
+  function fail(msg){ $('wrap').innerHTML = `<div class="err">${esc(msg)}</div>`; $('actions').innerHTML = ''; }
 
   async function load(){
     try {
       const res = await fetch('/miniapp/api/dungeon/state?init_data=' + encodeURIComponent(initData));
       const data = await res.json();
-      if (!data.success) return fail(data.error === 'invalid_auth' ? 'Открой данж из Telegram, братик.' : ('Ошибка: ' + data.error));
+      if (!data.success) return fail(data.error === 'invalid_auth' ? 'ОТКРОЙ ДАНЖ ИЗ TELEGRAM, БРАТИК' : ('ОШИБКА: ' + data.error));
       render(data.data);
-    } catch (e) { fail('Данж не отвечает: ' + e); }
+    } catch (e) { fail('ДАНЖ НЕ ОТВЕЧАЕТ'); }
   }
 
   async function act(action){
     if (busy) return;
     busy = true;
     $('actions').querySelectorAll('button').forEach(b => b.classList.add('busy'));
-    if (tg) { try { tg.HapticFeedback.impactOccurred('light'); } catch(e){} }
+    if (tg) try { tg.HapticFeedback.impactOccurred('light'); } catch(e){}
     try {
       const res = await fetch('/miniapp/api/dungeon/act', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ init_data: initData, action }) });
