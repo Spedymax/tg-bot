@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _DATA_DIR = os.path.join(_BASE_DIR, 'assets', 'data')
-_PUDGE_IMAGE = os.path.join(_BASE_DIR, 'assets', 'images', 'statuetki', 'pudginio.jpg')
+_PUDGE_IMAGE = os.path.join(_BASE_DIR, 'assets', 'images', 'statuetki', 'pudginio_famoza.jpg')
 
 DEFAULT_HP = 2500
 DEFAULT_DAYS = 14

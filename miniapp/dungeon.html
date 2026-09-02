@@ -14,7 +14,7 @@
     --hp:#c62e2e; --hp-dark:#5a1414; --enemy:#8b3fb8; --enemy-dark:#3a1a4d; --ok:#5aa85a; --torch:#ff9a2e;
     --fg:#e8dcc4; --hint:#9c8f78;
     --pixel:'Press Start 2P', monospace; --body:'Rubik', -apple-system, 'Segoe UI', Roboto, sans-serif;
-    --bar-h: 176px;
+    --bar-h: 118px;
   }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html{ min-height:100%; } body{ min-height:100%; overflow-y:auto; -webkit-overflow-scrolling:touch; }
@@ -46,15 +46,15 @@
   @keyframes glow{ 0%,100%{ opacity:.9 } 50%{ opacity:.55 } }
 
   .wrap{ position:relative; z-index:2; max-width:520px; margin:0 auto; }
-  header{ text-align:center; padding:6px 30px 4px; }
+  header{ text-align:center; padding:2px 30px 0; }
   header h1{ font-family:var(--pixel); font-size:13px; letter-spacing:1px; margin:0; color:var(--gold);
              text-shadow:0 0 12px rgba(216,168,56,.5), 2px 2px 0 #000; }
   header .sub{ font-family:var(--pixel); font-size:8px; color:var(--hint); margin-top:6px; }
 
   /* corridor map */
-  .map{ display:flex; gap:3px; margin:10px 0 10px; padding:6px; background:var(--stone-dark); border:2px solid #000; border-radius:4px;
+  .map{ display:flex; gap:3px; margin:8px 0 8px; padding:4px; background:var(--stone-dark); border:2px solid #000; border-radius:4px;
         box-shadow: inset 0 0 0 1px var(--stone-light), 0 2px 0 #000; }
-  .map span{ flex:1; aspect-ratio:1; display:flex; align-items:center; justify-content:center; font-size:14px;
+  .map span{ flex:1; aspect-ratio:1; display:flex; align-items:center; justify-content:center; font-size:12px;
              background:linear-gradient(180deg, var(--stone-light), var(--stone)); border:1px solid #000; border-radius:2px; color:#5a5148; }
   .map span.done{ background:linear-gradient(180deg,#3e5a3a,#2b3f28); color:#dfe8d0; }
   .map span.current{ background:linear-gradient(180deg,#8a6a22,#5e4614); color:#fff; box-shadow:0 0 10px rgba(216,168,56,.7); animation:pulse 1.2s infinite; }
@@ -85,6 +85,18 @@
      border-bottom:2px solid #000; }
   .scene .door .roomno{ font-family:var(--pixel); font-size:8px; color:var(--hint); letter-spacing:1px; }
   .scene .door .emoji{ font-size:64px; line-height:1.1; margin:8px 0 6px; filter:drop-shadow(0 6px 10px rgba(0,0,0,.8)); animation:idle 3s ease-in-out infinite; }
+  .scene .door .sprite{ display:block; width:150px; height:150px; margin:8px auto 8px; image-rendering:pixelated; border:3px solid #000; border-radius:6px;
+        box-shadow: 0 0 0 2px var(--gold-dim), 0 10px 20px rgba(0,0,0,.7); animation:idle 3s ease-in-out infinite; background:#0f0d0a; }
+  .scene .door .sprite.hurt{ animation:hurt .4s; }
+  @keyframes hurt{ 0%,100%{ filter:none; transform:none } 30%{ filter:brightness(2.2) saturate(0) sepia(1) hue-rotate(-50deg) saturate(6); transform:translateX(-6px) } 60%{ transform:translateX(6px) } }
+  /* JRPG battle text box: what just happened, right under the sprite */
+  .battle{ margin:10px; padding:10px 12px 10px; min-height:64px; background:#0b0907; border:3px double var(--gold-dim); border-radius:4px;
+           font-family:var(--body); font-size:14px; line-height:1.4; color:var(--fg); box-shadow: inset 0 0 14px rgba(0,0,0,.9); position:relative; }
+  .battle div{ padding:1px 0; }
+  .battle div.old{ color:var(--hint); }
+  .battle div.new{ animation:slidein .25s ease-out; }
+  .battle::after{ content:'▼'; position:absolute; right:10px; bottom:4px; font-size:10px; color:var(--gold); animation:blink 1s steps(1) infinite; }
+  @keyframes blink{ 50%{ opacity:0 } }
   @keyframes idle{ 50%{ transform:translateY(-4px) } }
   .scene .door h2{ font-family:var(--pixel); font-size:11px; margin:0; color:var(--gold); text-shadow:2px 2px 0 #000; line-height:1.6; }
   .enemybox{ margin:10px auto 0; max-width:320px; text-align:left; }
@@ -168,7 +180,7 @@
   <div class="slab log" id="log"></div>
 </div>
 
-<div class="bar-actions"><div class="feed" id="feed"></div><div class="in" id="actions"></div></div>
+<div class="bar-actions"><div class="in" id="actions"></div></div>
 
 <script>
 (function(){
@@ -211,36 +223,40 @@
     const roomKey = r.number + ':' + r.type;
     if (roomKey !== lastRoom) { lastRoom = roomKey; lastEnemyHp = null; parchOpen = false; }
     const fightStarted = r.enemy && r.enemy.hp < r.enemy.max_hp;
+    const log = v.log || [];
+    const fresh = Math.max(0, log.length - lastLogLen);
+    const visual = r.image ? `<img class="sprite" id="sprite" src="${esc(r.image)}" alt="">` : `<div class="emoji">${r.emoji || TYPE_ICON[r.type] || '❔'}</div>`;
     let html = `<div class="door"><div class="roomno">КОМНАТА ${r.number} / ${v.rooms_total}</div>
-      <div class="emoji">${r.emoji || TYPE_ICON[r.type] || '❔'}</div><h2>${esc(r.title || '')}</h2>`;
+      ${visual}<h2>${esc(r.title || '')}</h2>`;
     if (r.enemy) {
       const ep = Math.round(100 * r.enemy.hp / r.enemy.max_hp);
       html += `<div class="enemybox"><div class="row"><span>ВРАГ</span><span>АТК ${r.enemy.atk}</span></div>
         <div class="bar enemy"><i style="width:${ep}%"></i><b>${r.enemy.hp}/${r.enemy.max_hp}</b></div></div>`;
     }
     html += `</div>`;
-    // fights: no room text at all — the enemy intro goes to the feed once; other rooms keep their question/choice text
+    // battle text box: last 3 events, newest highlighted (fights: enemy intro lands here once)
+    const show = log.slice(-3);
+    const nNew = Math.min(Math.max(fresh, 1), show.length);
+    if (show.length) html += `<div class="battle">${show.map((l, i) => `<div class="${i < show.length - nNew ? 'old' : 'new'}">${esc(l)}</div>`).join('')}</div>`;
+    // non-fight rooms keep their question / choice text
     if (r.text && r.type !== 'fight' && r.type !== 'boss') {
       html += `<div class="parch" id="parch">${esc(r.text)}</div>`;
     }
     $('scene').innerHTML = html;
+    lastLogLen = log.length;
     if (r.enemy) {
       const ebox = $('scene').querySelector('.enemybox');
       if (lastEnemyHp !== null && r.enemy.hp < lastEnemyHp) {
         const d = lastEnemyHp - r.enemy.hp; const lastLine = (v.log || []).slice(-3).join(' ');
         pop(ebox, '-' + d, /КРИТ/.test(lastLine) ? 'crit' : 'dmg');
+        const sp = $('sprite'); if (sp) { sp.classList.add('hurt'); setTimeout(() => sp.classList.remove('hurt'), 400); }
       }
       lastEnemyHp = r.enemy.hp;
     }
     if (lastHp !== null && p.hp !== lastHp) pop($('stats'), (p.hp > lastHp ? '+' : '') + (p.hp - lastHp), p.hp > lastHp ? 'heal' : 'dmg');
     lastHp = p.hp;
 
-    // feed: what just happened, right above the buttons
-    const log = v.log || [];
-    const fresh = Math.max(0, log.length - lastLogLen);
-    const show = log.slice(-3);
-    $('feed').innerHTML = show.map((l, i) => `<div class="${i < show.length - Math.min(Math.max(fresh, 1), show.length) ? 'old' : ''}">${esc(l)}</div>`).join('');
-    lastLogLen = log.length;
+
 
     const acts = v.actions || [];
     $('actions').innerHTML = acts.map(a =>

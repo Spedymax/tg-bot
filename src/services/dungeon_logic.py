@@ -114,6 +114,7 @@ def generate_layout(seed: str, content: dict, lore: Optional[dict] = None, rage:
                     'emoji': tpl.get('emoji', '💩'), 'hp': 15, 'atk': 4,
                     'intro': tpl.get('intro', '').format(text=text, name=h.get('name', '?')),
                     'taunts': [text] if text else [],
+                    'image': tpl.get('image'),
                 }
             else:
                 base = enemies[(fight_no - 1) % len(enemies)] if enemies else {'name': 'Гоблин', 'emoji': '👺', 'hp': 12, 'atk': 4, 'intro': '', 'taunts': []}
@@ -148,7 +149,8 @@ def generate_layout(seed: str, content: dict, lore: Optional[dict] = None, rage:
     boss = {'type': 'boss', 'index': BOSS_ROOM, 'flavor': '',
             'enemy': {'name': mp['name'], 'emoji': mp['emoji'], 'hp': mp['hp'] + (4 if rage else 0),
                       'max_hp': mp['hp'] + (4 if rage else 0), 'atk': mp['atk'] + (1 if rage else 0),
-                      'intro': mp.get('intro', ''), 'taunts': list(mp.get('taunts') or []), 'bite': mp.get('bite', '')}}
+                      'intro': mp.get('intro', ''), 'taunts': list(mp.get('taunts') or []), 'bite': mp.get('bite', ''),
+                      'image': mp.get('image')}}
     rooms.append(boss)
     return rooms
 
@@ -404,30 +406,38 @@ def public_view(state: dict, content: dict) -> dict:
     view_room = {'type': t, 'number': state['room_index'] + 1, 'flavor': room.get('flavor', '')}
     if t in ('fight', 'boss'):
         e = room['enemy']
+        image = e.get('image')
+        if not image:  # layouts generated before sprites existed: look the image up by name
+            if t == 'boss':
+                image = (content.get('mini_pudge') or {}).get('image')
+            elif e['name'].startswith((content.get('highlight_enemy') or {}).get('name', 'Высер недели')):
+                image = (content.get('highlight_enemy') or {}).get('image')
+            else:
+                image = next((x.get('image') for x in content.get('enemies', []) if x['name'] == e['name']), None)
         view_room.update({
-            'title': e['name'], 'emoji': e['emoji'], 'text': e.get('intro', ''),
+            'title': e['name'], 'emoji': e['emoji'], 'text': e.get('intro', ''), 'image': image,
             'enemy': {'name': e['name'], 'hp': state['room_state'].get('enemy_hp', e['hp']), 'max_hp': e['max_hp'], 'atk': e['atk']},
         })
     elif t in ('riddle', 'puzzle'):
         pz = content.get('puzzle') or {}
         view_room.update({'title': pz.get('title', 'Загадка'), 'emoji': pz.get('emoji', '🧩'),
-                          'text': room['riddle']['q']})
+                          'text': room['riddle']['q'], 'image': pz.get('image')})
     elif t == 'npc':
         npc = content.get('npc') or {}
         view_room.update({'title': npc.get('title', 'Призрак'), 'emoji': npc.get('emoji', '👻'),
-                          'text': npc.get('text', '«{text}»').format(text=room['npc']['text'])})
+                          'text': npc.get('text', '«{text}»').format(text=room['npc']['text']), 'image': npc.get('image')})
     elif t == 'treasure':
         tr = content.get('treasure') or {}
-        view_room.update({'title': tr.get('title', 'Сокровищница'), 'emoji': tr.get('emoji', '💰'), 'text': tr.get('text', '')})
+        view_room.update({'title': tr.get('title', 'Сокровищница'), 'emoji': tr.get('emoji', '💰'), 'text': tr.get('text', ''), 'image': tr.get('image')})
     elif t == 'trap':
         tp = room['trap']
-        view_room.update({'title': tp['title'], 'emoji': tp['emoji'], 'text': tp['text']})
+        view_room.update({'title': tp['title'], 'emoji': tp['emoji'], 'text': tp['text'], 'image': content.get('trap_image')})
     elif t == 'rest':
         rs = content.get('rest') or {}
-        view_room.update({'title': rs.get('title', 'Костёр'), 'emoji': rs.get('emoji', '🔥'), 'text': rs.get('text', '')})
+        view_room.update({'title': rs.get('title', 'Костёр'), 'emoji': rs.get('emoji', '🔥'), 'text': rs.get('text', ''), 'image': rs.get('image')})
     elif t == 'merchant':
         m = content.get('merchant') or {}
-        view_room.update({'title': m.get('title', 'Торговец'), 'emoji': m.get('emoji', '🎩'), 'text': m.get('text', '')})
+        view_room.update({'title': m.get('title', 'Торговец'), 'emoji': m.get('emoji', '🎩'), 'text': m.get('text', ''), 'image': m.get('image')})
     return {
         'phase': state['phase'],
         'room': view_room,
