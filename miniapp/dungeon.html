@@ -17,7 +17,7 @@
     --bar-h: 118px;
   }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body{ height:100%; }
+  html{ min-height:100%; } body{ min-height:100%; overflow-y:auto; -webkit-overflow-scrolling:touch; }
   body{
     margin:0; color:var(--fg); font-family:var(--body); font-size:15px; line-height:1.4;
     background:
@@ -28,7 +28,7 @@
       linear-gradient(180deg, #221e19, #15120e);
     background-attachment: fixed;
     padding: 10px 12px calc(var(--bar-h) + env(safe-area-inset-bottom, 0px) + 14px);
-    touch-action:manipulation; overflow-x:hidden;
+    touch-action:pan-y; overflow-x:hidden;
   }
   body::before{ /* stone noise */
     content:''; position:fixed; inset:0; pointer-events:none; opacity:.35; mix-blend-mode:overlay;
@@ -96,6 +96,7 @@
 
   /* chronicle */
   .log{ padding:10px 12px; font-size:13.5px; color:var(--hint); }
+  .log .box{ max-height:190px; overflow-y:auto; -webkit-overflow-scrolling:touch; touch-action:pan-y; overscroll-behavior:contain; padding-right:4px; }
   .log .t{ font-family:var(--pixel); font-size:8px; color:var(--gold-dim); margin-bottom:6px; letter-spacing:1px; }
   .log div.e{ padding:3px 0; border-bottom:1px solid rgba(255,255,255,.05); }
   .log div.e:last-child{ color:var(--fg); border:0; }
@@ -159,7 +160,8 @@
 <script>
 (function(){
   const tg = window.Telegram && window.Telegram.WebApp;
-  if (tg) { try { tg.ready(); tg.expand(); tg.setHeaderColor('#17140f'); tg.setBackgroundColor('#17140f'); } catch(e){} }
+  if (tg) { try { tg.ready(); tg.expand(); tg.setHeaderColor('#17140f'); tg.setBackgroundColor('#17140f'); } catch(e){}
+            try { tg.disableVerticalSwipes(); } catch(e){} }
   const initData = (tg && tg.initData) || '';
   const $ = id => document.getElementById(id);
   let busy = false, lastHp = null;
@@ -212,7 +214,8 @@
     ).join('') || `<button class="btn wide" disabled>ДАНЖ ЗАКРЫТ ДО ЗАВТРА</button>`;
     $('actions').querySelectorAll('button[data-id]').forEach(b => b.addEventListener('click', () => act(b.dataset.id)));
 
-    $('log').innerHTML = `<div class="t">ХРОНИКА</div>` + ((v.log || []).map(l => `<div class="e">${esc(l)}</div>`).join('') || '<div class="e">…</div>');
+    $('log').innerHTML = `<div class="t">ХРОНИКА</div><div class="box">` + ((v.log || []).map(l => `<div class="e">${esc(l)}</div>`).join('') || '<div class="e">…</div>') + `</div>`;
+    const box = $('log').querySelector('.box'); box.scrollTop = box.scrollHeight;
 
     const end = $('end');
     if (v.phase === 'dead' || v.phase === 'won') {

@@ -170,7 +170,7 @@ def _room(state: dict) -> dict:
 
 def _log(state: dict, text: str):
     state['log'].append(text)
-    state['log'] = state['log'][-12:]
+    state['log'] = state['log'][-40:]
 
 
 def _enter_room(state: dict):
@@ -435,7 +435,7 @@ def public_view(state: dict, content: dict) -> dict:
         'stats_line': (f"Атака {state['player']['atk']}–{state['player']['atk'] + 2} · крит {int(CRIT_CHANCE * 100)}% (x2)"
                        + (" · 🛡 щит: следующий удар в 0" if state['player']['shield'] else "")),
         'actions': available_actions(state, content),
-        'log': state['log'][-8:],
+        'log': state['log'][-25:],
         'boss_killed': state['boss_killed'],
         'map': [{'type': rm['type'], 'done': i < state['rooms_cleared'], 'current': i == state['room_index']}
                 for i, rm in enumerate(state['rooms'])],
