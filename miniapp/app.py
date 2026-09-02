@@ -660,7 +660,8 @@ def _telegram_send(chat_id, text):
 def _dungeon_payload(state):
     from html import escape as _esc
     svc = get_dungeon_service()
-    payload = {'view': svc.view(state), 'date': svc.today().strftime('%d.%m.%Y'), 'others': [], 'boss': None}
+    payload = {'view': svc.view(state), 'date': svc.today().strftime('%d.%m.%Y'), 'others': [], 'boss': None,
+               'is_new': state.get('step', 0) == 0}
     try:
         payload['others'] = [{'line': svc.result_line(*r)} for r in run_async(svc.today_results())]
     except Exception as e:

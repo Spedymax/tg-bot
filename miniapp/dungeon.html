@@ -75,7 +75,7 @@
   /* message box — room text (if any) + last events; scrolls inside if long */
   .msg{ flex:0 1 auto; max-height:34vh; overflow-y:auto; -webkit-overflow-scrolling:touch; touch-action:pan-y; overscroll-behavior:contain;
         padding:10px 12px; background:#0b0907; border:3px double var(--gold-dim); border-radius:4px; box-shadow: inset 0 0 14px rgba(0,0,0,.9); position:relative; font-size:15px; }
-  .msg .text{ color:var(--parch); margin-bottom:6px; white-space:pre-wrap; }
+  .msg .text{ color:var(--parch); margin-bottom:8px; padding-bottom:8px; white-space:pre-wrap; border-bottom:1px solid rgba(238,227,204,.35); }
   .msg .ev{ padding:2px 0; color:var(--hint); }
   .msg .ev.new{ color:var(--fg); animation:slidein .25s ease-out; }
   .msg .cur{ position:sticky; float:right; bottom:0; font-size:10px; color:var(--gold); animation:blink 1s steps(1) infinite; }
@@ -125,11 +125,49 @@
   .flash.heal{ background:radial-gradient(ellipse, transparent 40%, rgba(60,180,80,.45)); opacity:1; transition:none; }
   .shake{ animation:shake .35s; } @keyframes shake{ 0%,100%{transform:translateX(0)} 20%{transform:translateX(-6px)} 40%{transform:translateX(6px)} 60%{transform:translateX(-4px)} 80%{transform:translateX(4px)} }
   .hidden{ display:none !important; }
+
+  /* ── intro: torches ignite, title types out, then the gates part ── */
+  .intro{ position:fixed; inset:0; z-index:30; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px;
+          background:#000; overflow:hidden; }
+  .intro .half{ position:absolute; top:0; bottom:0; width:50.5%; background:
+      repeating-linear-gradient(0deg, var(--mortar) 0 2px, transparent 2px 46px), repeating-linear-gradient(90deg, var(--mortar) 0 2px, transparent 2px 92px),
+      linear-gradient(180deg, #221e19, #15120e); box-shadow: inset 0 0 60px rgba(0,0,0,.9); transition:transform 1.1s cubic-bezier(.7,0,.3,1); }
+  .intro .half.l{ left:0; border-right:4px solid #000; } .intro .half.r{ right:0; border-left:4px solid #000; }
+  .intro .half.l::after,.intro .half.r::after{ content:''; position:absolute; top:50%; width:18px; height:18px; border-radius:50%; background:radial-gradient(circle,#d8a838,#5e4614); box-shadow:0 0 8px #000; transform:translateY(-50%); }
+  .intro .half.l::after{ right:10px; } .intro .half.r::after{ left:10px; }
+  .intro.open .half.l{ transform:translateX(-102%); } .intro.open .half.r{ transform:translateX(102%); }
+  .intro.open .content{ opacity:0; transition:opacity .5s; }
+  .intro .content{ position:relative; z-index:2; max-width:420px; }
+  .intro .torches{ display:flex; justify-content:center; gap:70px; font-size:40px; margin-bottom:26px; }
+  .intro .torches span{ opacity:0; transform:scale(.2); filter:drop-shadow(0 0 14px var(--torch)); animation:ignite .7s ease-out forwards, flicker 1.6s .7s infinite; }
+  .intro .torches span:nth-child(2){ animation-delay:.35s, 1.05s; }
+  @keyframes ignite{ to{ opacity:1; transform:scale(1) } }
+  @keyframes flicker{ 0%,100%{ transform:scale(1) rotate(-2deg) } 30%{ transform:scale(1.08) rotate(2deg); opacity:.85 } 60%{ transform:scale(.96) rotate(-1deg) } }
+  .intro h1{ font-family:var(--pixel); font-size:17px; line-height:1.8; letter-spacing:2px; color:var(--gold); text-shadow:0 0 16px rgba(216,168,56,.6), 3px 3px 0 #000; margin:0 0 18px; min-height:60px; }
+  .intro h1 .c{ opacity:0; animation:appear .05s forwards; }
+  @keyframes appear{ to{ opacity:1 } }
+  .intro .line{ font-size:16px; color:var(--fg); opacity:0; margin:8px 0; transform:translateY(8px); transition:opacity .8s, transform .8s; }
+  .intro .line.on{ opacity:1; transform:none; }
+  .intro .line.date{ font-family:var(--pixel); font-size:9px; color:var(--hint); margin-top:16px; }
+  .intro .tap{ margin-top:34px; font-family:var(--pixel); font-size:8px; color:var(--gold-dim); opacity:0; transition:opacity .8s; animation:blink 1.2s steps(1) infinite; }
+  .intro .tap.on{ opacity:1; }
   .err{ color:var(--fg); text-align:center; padding:60px 16px; font-family:var(--pixel); font-size:9px; line-height:2; }
 </style>
 </head>
 <body>
 <div class="flash" id="flash"></div>
+<div class="intro hidden" id="intro">
+  <div class="half l"></div><div class="half r"></div>
+  <div class="content">
+    <div class="torches"><span>🔥</span><span>🔥</span></div>
+    <h1 id="introTitle"></h1>
+    <div class="line" id="il1">Каменные ступени уходят во тьму.</div>
+    <div class="line" id="il2">Из глубины пахнет сыростью и дешёвым пивом.</div>
+    <div class="line" id="il3">Десять комнат. Один заход. В конце — он.</div>
+    <div class="line date" id="il4"></div>
+    <div class="tap" id="itap">КОСНИСЬ, ЧТОБЫ СПУСТИТЬСЯ</div>
+  </div>
+</div>
 <div class="app" id="app">
   <div class="top">
     <span class="roomno" id="roomno">КОМНАТА 1/10</span>
@@ -159,7 +197,14 @@
                         : id === 'next' ? 'gold wide' : id === 'leave' ? 'wide' : id.startsWith('buy:') ? 'purple' : '';
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   // "🛡️ Блок: урон ½, ответ 2" → main label + small detail so buttons stay readable
-  function btnLabel(l){ const m = l.match(/^(.*?)(?:\s*[:(]\s*(.*?)\)?)$/); return m && m[2] ? `${esc(m[1])}<small>${esc(m[2])}</small>` : esc(l); }
+  function btnLabel(l){
+    let main = l, sub = '';
+    const c = l.indexOf(': ');
+    if (c > 0) { main = l.slice(0, c); sub = l.slice(c + 2); }
+    else if (/\)$/.test(l) && l.lastIndexOf(' (') > 0) { const i = l.lastIndexOf(' ('); main = l.slice(0, i); sub = l.slice(i + 2, -1); }
+    else { const d = l.indexOf(' — '); if (d > 0) { main = l.slice(0, d); sub = l.slice(d + 3); } }
+    return sub ? `${esc(main)}<small>${esc(sub)}</small>` : esc(l);
+  }
   function flash(kind){ const f = $('flash'); f.className = 'flash ' + kind; setTimeout(() => { f.className = 'flash'; }, 60); }
   function pop(host, text, cls){ if (!host) return; const el = document.createElement('div'); el.className = 'pop ' + cls; el.textContent = text; host.appendChild(el); setTimeout(() => el.remove(), 1000); }
 
@@ -231,12 +276,38 @@
     } else { end.classList.add('hidden'); $('stage').classList.remove('hidden'); $('msg').classList.remove('hidden'); }
   }
 
+  // ── intro sequence ──
+  let introTimers = [], introDone = false;
+  function playIntro(date){
+    const box = $('intro'); box.classList.remove('hidden');
+    const title = 'ДАНЖ ПУДЖИНИО';
+    $('introTitle').innerHTML = [...title].map((ch, i) => `<span class="c" style="animation-delay:${1.0 + i * 0.11}s">${ch === ' ' ? '&nbsp;' : ch}</span>`).join('');
+    $('il4').textContent = date || '';
+    const t = (ms, fn) => introTimers.push(setTimeout(fn, ms));
+    t(3000, () => $('il1').classList.add('on'));
+    t(4600, () => $('il2').classList.add('on'));
+    t(6200, () => $('il3').classList.add('on'));
+    t(7400, () => $('il4').classList.add('on'));
+    t(8200, () => $('itap').classList.add('on'));
+    t(14000, openGates);
+    box.addEventListener('click', openGates);
+    if (tg) try { tg.HapticFeedback.impactOccurred('medium'); } catch(e){}
+  }
+  function openGates(){
+    if (introDone) return; introDone = true;
+    introTimers.forEach(clearTimeout);
+    const box = $('intro'); box.classList.add('open');
+    if (tg) try { tg.HapticFeedback.notificationOccurred('warning'); } catch(e){}
+    setTimeout(() => box.classList.add('hidden'), 1200);
+  }
+
   function fail(msg){ $('app').innerHTML = `<div class="err">${esc(msg)}</div>`; }
   async function load(){
     try {
       const res = await fetch('/miniapp/api/dungeon/state?init_data=' + encodeURIComponent(initData));
       const data = await res.json();
       if (!data.success) return fail(data.error === 'invalid_auth' ? 'ОТКРОЙ ДАНЖ ИЗ TELEGRAM, БРАТИК' : ('ОШИБКА: ' + data.error));
+      if (data.data.is_new || location.search.includes('intro')) playIntro(data.data.date);
       render(data.data);
     } catch (e) { fail('ДАНЖ НЕ ОТВЕЧАЕТ'); }
   }
