@@ -150,7 +150,8 @@ class DungeonService:
         if state:
             return state
         layout = await self.get_or_create_daily(day)
-        state = logic.new_run(f"dungeon:{day.isoformat()}:{player_id}", layout)
+        state = logic.new_run(f"dungeon:{day.isoformat()}:{player_id}", layout,
+                              modifier=logic.daily_modifier(f"dungeon:{day.isoformat()}"))
         await self.save_run(day, player_id, player_name, state)
         return state
 

@@ -34,6 +34,19 @@ def _rng(seed: str, step) -> random.Random:
     return random.Random(f"{seed}:{step}")
 
 
+MODIFIER_KEYS = ['none', 'no_negativity', 'lowkey', 'prime', 'sheva', 'reveal', 'dai_bozhe', 'torsion', 'old_god']
+
+
+def daily_modifier(day_seed: str) -> str:
+    """One «правило дня» for everyone; 'none' roughly one day in four."""
+    r = _rng(day_seed, 'modifier')
+    return 'none' if r.random() < 0.25 else r.choice(MODIFIER_KEYS[1:])
+
+
+def _mod(state: dict) -> str:
+    return state.get('modifier') or 'none'
+
+
 # ── layout generation ─────────────────────────────────────────────────────────
 def _scale_enemy(base: dict, idx: int, rage: bool) -> dict:
     e = dict(base)
@@ -97,6 +110,7 @@ def generate_layout(seed: str, content: dict, lore: Optional[dict] = None, rage:
     riddles = list(content.get('riddles') or [])
     r.shuffle(riddles)
     traps = list(content.get('traps') or [])
+    r.shuffle(traps)
     flavor = list(content.get('room_flavor') or [''])
     rooms = []
     fight_no = 0
@@ -133,10 +147,11 @@ def generate_layout(seed: str, content: dict, lore: Optional[dict] = None, rage:
             room['hidden'] = {'chests': contents, 'gold': 10 + idx * 2, 'dmg': 4}
         elif kind == 'trap':
             t = traps[idx % len(traps)] if traps else {'title': 'Ловушка', 'emoji': '⚠️', 'text': '', 'options': ['А', 'Б', 'В']}
-            outcomes = ['safe', 'hurt', 'loot']
+            outcomes = list(t.get('outcomes') or ['safe', 'hurt', 'loot'])
             r.shuffle(outcomes)
-            room['trap'] = {'title': t['title'], 'emoji': t['emoji'], 'text': t['text'], 'options': list(t['options'])}
-            room['hidden'] = {'outcomes': outcomes, 'dmg': 6, 'gold': 8 + idx}
+            room['trap'] = {'title': t['title'], 'emoji': t['emoji'], 'text': t['text'], 'options': list(t['options']),
+                            'image': t.get('image'), 'results': t.get('results') or {}}
+            room['hidden'] = {'outcomes': outcomes, 'dmg': 6, 'gold': 8 + idx, 'heal': 8}
         elif kind == 'npc':
             m = r.choice(messages)
             opts = list(players)
@@ -156,12 +171,14 @@ def generate_layout(seed: str, content: dict, lore: Optional[dict] = None, rage:
 
 
 # ── run state ─────────────────────────────────────────────────────────────────
-def new_run(seed: str, rooms: list) -> dict:
+def new_run(seed: str, rooms: list, modifier: str = 'none') -> dict:
     state = {
-        'seed': seed, 'step': 0, 'room_index': 0, 'rooms': rooms,
+        'seed': seed, 'step': 0, 'room_index': 0, 'rooms': rooms, 'modifier': modifier,
         'player': dict(BASE_PLAYER), 'phase': 'room', 'room_state': {},
         'log': [], 'rooms_cleared': 0, 'boss_killed': False,
     }
+    if modifier == 'prime':
+        state['player']['atk'] += 1
     _enter_room(state)
     return state
 
@@ -179,8 +196,12 @@ def _enter_room(state: dict):
     room = _room(state)
     state['phase'] = 'room'
     state['room_state'] = {}
+    if _mod(state) == 'torsion' and state['room_index'] % 2 == 1:
+        p = state['player']
+        p['hp'] = max(1, p['hp'] - 1)  # the generator hums, never kills outright
+        _log(state, "⚙️ Торсионное поле гудит. -1 HP.")
     if room['type'] in ('fight', 'boss'):
-        state['room_state'] = {'enemy_hp': room['enemy']['hp'], 'turn': 0}
+        state['room_state'] = {'enemy_hp': room['enemy']['hp'], 'turn': 0, 'atk_bonus': 1 if _mod(state) == 'prime' else 0}
         if room['enemy'].get('intro'):
             _log(state, f"{room['enemy']['emoji']} {room['enemy']['intro']}")
         _log(state, f"{room['enemy']['emoji']} {room['enemy']['name']} — {room['enemy']['hp']} HP, атака {room['enemy']['atk']}.")
@@ -217,6 +238,8 @@ def _hurt(state: dict, dmg: int, text: str) -> bool:
 
 def _heal(state: dict, amount: int):
     p = state['player']
+    if _mod(state) == 'no_negativity':
+        amount = int(amount * 1.3)
     p['hp'] = min(p['max_hp'], p['hp'] + amount)
 
 
@@ -283,7 +306,7 @@ def apply_action(state: dict, action: str, content: dict) -> dict:
         defended = False
         if action == 'attack':
             player_dmg = p['atk'] + r.randint(0, 2)
-            crit = r.random() < CRIT_CHANCE
+            crit = r.random() < (0.30 if _mod(state) == 'dai_bozhe' else CRIT_CHANCE)
             if crit:
                 player_dmg *= 2
             _log(state, f"⚔️ Вы бьёте {enemy['name']} на {player_dmg}{' — КРИТ!' if crit else ''}.")
@@ -302,13 +325,18 @@ def apply_action(state: dict, action: str, content: dict) -> dict:
         rs['enemy_hp'] = max(0, rs['enemy_hp'] - player_dmg)
         if rs['enemy_hp'] <= 0:
             gold = r.randint(4, 8) + room['index']
+            if t == 'boss' and _mod(state) == 'old_god':
+                gold *= 2
             p['gold'] += gold
             _clear_room(state, f"✅ {enemy['name']} повержен. +{gold} золота.")
             return state
+        if _mod(state) == 'sheva' and t == 'fight' and rs['enemy_hp'] <= enemy['max_hp'] * 0.15:
+            _clear_room(state, f"🏃 {enemy['name']} ливнул с мида. Как всегда. Золота нет.")
+            return state
         # enemy turn
         rs['turn'] += 1
-        dmg = enemy['atk'] + r.randint(-1, 1)
-        bite = t == 'boss' and rs['turn'] % 4 == 0
+        dmg = enemy['atk'] + rs.get('atk_bonus', 0) + r.randint(-1, 1)
+        bite = t == 'boss' and rs['turn'] % (3 if _mod(state) == 'old_god' else 4) == 0
         if bite:
             dmg *= 2
             _log(state, enemy.get('bite') or 'Босс кусает!')
@@ -332,6 +360,8 @@ def apply_action(state: dict, action: str, content: dict) -> dict:
             opts = room['riddle']['options'] if t != 'npc' else room['npc']['options']
             right = opts[room['hidden']['answer']]
             dmg = 5 if t != 'npc' else 3
+            if _mod(state) == 'reveal':
+                dmg *= 2
             died = _hurt(state, dmg, f"❌ Неверно. Правильно: {right}. Дверь бьёт током: -{dmg} HP.")
             if not died:
                 _clear_room(state)
@@ -356,16 +386,28 @@ def apply_action(state: dict, action: str, content: dict) -> dict:
     if t == 'trap' and action.startswith('trap:'):
         i = int(action.split(':', 1)[1])
         outcome = room['hidden']['outcomes'][i]
-        tpl = content.get('trap_outcomes') or {}
-        if outcome == 'safe':
-            _clear_room(state, tpl.get('safe', 'Пронесло.'))
-        elif outcome == 'loot':
-            p['gold'] += room['hidden']['gold']
-            _clear_room(state, tpl.get('loot', '+{gold}').format(gold=room['hidden']['gold']))
-        else:
-            died = _hurt(state, room['hidden']['dmg'], tpl.get('hurt', '-{dmg} HP').format(dmg=room['hidden']['dmg']))
+        tpl = dict(content.get('trap_outcomes') or {})
+        tpl.update(room['trap'].get('results') or {})
+        h = room['hidden']
+        if outcome == 'hurt':
+            died = _hurt(state, h['dmg'], tpl.get('hurt', '-{dmg} HP').format(dmg=h['dmg']))
             if not died:
                 _clear_room(state)
+            return state
+        if outcome == 'loot':
+            p['gold'] += h['gold']
+        elif outcome == 'heal':
+            _heal(state, h.get('heal', 8))
+        elif outcome == 'atk':
+            p['atk'] += 1
+        elif outcome == 'potion':
+            p['potions'] += 1
+        elif outcome == 'lose_gold':
+            p['gold'] -= p['gold'] // 2
+        elif outcome == 'jackpot':
+            p['gold'] += max(p['gold'], 5)  # double, or +5 if you came in broke
+        text = tpl.get(outcome, tpl.get('safe', 'Пронесло.'))
+        _clear_room(state, text.format(gold=(h['gold'] if outcome == 'loot' else p['gold']), dmg=h['dmg'], heal=h.get('heal', 8)))
         return state
 
     if t == 'rest':
@@ -416,7 +458,8 @@ def public_view(state: dict, content: dict) -> dict:
                 image = next((x.get('image') for x in content.get('enemies', []) if x['name'] == e['name']), None)
         view_room.update({
             'title': e['name'], 'emoji': e['emoji'], 'text': e.get('intro', ''), 'image': image,
-            'enemy': {'name': e['name'], 'hp': state['room_state'].get('enemy_hp', e['hp']), 'max_hp': e['max_hp'], 'atk': e['atk']},
+            'enemy': {'name': e['name'], 'hp': state['room_state'].get('enemy_hp', e['hp']), 'max_hp': e['max_hp'],
+                      'atk': e['atk'] + state['room_state'].get('atk_bonus', 0), 'hidden_hp': _mod(state) == 'lowkey'},
         })
     elif t in ('riddle', 'puzzle'):
         pz = content.get('puzzle') or {}
@@ -431,15 +474,18 @@ def public_view(state: dict, content: dict) -> dict:
         view_room.update({'title': tr.get('title', 'Сокровищница'), 'emoji': tr.get('emoji', '💰'), 'text': tr.get('text', ''), 'image': tr.get('image')})
     elif t == 'trap':
         tp = room['trap']
-        view_room.update({'title': tp['title'], 'emoji': tp['emoji'], 'text': tp['text'], 'image': content.get('trap_image')})
+        view_room.update({'title': tp['title'], 'emoji': tp['emoji'], 'text': tp['text'], 'image': tp.get('image') or content.get('trap_image')})
     elif t == 'rest':
         rs = content.get('rest') or {}
         view_room.update({'title': rs.get('title', 'Костёр'), 'emoji': rs.get('emoji', '🔥'), 'text': rs.get('text', ''), 'image': rs.get('image')})
     elif t == 'merchant':
         m = content.get('merchant') or {}
         view_room.update({'title': m.get('title', 'Торговец'), 'emoji': m.get('emoji', '🎩'), 'text': m.get('text', ''), 'image': m.get('image')})
+    mods = content.get('modifiers') or {}
+    m = mods.get(_mod(state)) or {'name': 'Обычный день', 'desc': ''}
     return {
         'phase': state['phase'],
+        'modifier': {'key': _mod(state), 'name': m.get('name', ''), 'desc': m.get('desc', '')},
         'room': view_room,
         'rooms_total': ROOMS,
         'rooms_cleared': state['rooms_cleared'],

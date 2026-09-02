@@ -45,6 +45,8 @@
   .map span.done{ background:linear-gradient(180deg,#3e5a3a,#2b3f28); color:#dfe8d0; }
   .map span.current{ background:linear-gradient(180deg,#8a6a22,#5e4614); color:#fff; box-shadow:0 0 8px rgba(216,168,56,.7); }
   .map span.boss{ border-color:var(--gold-dim); }
+  .rule{ font-size:12.5px; color:var(--hint); text-align:center; margin-top:-4px; }
+  .rule b{ color:var(--gold); font-family:var(--pixel); font-size:8px; margin-right:6px; }
   .iconbtn{ width:38px; height:32px; border:2px solid #000; border-radius:4px; background:linear-gradient(180deg,#5a4f43,#3a322b 60%,#2a241f); color:var(--fg); font-size:16px; box-shadow:0 2px 0 #000; }
 
   .slab{ background:linear-gradient(180deg, var(--stone-light), var(--stone) 30%, var(--stone-dark)); border:2px solid #000; border-radius:6px;
@@ -174,6 +176,7 @@
     <div class="map" id="map"></div>
     <button class="iconbtn" id="logbtn" aria-label="Хроника">📜</button>
   </div>
+  <div class="rule hidden" id="rule"></div>
   <div class="slab enemy hidden" id="enemy"></div>
   <div class="stage" id="stage"></div>
   <div class="msg" id="msg"></div>
@@ -219,17 +222,20 @@
     const fresh = Math.max(0, log.length - lastLogLen);
 
     $('roomno').textContent = `КОМНАТА ${r.number}/${v.rooms_total}`;
+    if (v.modifier && v.modifier.key && v.modifier.key !== 'none') { $('rule').innerHTML = `<b>ПРАВИЛО ДНЯ</b>${esc(v.modifier.name)} — ${esc(v.modifier.desc)}`; $('rule').classList.remove('hidden'); }
+    else $('rule').classList.add('hidden');
     $('map').innerHTML = v.map.map((m,i) => `<span class="${m.done ? 'done' : ''}${m.current ? ' current' : ''}${i === 9 ? ' boss' : ''}">${(m.done || m.current || i === 9) ? (TYPE_ICON[m.type] || '❔') : '·'}</span>`).join('');
 
     // enemy panel
     const en = $('enemy');
     if (r.enemy) {
       const ep = Math.round(100 * r.enemy.hp / r.enemy.max_hp);
+      const hid = r.enemy.hidden_hp;
       en.innerHTML = `<div class="name">${esc(r.enemy.name)}</div><div class="atk">АТК ${r.enemy.atk}</div>
-        <div class="bar en"><i style="width:${ep}%"></i><b>${r.enemy.hp}/${r.enemy.max_hp}</b></div>`;
+        <div class="bar en"><i style="width:${hid ? 100 : ep}%; ${hid ? 'filter:grayscale(1) brightness(.6)' : ''}"></i><b>${hid ? '??? / ???' : r.enemy.hp + '/' + r.enemy.max_hp}</b></div>`;
       en.classList.remove('hidden');
       if (lastEnemyHp !== null && r.enemy.hp < lastEnemyHp) {
-        pop(en, '-' + (lastEnemyHp - r.enemy.hp), /КРИТ/.test(log.slice(-3).join(' ')) ? 'crit' : 'dmg');
+        pop(en, hid ? '-?' : '-' + (lastEnemyHp - r.enemy.hp), /КРИТ/.test(log.slice(-3).join(' ')) ? 'crit' : 'dmg');
         const sp = $('stage').querySelector('img'); if (sp) { sp.classList.add('hurt'); setTimeout(() => sp.classList.remove('hurt'), 400); }
       }
       lastEnemyHp = r.enemy.hp;
@@ -278,8 +284,9 @@
 
   // ── intro sequence ──
   let introTimers = [], introDone = false;
-  function playIntro(date){
+  function playIntro(date, mod){
     const box = $('intro'); box.classList.remove('hidden');
+    if (mod && mod.key && mod.key !== 'none') $('il3').textContent = `Правило дня — ${mod.name}: ${mod.desc}`;
     const title = 'ДАНЖ ПУДЖИНИО';
     $('introTitle').innerHTML = [...title].map((ch, i) => `<span class="c" style="animation-delay:${1.0 + i * 0.11}s">${ch === ' ' ? '&nbsp;' : ch}</span>`).join('');
     $('il4').textContent = date || '';
@@ -307,7 +314,7 @@
       const res = await fetch('/miniapp/api/dungeon/state?init_data=' + encodeURIComponent(initData));
       const data = await res.json();
       if (!data.success) return fail(data.error === 'invalid_auth' ? 'ОТКРОЙ ДАНЖ ИЗ TELEGRAM, БРАТИК' : ('ОШИБКА: ' + data.error));
-      if (data.data.is_new || location.search.includes('intro')) playIntro(data.data.date);
+      if (data.data.is_new || location.search.includes('intro')) playIntro(data.data.date, data.data.view && data.data.view.modifier);
       render(data.data);
     } catch (e) { fail('ДАНЖ НЕ ОТВЕЧАЕТ'); }
   }
