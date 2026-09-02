@@ -227,11 +227,12 @@ def available_actions(state: dict, content: dict) -> list:
     p = state['player']
     t = room['type']
     if t in ('fight', 'boss'):
-        acts = [{'id': 'attack', 'label': '⚔️ Удар'}, {'id': 'defend', 'label': '🛡️ Блок'}]
+        acts = [{'id': 'attack', 'label': f"⚔️ Удар {p['atk']}–{p['atk'] + 2}"},
+                {'id': 'defend', 'label': '🛡️ Блок: урон ½, ответ 2'}]
         if not p['special_used']:
-            acts.append({'id': 'special', 'label': '🗿 Удар статуэткой'})
+            acts.append({'id': 'special', 'label': f"🗿 Статуэтка {p['atk'] * 2}–{p['atk'] * 2 + 3} (1 раз)"})
         if p['potions'] > 0:
-            acts.append({'id': 'potion', 'label': f"🧪 Зелье ({p['potions']})"})
+            acts.append({'id': 'potion', 'label': f"🧪 Зелье +{POTION_HEAL} HP ({p['potions']})"})
         return acts
     if t in ('riddle', 'puzzle'):
         return [{'id': f'answer:{i}', 'label': o} for i, o in enumerate(room['riddle']['options'])]
@@ -431,6 +432,8 @@ def public_view(state: dict, content: dict) -> dict:
         'rooms_total': ROOMS,
         'rooms_cleared': state['rooms_cleared'],
         'player': dict(state['player']),
+        'stats_line': (f"Атака {state['player']['atk']}–{state['player']['atk'] + 2} · крит {int(CRIT_CHANCE * 100)}% (x2)"
+                       + (" · 🛡 щит: следующий удар в 0" if state['player']['shield'] else "")),
         'actions': available_actions(state, content),
         'log': state['log'][-8:],
         'boss_killed': state['boss_killed'],
