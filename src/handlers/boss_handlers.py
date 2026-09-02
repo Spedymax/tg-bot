@@ -209,30 +209,29 @@ class BossHandlers:
 
     async def play_scene(self, chat_id: int, lines: list, ctx: dict, fast: bool = False,
                          image_trigger: str | None = None):
-        """Send a cutscene line by line with the same pacing as the old statuetki plot."""
+        """Send a cutscene line by line. Pacing (per the author): 2.5s before an ordinary line,
+        3.5s before an important one (shouted caps, *event markers*, the sky-sign line) and
+        3.5s before the Pudginio picture."""
         for i, raw in enumerate(lines):
             try:
                 line = raw.format(**ctx) if ctx else raw
             except (KeyError, IndexError):
                 line = raw
+            important = (
+                bool(re.search(r"[А-ЯЁ]{3,}(?:[ ,.!?-]+[А-ЯЁ]{3,}){1,}", line))
+                or line.startswith('*')
+                or (image_trigger is not None and image_trigger in raw)
+                or 'вспышка' in line.lower() or 'ослепляет' in line.lower()
+            )
+            if i > 0:
+                await asyncio.sleep(0.05 if fast else (3.5 if important else 2.5))
             try:
                 await self.bot.send_message(chat_id, line, disable_notification=True)
                 if image_trigger and image_trigger in raw and os.path.exists(_PUDGE_IMAGE):
+                    await asyncio.sleep(0.05 if fast else 3.5)
                     await self.bot.send_photo(chat_id, FSInputFile(_PUDGE_IMAGE), disable_notification=True)
             except Exception as e:
                 logger.warning(f"Boss: scene line failed: {e}")
-            if fast:
-                await asyncio.sleep(0.05)
-            elif 'вспышка' in line.lower() or 'ослепляет' in line.lower():
-                await asyncio.sleep(3.5)
-            elif line.strip() in ('...', '.....'):
-                await asyncio.sleep(2.5)
-            elif re.search(r"[А-ЯЁ]{3,}(?:[ ,.!?-]+[А-ЯЁ]{3,}){1,}", line) or line.startswith('*'):
-                await asyncio.sleep(3)          # shouted lines and *event markers* need to land
-            elif len(line) > 110:
-                await asyncio.sleep(2.6)        # long line: give people time to read it
-            elif i < len(lines) - 1:
-                await asyncio.sleep(1.8)
 
     async def _unpin(self, ev: dict):
         if ev.get('message_id'):
