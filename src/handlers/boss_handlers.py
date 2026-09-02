@@ -207,11 +207,32 @@ class BossHandlers:
             InlineKeyboardButton(text="⚔️ В данж", url=f"https://t.me/{Settings.BOT_USERNAME}?start=dungeon")
         ]])
 
+    # Cutscene pacing. People read ~15 chars/s in a chat, so the pause before a line
+    # grows with the length of the line they are still reading.
+    READ_CHARS_PER_SEC = 15
+    MIN_PAUSE = 2.5
+    MIN_PAUSE_IMPORTANT = 3.5
+    MAX_PAUSE = 8.0
+    IMAGE_PAUSE = 3.5
+    IMAGE_VIEW_TIME = 4.0
+
+    @classmethod
+    def _pause_before(cls, prev_line: str | None, important: bool, after_image: bool = False) -> float:
+        base = cls.MIN_PAUSE_IMPORTANT if important else cls.MIN_PAUSE
+        read = 1.0 + len(prev_line or '') / cls.READ_CHARS_PER_SEC
+        if important:
+            read += 1.0
+        if after_image:
+            read = max(read, cls.IMAGE_VIEW_TIME)
+        return min(cls.MAX_PAUSE, max(base, read))
+
     async def play_scene(self, chat_id: int, lines: list, ctx: dict, fast: bool = False,
                          image_trigger: str | None = None):
-        """Send a cutscene line by line. Pacing (per the author): 2.5s before an ordinary line,
-        3.5s before an important one (shouted caps, *event markers*, the sky-sign line) and
-        3.5s before the Pudginio picture."""
+        """Send a cutscene line by line. The pause before each line depends on how long the
+        previous line was (reading time), with a floor of 2.5s (3.5s before an important line:
+        shouted caps, *event markers*, the sky-sign line) and 3.5s before the Pudginio picture."""
+        prev = None
+        after_image = False
         for i, raw in enumerate(lines):
             try:
                 line = raw.format(**ctx) if ctx else raw
@@ -224,14 +245,17 @@ class BossHandlers:
                 or 'вспышка' in line.lower() or 'ослепляет' in line.lower()
             )
             if i > 0:
-                await asyncio.sleep(0.05 if fast else (3.5 if important else 2.5))
+                await asyncio.sleep(0.05 if fast else self._pause_before(prev, important, after_image))
+            after_image = False
             try:
                 await self.bot.send_message(chat_id, line, disable_notification=True)
                 if image_trigger and image_trigger in raw and os.path.exists(_PUDGE_IMAGE):
-                    await asyncio.sleep(0.05 if fast else 3.5)
+                    await asyncio.sleep(0.05 if fast else self.IMAGE_PAUSE)
                     await self.bot.send_photo(chat_id, FSInputFile(_PUDGE_IMAGE), disable_notification=True)
+                    after_image = True
             except Exception as e:
                 logger.warning(f"Boss: scene line failed: {e}")
+            prev = line
 
     async def _unpin(self, ev: dict):
         if ev.get('message_id'):
