@@ -59,6 +59,7 @@ class BossService:
         self.persona_injection: str = ""
         self.riddle_active: bool = False
         self.event_active: bool = False
+        self.event_chat_id: int | None = None
 
     @property
     def enabled(self) -> bool:
