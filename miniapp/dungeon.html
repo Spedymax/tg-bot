@@ -219,12 +219,11 @@
         <div class="bar enemy"><i style="width:${ep}%"></i><b>${r.enemy.hp}/${r.enemy.max_hp}</b></div></div>`;
     }
     html += `</div>`;
-    if (r.text || (r.flavor && v.phase === 'room')) {
-      const collapsed = fightStarted && !parchOpen;
-      html += `<div class="parch ${collapsed ? 'collapsed' : ''}" id="parch">${r.flavor && v.phase === 'room' ? `<div class="flavor">${esc(r.flavor)}</div>` : ''}${collapsed ? '📜 ' : ''}${esc(r.text || '')}</div>`;
+    // fights: no room text at all — the enemy intro goes to the feed once; other rooms keep their question/choice text
+    if (r.text && r.type !== 'fight' && r.type !== 'boss') {
+      html += `<div class="parch" id="parch">${esc(r.text)}</div>`;
     }
     $('scene').innerHTML = html;
-    const parch = $('parch'); if (parch) parch.addEventListener('click', () => { parchOpen = !parchOpen; parch.classList.toggle('collapsed'); });
     if (r.enemy) {
       const ebox = $('scene').querySelector('.enemybox');
       if (lastEnemyHp !== null && r.enemy.hp < lastEnemyHp) {

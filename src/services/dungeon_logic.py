@@ -179,6 +179,8 @@ def _enter_room(state: dict):
     state['room_state'] = {}
     if room['type'] in ('fight', 'boss'):
         state['room_state'] = {'enemy_hp': room['enemy']['hp'], 'turn': 0}
+        if room['enemy'].get('intro'):
+            _log(state, f"{room['enemy']['emoji']} {room['enemy']['intro']}")
         _log(state, f"{room['enemy']['emoji']} {room['enemy']['name']} — {room['enemy']['hp']} HP, атака {room['enemy']['atk']}.")
     elif room['type'] == 'merchant':
         state['room_state'] = {'bought': []}
