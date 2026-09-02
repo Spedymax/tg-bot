@@ -398,6 +398,7 @@ class BossService:
         try:
             ev = await self.get_active_event()
             self.event_active = ev is not None
+            self.event_chat_id = ev['chat_id'] if ev else None
             now = _now()
             injection = ""
             if ev:

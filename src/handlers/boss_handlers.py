@@ -76,11 +76,14 @@ class BossHandlers:
                 await message.reply("Ивент уже идёт. /pudge_status или /pudge_stop")
                 return
             args = (command.args or '').split()
-            hp = int(args[0]) if len(args) > 0 and args[0].isdigit() else DEFAULT_HP
-            days = int(args[1]) if len(args) > 1 and args[1].isdigit() else DEFAULT_DAYS
-            chat_id = Settings.CHAT_IDS['main'] if message.chat.type == 'private' else message.chat.id
+            nums = [a for a in args if a.isdigit()]
+            hp = int(nums[0]) if len(nums) > 0 else DEFAULT_HP
+            days = int(nums[1]) if len(nums) > 1 else DEFAULT_DAYS
+            here = 'here' in args or 'тут' in args
+            # from a DM the event goes to the main chat unless you say `here` (test mode: the DM itself)
+            chat_id = message.chat.id if (here or message.chat.type != 'private') else Settings.CHAT_IDS['main']
             asyncio.create_task(self.start_event(chat_id, hp, days))
-            if message.chat.type == 'private':
+            if chat_id != message.chat.id:
                 await message.reply(f"Запускаю в основном чате: {hp} HP, {days} дней")
 
         @self.router.message(Command('pudge_stop'))
@@ -146,9 +149,93 @@ class BossHandlers:
                 return
             await self._merchant_return(ev)
 
-        # Group riddle answers. Only matches while a riddle is pending (sync cache),
+        @self.router.message(Command('pudge_finish'))
+        async def pudge_finish(message: Message, command: CommandObject):
+            """Force the finale: /pudge_finish win | lose"""
+            if not self._is_admin(message):
+                return
+            ev = await self.svc.get_active_event()
+            if not ev:
+                await message.reply("Активного ивента нет")
+                return
+            won = (command.args or '').strip().lower() in ('win', 'победа', 'won')
+            await self._finish(ev, won=won)
+
+        @self.router.message(Command('pudge_day'))
+        async def pudge_day(message: Message, command: CommandObject):
+            """Time travel: /pudge_day 7 → it is now day 7; /pudge_day end → the event expires now."""
+            if not self._is_admin(message):
+                return
+            ev = await self.svc.get_active_event()
+            if not ev:
+                await message.reply("Активного ивента нет")
+                return
+            arg = (command.args or '').strip().lower()
+            if arg in ('end', 'конец'):
+                await self.db.execute_query("UPDATE boss_events SET ends_at = NOW() WHERE id = %s", (ev['id'],))
+                await message.reply("Срок ивента истёк. Финал прилетит на следующем тике (до 30 с).")
+            elif arg.isdigit():
+                day = max(1, int(arg))
+                await self.db.execute_query(
+                    "UPDATE boss_events SET started_at = NOW() - INTERVAL '1 day' * %s, "
+                    "ends_at = NOW() + INTERVAL '1 day' * %s WHERE id = %s",
+                    (day - 1, max(0, ev['meta'].get('days', DEFAULT_DAYS) - day + 1), ev['id']),
+                )
+                await message.reply(f"Теперь день {day}. Торговец седьмого дня приходит на тике после 10:00 Kyiv, или сразу: /pudge_merchant_test")
+            else:
+                await message.reply("Использование: /pudge_day 7  или  /pudge_day end")
+            await self.tick()
+
+        @self.router.message(Command('pudge_regen_test'))
+        async def pudge_regen_test(message: Message):
+            """Pretend nobody hit the boss for a day and run the regen job now."""
+            if not self._is_admin(message):
+                return
+            ev = await self.svc.get_active_event()
+            if not ev:
+                await message.reply("Активного ивента нет")
+                return
+            await self.db.execute_query("UPDATE boss_events SET last_damage_at = NOW() - INTERVAL '25 hours' WHERE id = %s", (ev['id'],))
+            await self.daily_regen()
+
+        @self.router.message(Command('pudge_summary'))
+        async def pudge_summary(message: Message):
+            """Show the blocks that get appended to tonight's «правильные ответы»."""
+            if not self._is_admin(message):
+                return
+            text = await self.svc.summary_block()
+            try:
+                from services.dungeon_service import get_dungeon_service
+                dg = get_dungeon_service()
+                if dg:
+                    text += await dg.summary_block()
+            except Exception as e:
+                text += f"\n(данж: {e})"
+            await message.reply(text.strip() or "Пусто: ивента нет и в данж никто не ходил.", parse_mode='HTML')
+
+        @self.router.message(Command('pudge_help'))
+        async def pudge_help(message: Message):
+            if not self._is_admin(message):
+                return
+            await message.reply(
+                "🗿 <b>Пуджинио — админка</b>\n"
+                "/pudge_start [hp] [days] [here] — старт (из ЛС без here → основной чат)\n"
+                "/pudge_status · /pudge_stop (без катсцены)\n"
+                "/pudge_hit 100 — урон себе в зачёт; фазы: ≤66% захват Джарвиса, ≤33% ярость\n"
+                "/pudge_day 7 · /pudge_day end — перемотка времени\n"
+                "/pudge_merchant_test — Торговец с загадкой сейчас (ответ пишется в чат ивента)\n"
+                "/pudge_regen_test — реген за день тишины\n"
+                "/pudge_finish win|lose — финал сразу\n"
+                "/pudge_summary — блок для вечерних ответов\n"
+                "/pudge_intro_test [fast] — интро в ЛС\n\n"
+                "Тест-прогон: в ЛС <code>/pudge_start 200 1 here</code> → /pudge_hit 70 (захват) → поговорить с Джарвисом → "
+                "/pudge_hit 70 (ярость) → /pudge_merchant_test → ответить → /pudge_regen_test → /pudge_summary → /pudge_finish win.",
+                parse_mode='HTML',
+            )
+
+        # Riddle answers in the event chat. Only matches while a riddle is pending (sync cache),
         # and always re-raises SkipHandler so moltbot still logs/answers the message.
-        @self.router.message(F.text, F.chat.type.in_({'group', 'supergroup'}), lambda m: self.svc.riddle_active)
+        @self.router.message(F.text, lambda m: self.svc.riddle_active and m.chat.id == self.svc.event_chat_id)
         async def riddle_answer(message: Message):
             try:
                 riddle = await self.svc.try_answer_riddle(
