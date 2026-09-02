@@ -295,13 +295,13 @@ class QuizScheduler:
         """Send a long message by splitting it into chunks of MAX_TG_MSG_LEN."""
         while text:
             if len(text) <= self.MAX_TG_MSG_LEN:
-                await self.bot.send_message(chat_id, text, parse_mode=parse_mode)
+                await self.bot.send_message(chat_id, text, parse_mode=parse_mode, disable_notification=True)
                 break
             chunk = text[:self.MAX_TG_MSG_LEN]
             cut = chunk.rfind('\n')
             if cut > 0:
                 chunk = text[:cut]
-            await self.bot.send_message(chat_id, chunk, parse_mode=parse_mode)
+            await self.bot.send_message(chat_id, chunk, parse_mode=parse_mode, disable_notification=True)
             text = text[len(chunk):]
 
     async def _send_daily_answers_async(self):

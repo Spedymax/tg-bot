@@ -198,6 +198,7 @@ class WeeklyHighlightHandlers:
                 await self.bot.send_message(
                     chat_id,
                     "🏆 На этой неделе слишком тихо было — высер недели отменяется.",
+                    disable_notification=True,
                 )
                 return
 
@@ -281,7 +282,9 @@ class WeeklyHighlightHandlers:
             top = max(counts) if counts else 0
 
             if top == 0:
-                await self.bot.send_message(chat_id, "🏆 Никто не проголосовал — высер недели остаётся без победителя.")
+                await self.bot.send_message(
+                    chat_id, "🏆 Никто не проголосовал — высер недели остаётся без победителя.", disable_notification=True,
+                )
             else:
                 winners = [candidates[i] for i, c in enumerate(counts) if c == top]
                 winners_desc = "\n".join(f"— {w['name']}: «{self._oneline(w['text'], 200)}»" for w in winners)
@@ -295,7 +298,9 @@ class WeeklyHighlightHandlers:
                 ceremony = await self._call_llm(CEREMONY_SYSTEM_PROMPT, prompt)
                 if not ceremony:
                     ceremony = "Победител" + ("и определены" if is_tie else "ь определён") + f":\n{winners_desc}"
-                await self.bot.send_message(chat_id, f"🏆 <b>Высер недели</b>\n\n{ceremony}", parse_mode='HTML')
+                await self.bot.send_message(
+                    chat_id, f"🏆 <b>Высер недели</b>\n\n{ceremony}", parse_mode='HTML', disable_notification=True,
+                )
 
             await self.db.execute_query(
                 "UPDATE weekly_highlights SET status = 'finished' WHERE id = %s", (row["id"],),

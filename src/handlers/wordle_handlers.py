@@ -131,7 +131,7 @@ class WordleHandlers:
             )
             if previous and previous[0][0]:
                 try:
-                    await self.bot.unpin_chat_message(chat_id, previous[0][0])
+                    await self.bot.unpin_chat_message(chat_id, message_id=previous[0][0])
                 except Exception as e:
                     logger.warning(f"Wordle: failed to unpin previous message: {e}")
 
@@ -151,6 +151,7 @@ class WordleHandlers:
             text = build_message_text(rows)
             sent = await self.bot.send_message(
                 chat_id, text, reply_markup=self._build_markup(private=False), parse_mode='HTML',
+                disable_notification=True,
             )
             await self.db.execute_query(
                 "INSERT INTO wordle_daily (date, word, chat_id, message_id) "

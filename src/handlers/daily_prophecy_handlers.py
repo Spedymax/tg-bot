@@ -460,7 +460,9 @@ class DailyProphecyHandlers:
                 logger.error("DailyProphecy: could not parse any prophecy, skipping post")
                 return
 
-            await self.bot.send_message(chat_id, self._build_message(scene, prophecies), parse_mode='HTML')
+            await self.bot.send_message(
+                chat_id, self._build_message(scene, prophecies), parse_mode='HTML', disable_notification=True,
+            )
 
             await self.db.execute_query(
                 "INSERT INTO daily_prophecies (chat_id, style, prophecies) VALUES (%s, %s, %s)",
