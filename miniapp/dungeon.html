@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Данж Пуджинио</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg: var(--tg-theme-bg-color, #15161a);
+    --card: var(--tg-theme-secondary-bg-color, #1f2026);
+    --fg: var(--tg-theme-text-color, #f2f2f2);
+    --hint: var(--tg-theme-hint-color, #8a8a8f);
+    --button: var(--tg-theme-button-color, #3390ec);
+    --button-text: var(--tg-theme-button-text-color, #ffffff);
+    --hp: #d9534f; --hp-bg: #3a2426; --gold: #e0b341; --enemy: #9b59b6; --ok: #538d4e; --bad: #b0413e;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body{ margin:0; padding:12px 12px 24px; background:var(--bg); color:var(--fg);
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; touch-action:manipulation; }
+  header{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+  header h1{ font-size:18px; margin:0; letter-spacing:1px; }
+  header .sub{ color:var(--hint); font-size:12px; }
+  .map{ display:flex; gap:4px; margin:6px 0 10px; }
+  .map span{ flex:1; height:6px; border-radius:3px; background:#333; }
+  .map span.done{ background:var(--ok); }
+  .map span.current{ background:var(--button); box-shadow:0 0 6px var(--button); }
+  .map span.boss{ border:1px solid var(--gold); }
+  .stats{ display:grid; grid-template-columns:1fr auto; gap:6px 10px; align-items:center; background:var(--card);
+          border-radius:12px; padding:10px 12px; margin-bottom:10px; font-size:14px; }
+  .bar{ position:relative; height:14px; background:var(--hp-bg); border-radius:7px; overflow:hidden; }
+  .bar i{ position:absolute; left:0; top:0; bottom:0; background:var(--hp); transition:width .35s ease; }
+  .bar.enemy{ background:#2b2233; } .bar.enemy i{ background:var(--enemy); }
+  .bar b{ position:absolute; inset:0; font-size:10px; line-height:14px; text-align:center; font-weight:600; color:#fff; text-shadow:0 0 2px #000; }
+  .chips{ display:flex; gap:10px; font-size:13px; white-space:nowrap; }
+  .card{ background:var(--card); border-radius:14px; padding:14px; margin-bottom:10px; min-height:150px; }
+  .card .top{ display:flex; gap:12px; align-items:center; }
+  .card .emoji{ font-size:44px; line-height:1; filter:drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+  .card h2{ margin:0; font-size:17px; }
+  .card .room{ color:var(--hint); font-size:12px; }
+  .card p{ margin:8px 0 0; font-size:14px; line-height:1.4; white-space:pre-wrap; }
+  .card p.flavor{ color:var(--hint); font-style:italic; font-size:13px; }
+  .enemybox{ margin-top:10px; }
+  .enemybox .row{ display:flex; justify-content:space-between; font-size:12px; color:var(--hint); margin-bottom:3px; }
+  .actions{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+  .actions button{ padding:13px 10px; border:0; border-radius:12px; background:var(--button); color:var(--button-text);
+                   font-size:14px; font-weight:600; cursor:pointer; }
+  .actions button:disabled{ opacity:.4; }
+  .actions button.wide{ grid-column:1 / -1; }
+  .actions button.busy{ opacity:.6; }
+  .log{ background:var(--card); border-radius:12px; padding:10px 12px; font-size:13px; line-height:1.45; color:var(--hint); }
+  .log div{ padding:2px 0; border-bottom:1px solid rgba(255,255,255,.04); }
+  .log div:last-child{ color:var(--fg); border:0; }
+  .end{ background:var(--card); border-radius:14px; padding:16px; margin-bottom:10px; text-align:center; }
+  .end h2{ margin:0 0 8px; }
+  .end .others{ text-align:left; margin-top:12px; font-size:14px; line-height:1.6; }
+  .end .boss{ margin-top:12px; font-size:13px; color:var(--hint); }
+  .hidden{ display:none !important; }
+  .shake{ animation:shake .35s; } @keyframes shake{ 0%,100%{transform:translateX(0)} 25%{transform:translateX(-5px)} 75%{transform:translateX(5px)} }
+  .err{ color:var(--bad); text-align:center; padding:30px 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏰 ДАНЖ ПУДЖИНИО</h1>
+  <span class="sub" id="date"></span>
+</header>
+<div class="map" id="map"></div>
+
+<div class="stats" id="stats">
+  <div class="bar" id="hpbar"><i></i><b></b></div>
+  <div class="chips" id="chips"></div>
+</div>
+
+<div class="end hidden" id="end"></div>
+<div class="card" id="card"></div>
+<div class="actions" id="actions"></div>
+<div class="log" id="log"></div>
+
+<script>
+(function(){
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) { try { tg.ready(); tg.expand(); } catch(e){} }
+  const initData = (tg && tg.initData) || '';
+  const $ = id => document.getElementById(id);
+  let busy = false;
+  let lastHp = null;
+
+  const TYPE_EMOJI = {fight:'⚔️', boss:'🗿', riddle:'🧩', puzzle:'🧩', npc:'👻', treasure:'💰', trap:'⚠️', rest:'🔥', merchant:'🎩'};
+
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  function render(payload){
+    const v = payload.view, p = v.player;
+    $('date').textContent = payload.date || '';
+
+    // map
+    $('map').innerHTML = v.map.map((m,i) => `<span class="${m.done?'done':''} ${m.current?'current':''} ${i===9?'boss':''}" title="${TYPE_EMOJI[m.type]||''}"></span>`).join('');
+
+    // stats
+    const hpPct = Math.round(100 * p.hp / p.max_hp);
+    $('hpbar').querySelector('i').style.width = hpPct + '%';
+    $('hpbar').querySelector('b').textContent = `❤️ ${p.hp} / ${p.max_hp}`;
+    if (lastHp !== null && p.hp < lastHp) { $('stats').classList.remove('shake'); void $('stats').offsetWidth; $('stats').classList.add('shake'); }
+    lastHp = p.hp;
+    $('chips').innerHTML = `<span>⚔️ ${p.atk}</span><span style="color:var(--gold)">💰 ${p.gold}</span><span>🧪 ${p.potions}</span>${p.shield ? '<span>🛡️</span>' : ''}`;
+
+    // room card
+    const r = v.room;
+    let html = `<div class="top"><div class="emoji">${r.emoji || TYPE_EMOJI[r.type] || '❔'}</div>
+      <div><div class="room">Комната ${r.number} из ${v.rooms_total}</div><h2>${esc(r.title || '')}</h2></div></div>`;
+    if (r.flavor && v.phase === 'room') html += `<p class="flavor">${esc(r.flavor)}</p>`;
+    if (r.text) html += `<p>${esc(r.text)}</p>`;
+    if (r.enemy) {
+      const ep = Math.round(100 * r.enemy.hp / r.enemy.max_hp);
+      html += `<div class="enemybox"><div class="row"><span>${esc(r.enemy.name)}</span><span>атака ${r.enemy.atk}</span></div>
+        <div class="bar enemy"><i style="width:${ep}%"></i><b>${r.enemy.hp} / ${r.enemy.max_hp}</b></div></div>`;
+    }
+    $('card').innerHTML = html;
+
+    // actions
+    const acts = v.actions || [];
+    $('actions').innerHTML = acts.map(a =>
+      `<button data-id="${esc(a.id)}" ${a.disabled ? 'disabled' : ''} class="${acts.length === 1 || a.id === 'leave' || a.id === 'next' ? 'wide' : ''}">${esc(a.label)}</button>`
+    ).join('');
+    $('actions').querySelectorAll('button').forEach(b => b.addEventListener('click', () => act(b.dataset.id)));
+
+    // log
+    $('log').innerHTML = (v.log || []).map(l => `<div>${esc(l)}</div>`).join('') || '<div>…</div>';
+
+    // end screen
+    const end = $('end');
+    if (v.phase === 'dead' || v.phase === 'won') {
+      const title = v.phase === 'won' ? '👑 Мини-Пуджик убит!' : '💀 Вы погибли';
+      const sub = v.phase === 'won' ? 'Все 10 комнат пройдены. Завтра — новый данж.' : `Пройдено комнат: ${v.rooms_cleared} из ${v.rooms_total}. Завтра — новый данж.`;
+      let others = (payload.others || []).map(o => `<div>${esc(o.line)}</div>`).join('');
+      let boss = payload.boss ? `<div class="boss">🗿 Пуджинио-Фамоза: ${payload.boss.hp} / ${payload.boss.max_hp} HP${payload.boss.rage ? ' · ЯРОСТЬ' : ''}</div>` : '';
+      end.innerHTML = `<h2>${title}</h2><div>${sub}</div><div class="others">${others}</div>${boss}`;
+      end.classList.remove('hidden');
+      $('card').classList.add('hidden');
+      if (tg) { try { tg.HapticFeedback.notificationOccurred(v.phase === 'won' ? 'success' : 'error'); } catch(e){} }
+    } else {
+      end.classList.add('hidden');
+      $('card').classList.remove('hidden');
+    }
+  }
+
+  function fail(msg){ document.body.innerHTML = `<div class="err">${esc(msg)}</div>`; }
+
+  async function load(){
+    try {
+      const res = await fetch('/miniapp/api/dungeon/state?init_data=' + encodeURIComponent(initData));
+      const data = await res.json();
+      if (!data.success) return fail(data.error === 'invalid_auth' ? 'Открой данж из Telegram, братик.' : ('Ошибка: ' + data.error));
+      render(data.data);
+    } catch (e) { fail('Данж не отвечает: ' + e); }
+  }
+
+  async function act(action){
+    if (busy) return;
+    busy = true;
+    $('actions').querySelectorAll('button').forEach(b => b.classList.add('busy'));
+    if (tg) { try { tg.HapticFeedback.impactOccurred('light'); } catch(e){} }
+    try {
+      const res = await fetch('/miniapp/api/dungeon/act', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ init_data: initData, action }) });
+      const data = await res.json();
+      if (data.success) render(data.data);
+    } catch (e) { console.error(e); }
+    busy = false;
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>

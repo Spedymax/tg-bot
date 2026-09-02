@@ -39,6 +39,7 @@ from handlers.weekly_highlight_handlers import WeeklyHighlightHandlers
 from handlers.daily_prophecy_handlers import DailyProphecyHandlers
 from handlers.wordle_handlers import WordleHandlers
 from handlers.boss_handlers import BossHandlers
+from handlers.dungeon_handlers import DungeonHandlers
 
 json_handler = RotatingFileHandler('bot.log', maxBytes=10 * 1024 * 1024, backupCount=3)
 json_handler.setFormatter(JSONFormatter())
@@ -102,6 +103,7 @@ async def _main():
     daily_prophecy_h = DailyProphecyHandlers(bot, db_manager)
     wordle_h = WordleHandlers(bot, db_manager)
     boss_h = BossHandlers(bot, db_manager)
+    dungeon_h = DungeonHandlers(bot, db_manager)
 
     # ── Load shop data (JSON assets) ──────────────────────────────────────────
     _assets = os.path.join(os.path.dirname(__file__), '..', 'assets', 'data')
@@ -133,6 +135,7 @@ async def _main():
     # wordle_h BEFORE game_h/admin_h: its CommandStart(deep_link=True) handler must see
     # "/start wordle" before their unconditional Command('start') handlers swallow it.
     dp.include_router(wordle_h.router)
+    dp.include_router(dungeon_h.router)
     dp.include_router(game_h.router)
     dp.include_router(admin_h.router)
     dp.include_router(entertainment_h.router)
@@ -179,6 +182,7 @@ async def _main():
         BotCommand(command="sdayus",          description="Сдаться в данетке"),
         BotCommand(command="anekdot",         description="Случайный анекдот"),
         BotCommand(command="wordle",          description="Статус Wordle дня"),
+        BotCommand(command="dungeon",         description="Данж дня: 10 комнат и мини-пуджик"),
         BotCommand(command="wordle_test",     description="Тестовая ссылка в личку (адм)"),
         BotCommand(command="event",           description="Поставить ивент/напоминание"),
         BotCommand(command="events",          description="Список ивентов"),

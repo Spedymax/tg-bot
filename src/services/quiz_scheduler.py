@@ -327,8 +327,12 @@ class QuizScheduler:
                 _boss = get_boss_service()
                 if _boss:
                     message += await _boss.summary_block()
+                from services.dungeon_service import get_dungeon_service
+                _dg = get_dungeon_service()
+                if _dg:
+                    message += await _dg.summary_block()
             except Exception as _e:
-                logger.warning(f"Boss summary in daily answers failed: {_e}")
+                logger.warning(f"Boss/dungeon summary in daily answers failed: {_e}")
             await self._send_long_message(self.target_chat_id, message)
             logger.info(f"Daily answers broadcast sent successfully ({len(questions)} questions)")
 

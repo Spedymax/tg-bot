@@ -30,10 +30,12 @@ try:
         score_guess, is_valid_guess, build_message_text, build_share_text,
         word_for_date, WORD_LENGTH, MAX_ATTEMPTS,
     )
-    from services.boss_service import get_boss_service
+    from services.boss_service import get_boss_service, DAMAGE as BOSS_DAMAGE
+    from services.dungeon_service import get_dungeon_service
 except ImportError as e:
     Settings = DatabaseManager = PlayerService = None
-    get_boss_service = None
+    get_boss_service = get_dungeon_service = None
+    BOSS_DAMAGE = {}
     score_guess = is_valid_guess = build_message_text = build_share_text = word_for_date = None
     WORD_LENGTH, MAX_ATTEMPTS = 5, 6
 
@@ -73,6 +75,9 @@ if db_manager and player_service:
         logger.info("Async DB connection pool opened")
         if get_boss_service:
             get_boss_service(db_manager)  # boss event hooks (Pudginio) share this pool
+        if get_dungeon_service:
+            with open(os.path.join(parent_dir, 'assets', 'data', 'dungeon_content.json'), encoding='utf-8') as _f:
+                get_dungeon_service(db_manager, json.load(_f))
     except Exception as e:
         logger.error(f"Failed to open DB pool, falling back to in-memory: {e}")
         db_manager = None
@@ -636,6 +641,100 @@ def wordle_guess():
         'max_attempts': MAX_ATTEMPTS, 'target': target if finished else None,
         'share_text': share_text, 'coins': coins, 'wordle_streak': wordle_streak,
     }})
+
+
+# ── Daily dungeon ─────────────────────────────────────────────────────────────
+def _telegram_send(chat_id, text):
+    if not Settings or not Settings.TELEGRAM_BOT_TOKEN:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{Settings.TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_notification": True},
+            timeout=10,
+        )
+    except Exception as e:
+        logger.error(f"Dungeon: sendMessage failed: {e}")
+
+
+def _dungeon_payload(state):
+    from html import escape as _esc
+    svc = get_dungeon_service()
+    payload = {'view': svc.view(state), 'date': svc.today().strftime('%d.%m.%Y'), 'others': [], 'boss': None}
+    try:
+        payload['others'] = [{'line': svc.result_line(*r)} for r in run_async(svc.today_results())]
+    except Exception as e:
+        logger.warning(f"Dungeon: today_results failed: {e}")
+    try:
+        boss = get_boss_service() if get_boss_service else None
+        ev = run_async(boss.get_active_event()) if boss else None
+        if ev:
+            payload['boss'] = {'hp': ev['hp'], 'max_hp': ev['max_hp'], 'rage': bool(ev.get('rage'))}
+    except Exception as e:
+        logger.warning(f"Dungeon: boss lookup failed: {e}")
+    return payload
+
+
+@app.route('/miniapp/dungeon')
+def dungeon_page():
+    return send_from_directory('.', 'dungeon.html')
+
+
+@app.route('/miniapp/api/dungeon/state', methods=['GET'])
+def dungeon_state():
+    if not db_manager or not get_dungeon_service or not get_dungeon_service():
+        return jsonify({'success': False, 'error': 'Database not available'}), 503
+    user = _validate_init_data(request.args.get('init_data', ''))
+    if not user:
+        return jsonify({'success': False, 'error': 'invalid_auth'}), 401
+    player_name = user.get('first_name') or user.get('username') or 'Игрок'
+    svc = get_dungeon_service()
+    state = run_async(svc.get_or_create_run(svc.today(), user['id'], player_name))
+    return jsonify({'success': True, 'data': _dungeon_payload(state)})
+
+
+@app.route('/miniapp/api/dungeon/act', methods=['POST'])
+def dungeon_act():
+    if not db_manager or not get_dungeon_service or not get_dungeon_service():
+        return jsonify({'success': False, 'error': 'Database not available'}), 503
+    data = request.json or {}
+    user = _validate_init_data(data.get('init_data', ''))
+    if not user:
+        return jsonify({'success': False, 'error': 'invalid_auth'}), 401
+    action = str(data.get('action') or '')[:40]
+    player_id = user['id']
+    player_name = user.get('first_name') or user.get('username') or 'Игрок'
+    svc = get_dungeon_service()
+    state, events = run_async(svc.act(player_id, player_name, action))
+
+    # Boss event hooks: every cleared room chips at Pudginio, the mini-Pudge kill is a big hit.
+    boss_res = None
+    try:
+        boss = get_boss_service() if get_boss_service else None
+        if boss:
+            if events['rooms_delta'] > 0:
+                boss_res = run_async(boss.deal_damage(player_id, player_name, 'dungeon_room',
+                                                      BOSS_DAMAGE.get('dungeon_room', 5) * events['rooms_delta']))
+            if events['boss_killed_now']:
+                boss_res = run_async(boss.deal_damage(player_id, player_name, 'dungeon_boss')) or boss_res
+    except Exception as e:
+        logger.warning(f"Dungeon: boss hook failed: {e}")
+
+    if events['finished_now']:
+        try:
+            from html import escape as _esc
+            rooms = state['rooms_cleared']
+            if state['phase'] == 'won':
+                line = f"🏰 {_esc(player_name)} прошёл данж: 10/10, мини-пуджик убит 👑"
+            else:
+                line = f"🏰 {_esc(player_name)} погиб в комнате {min(rooms + 1, 10)} данжа 💀"
+            if boss_res:
+                line += f" · Пуджинио: {boss_res['hp']}/{boss_res['max_hp']} HP"
+            _telegram_send(Settings.CHAT_IDS['main'], line)
+        except Exception as e:
+            logger.warning(f"Dungeon: finish notice failed: {e}")
+
+    return jsonify({'success': True, 'data': _dungeon_payload(state)})
 
 
 @app.route('/miniapp/dog.jpg')

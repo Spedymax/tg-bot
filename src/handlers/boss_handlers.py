@@ -341,6 +341,8 @@ class BossHandlers:
         if not self.svc.enabled:
             logger.info("Boss: PUDGE_EVENT disabled, scheduler not started")
             return
+        # the 30s tick would otherwise log two INFO lines a minute forever
+        logging.getLogger('apscheduler.executors.default').setLevel(logging.WARNING)
         self._scheduler = AsyncIOScheduler(timezone=KYIV)
         self._scheduler.add_job(self.tick, IntervalTrigger(seconds=30), max_instances=1, coalesce=True)
         self._scheduler.add_job(self.daily_regen, CronTrigger(hour=4, minute=0, timezone=KYIV))
