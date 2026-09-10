@@ -455,6 +455,7 @@ class MoltbotHandlers:
                             body = (await r.aread()).decode(errors="replace")[:300]
                             raise _AIConnectionError(f"Together.ai {r.status_code}: {body}")
                         chunks: list[str] = []
+                        tool_calls: dict[int, dict] = {}
                         async for line in r.aiter_lines():
                             if not line or not line.startswith("data: "):
                                 continue
@@ -463,12 +464,29 @@ class MoltbotHandlers:
                                 break
                             try:
                                 delta = json.loads(data)["choices"][0].get("delta") or {}
-                                piece = delta.get("content")
-                                if piece:
-                                    chunks.append(piece)
                             except Exception:
                                 continue
-                        return {"choices": [{"message": {"content": "".join(chunks)}}]}
+                            piece = delta.get("content")
+                            if piece:
+                                chunks.append(piece)
+                            # Function-calling deltas arrive in pieces keyed by index
+                            for tc in delta.get("tool_calls") or []:
+                                idx = tc.get("index", 0)
+                                acc = tool_calls.setdefault(idx, {
+                                    "id": None, "type": "function",
+                                    "function": {"name": "", "arguments": ""},
+                                })
+                                if tc.get("id"):
+                                    acc["id"] = tc["id"]
+                                fn = tc.get("function") or {}
+                                if fn.get("name"):
+                                    acc["function"]["name"] += fn["name"]
+                                if fn.get("arguments"):
+                                    acc["function"]["arguments"] += fn["arguments"]
+                        message: dict = {"content": "".join(chunks)}
+                        if tool_calls:
+                            message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
+                        return {"choices": [{"message": message}]}
                 except (httpx.TransportError, httpx.TimeoutException) as e:
                     last_exc = e
                     logger.warning(f"MoltBot: Together.ai transient error ({e!r}), retry {attempt}/3")
@@ -488,7 +506,8 @@ class MoltbotHandlers:
             identity = ""
         system_msg = "\n\n".join([self._HARD_RULES, identity])
         try:
-            data = await self._together_post(
+            text = await self._complete_with_tools(
+                self._together_post,
                 {
                     "model": Settings.TOGETHER_MODEL,
                     "messages": [
@@ -501,12 +520,8 @@ class MoltbotHandlers:
                 },
                 timeout=120,
             )
-            text = data["choices"][0]["message"]["content"]
-            text = re.sub(r'<think>.*?(?:</think>|$)', '', text, flags=re.DOTALL).strip()
-            text = re.sub(r'\*[^*]{2,80}\*', '', text)
-            text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
             together_breaker.record_success()
-            return text
+            return self._clean_persona_reply(text)
         except Exception as e:
             together_breaker.record_failure()
             logger.error(f"MoltBot: Together.ai simple call failed: {e}")
@@ -525,7 +540,8 @@ class MoltbotHandlers:
             identity = ""
         system_msg = "\n\n".join([self._HARD_RULES, identity])
         try:
-            data = await self._openrouter_post(
+            text = await self._complete_with_tools(
+                self._openrouter_post,
                 {
                     "model": Settings.OPENROUTER_MODEL,
                     "messages": [
@@ -539,7 +555,7 @@ class MoltbotHandlers:
                 timeout=120,
             )
             openrouter_breaker.record_success()
-            return self._clean_persona_reply(data["choices"][0]["message"]["content"])
+            return self._clean_persona_reply(text)
         except Exception as e:
             openrouter_breaker.record_failure()
             logger.warning(f"MoltBot: OpenRouter simple call failed: {e}")
@@ -1018,7 +1034,8 @@ class MoltbotHandlers:
         if not Settings.TOGETHER_API_KEY:
             raise _AIConnectionError("TOGETHER_API_KEY not set")
         messages = await self._build_persona_messages(sender_name, user_text, chat_context, history)
-        data = await self._together_post(
+        text = await self._complete_with_tools(
+            self._together_post,
             {
                 "model": Settings.TOGETHER_MODEL,
                 "messages": messages,
@@ -1027,7 +1044,7 @@ class MoltbotHandlers:
             },
             timeout=120,
         )
-        return self._clean_persona_reply(data["choices"][0]["message"]["content"])
+        return self._clean_persona_reply(text)
 
     async def _openrouter_post(self, payload: dict, timeout: float) -> dict:
         """POST to OpenRouter (non-streaming) with retry on 5xx/429 and transient errors."""
@@ -1075,7 +1092,8 @@ class MoltbotHandlers:
             raise _AIConnectionError("openrouter circuit breaker open")
         messages = await self._build_persona_messages(sender_name, user_text, chat_context, history)
         try:
-            data = await self._openrouter_post(
+            text = await self._complete_with_tools(
+                self._openrouter_post,
                 {
                     "model": Settings.OPENROUTER_MODEL,
                     "messages": messages,
@@ -1085,7 +1103,7 @@ class MoltbotHandlers:
                 timeout=120,
             )
             openrouter_breaker.record_success()
-            return self._clean_persona_reply(data["choices"][0]["message"]["content"])
+            return self._clean_persona_reply(text)
         except Exception as e:
             openrouter_breaker.record_failure()
             logger.warning(f"MoltBot: OpenRouter call failed: {e}")
@@ -1140,27 +1158,135 @@ class MoltbotHandlers:
             logger.warning(f"MoltBot: Brave search failed: {e}")
             return ""
 
-    @staticmethod
-    def _extract_search_query(text: str) -> str | None:
-        """Extract search query from LLM reply. Handles SEARCH: anywhere in text."""
+    # ------------------------------------------------------------------
+    # Web search as a native tool call (OpenAI-compatible function calling).
+    # The model calls web_search(query) instead of emitting "SEARCH: ..." as
+    # text — text markers leaked into the chat whenever the intercept missed.
+    # ------------------------------------------------------------------
+    _WEB_SEARCH_TOOL = {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "Поиск в интернете. Вызывай, когда нужен свежий или точный факт, которого ты "
+                "не знаешь: новости, курсы, результаты матчей, кто такой X, что за X, что случилось. "
+                "Любой вопрос про незнакомого человека/вещь/событие — повод искать, а не отвечать «хз». "
+                "На болтовню, мнения и советы поиск не нужен."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Короткий поисковый запрос на русском (или на языке темы).",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    }
+    # How many rounds of tool calls we allow before forcing a plain answer
+    _MAX_TOOL_ROUNDS = 2
+
+    async def _execute_tool_call(self, tool_call: dict) -> str:
+        """Run one tool call from the model and return its result as text."""
+        fn = tool_call.get("function") or {}
+        name = fn.get("name") or ""
+        raw_args = fn.get("arguments") or "{}"
+        try:
+            args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+        except Exception:
+            args = {"query": str(raw_args)}
+        if name != "web_search":
+            logger.warning(f"MoltBot: model called unknown tool {name!r}")
+            return f"Ошибка: инструмента {name!r} нет. Доступен только web_search."
+        query = str(args.get("query") or "").strip()
+        if not query:
+            return "Ошибка: пустой запрос. Передай query."
+        logger.info(f"MoltBot: web_search tool → '{query}'")
+        results = await self._brave_search(query)
+        if not results:
+            return f"По запросу '{query}' ничего не нашлось. Скажи честно, что не нашёл, не выдумывай."
+        return (
+            f"Результаты поиска по запросу '{query}':\n{results}\n"
+            "Используй эту информацию чтобы ответить. Отвечай коротко, своими словами, "
+            "не пересказывай список результатов."
+        )
+
+    async def _complete_with_tools(self, post, payload: dict, timeout: float) -> str:
+        """Chat-completion loop with the web_search tool.
+
+        `post` is a provider poster (`_openrouter_post` / `_together_post`) returning the
+        OpenAI-style {"choices": [{"message": {...}}]} shape. If the model answers with
+        tool_calls we run them, append the results as `tool` messages and call again.
+        After `_MAX_TOOL_ROUNDS` rounds the tool is disabled (tool_choice=none) so the
+        model has to answer in plain text. Returns the final text content.
+        """
+        messages = list(payload["messages"])
+        base = {k: v for k, v in payload.items() if k != "messages"}
+        tools_supported = True
+        for round_no in range(self._MAX_TOOL_ROUNDS + 1):
+            req = {**base, "messages": messages}
+            if tools_supported:
+                req["tools"] = [self._WEB_SEARCH_TOOL]
+                req["tool_choice"] = "none" if round_no == self._MAX_TOOL_ROUNDS else "auto"
+            try:
+                data = await post(req, timeout)
+            except _AIConnectionError as e:
+                # Provider/model without function calling → retry once without tools
+                if tools_supported and round_no == 0 and "400" in str(e) and "tool" in str(e).lower():
+                    logger.warning(f"MoltBot: provider rejected tools, retrying without: {e}")
+                    tools_supported = False
+                    data = await post({**base, "messages": messages}, timeout)
+                else:
+                    raise
+            msg = data["choices"][0]["message"]
+            content = msg.get("content") or ""
+            tool_calls = msg.get("tool_calls") or []
+            if not tool_calls or round_no == self._MAX_TOOL_ROUNDS:
+                return content
+            messages.append({"role": "assistant", "content": content or None, "tool_calls": tool_calls})
+            for tc in tool_calls:
+                result = await self._execute_tool_call(tc)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id") or f"call_{round_no}",
+                    "name": (tc.get("function") or {}).get("name") or "web_search",
+                    "content": result,
+                })
+        return ""
+
+    # Legacy text marker. Kept only as a safety net for prompt versions that still
+    # say "ответь словом SEARCH:" — the model should be using the web_search tool.
+    # Uppercase-only on purpose: the marker is always uppercase, ordinary text isn't.
+    _SEARCH_MARKER_RE = re.compile(r"SEARCH\s*:\s*([^\n\]]+)")
+    _SEARCH_LINE_RE = re.compile(r"(?m)^[ \t]*(?:\[?[^\n:]{0,20}:[ \t]*)?\[?[ \t]*SEARCH\s*:[^\n]*$")
+
+    @classmethod
+    def _extract_search_query(cls, text: str) -> str | None:
+        """Extract search query from a legacy 'SEARCH: ...' marker anywhere in the reply."""
         if not text:
             return None
-        for line in text.strip().splitlines():
-            line = line.strip()
-            # Remove common prefixes: timestamps, bot name, brackets
-            for prefix in ("Jarvis:", "Кеша:", "[", "]"):
-                if line.startswith(prefix):
-                    line = line[len(prefix):].strip()
-            upper = line.upper()
-            if upper.startswith("SEARCH:"):
-                query = line[7:].strip()
-                logger.info(f"MoltBot: _extract_search_query found '{query}' in line: {line[:80]}")
-                return query if query else None
-        return None
+        m = cls._SEARCH_MARKER_RE.search(text)
+        if not m:
+            return None
+        query = m.group(1).strip()
+        if query:
+            logger.info(f"MoltBot: legacy SEARCH marker found → '{query}'")
+        return query or None
+
+    @classmethod
+    def _strip_search_markers(cls, text: str) -> str:
+        """Remove any leftover 'SEARCH: ...' markers so they never reach the chat."""
+        if not text:
+            return text
+        cleaned = cls._SEARCH_LINE_RE.sub("", text)          # whole marker lines
+        cleaned = cls._SEARCH_MARKER_RE.sub("", cleaned)     # inline leftovers
+        return re.sub(r"\n\s*\n\s*\n", "\n\n", cleaned).strip()
 
     async def _maybe_search(self, reply: str, sender_name: str, user_text: str,
                             chat_context: str, history: list[str] | None) -> str | None:
-        """If reply contains SEARCH:, do the search and re-generate. Returns new reply or None."""
+        """Legacy net: if reply contains a SEARCH: marker, search and re-generate. Returns new reply or None."""
         query = self._extract_search_query(reply)
         if not query:
             return None
@@ -1187,7 +1313,8 @@ class MoltbotHandlers:
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str,
                                   history: list[str] | None = None) -> str:
-        """Route: OpenRouter/Grok → Together.ai fallback → Brave Search (SEARCH:) / Gemini (INTERNET)."""
+        """Route: OpenRouter/Grok → Together.ai fallback. Web search is a native tool call
+        (web_search → Brave); legacy SEARCH:/INTERNET text markers are intercepted as a fallback."""
         if not Settings.OPENROUTER_API_KEY and not Settings.TOGETHER_API_KEY:
             raise _AIConnectionError("Neither OPENROUTER_API_KEY nor TOGETHER_API_KEY set")
         logger.info(f"MoltBot: persona call for: {user_text[:60]}")
@@ -1195,11 +1322,18 @@ class MoltbotHandlers:
         if not reply or not reply.strip():
             return reply
         logger.info(f"MoltBot: routed got reply ({len(reply)} chars): {reply[:100]!r}")
-        # Check for SEARCH: or INTERNET
-        searched = await self._maybe_search(reply, sender_name, user_text, chat_context, history)
-        if searched:
-            logger.info(f"MoltBot: SEARCH resolved, returning: {searched[:100]!r}")
-            return searched
+        # Legacy text markers (SEARCH: / INTERNET) — search is a tool call now,
+        # but old prompt versions may still emit them. Never let them reach the chat.
+        if self._extract_search_query(reply):
+            searched = await self._maybe_search(reply, sender_name, user_text, chat_context, history)
+            if searched and not self._extract_search_query(searched):
+                logger.info(f"MoltBot: legacy SEARCH resolved, returning: {searched[:100]!r}")
+                return searched
+            stripped = self._strip_search_markers(searched or reply)
+            if stripped:
+                logger.warning("MoltBot: legacy SEARCH marker stripped from reply")
+                return stripped
+            raise _AIConnectionError("reply was only a SEARCH marker and search failed")
         if reply.strip().upper() == "INTERNET":
             logger.info(f"MoltBot: INTERNET → gemini for: {user_text[:60]}")
             return await self._call_gemini_text(sender_name, user_text, chat_context, history)
@@ -1299,17 +1433,17 @@ class MoltbotHandlers:
             if not reply:
                 return False
 
-            # Intercept SEARCH: in probabilistic replies
+            # Legacy SEARCH: marker in probabilistic replies (search is a tool call now)
             search_q = self._extract_search_query(reply)
             if search_q:
-                logger.info(f"MoltBot: probabilistic SEARCH → '{search_q}'")
+                logger.info(f"MoltBot: probabilistic legacy SEARCH → '{search_q}'")
                 results = await self._brave_search(search_q)
                 if results:
                     augmented = f"{prompt}\n\n[Результаты поиска '{search_q}':\n{results}\nОтвечай коротко.]"
                     reply = await self._call_persona_simple(augmented)
-                    reply = reply.strip()
-                    if not reply or self._extract_search_query(reply):
-                        return False  # avoid infinite loop
+                reply = self._strip_search_markers(reply)
+                if not reply:
+                    return False
 
             sent = await self._send_long_reply(message, reply)
             await self._store_bot_reply(reply, sent.message_id)
