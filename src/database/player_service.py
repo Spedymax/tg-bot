@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Dict, Optional, List
 from datetime import datetime, timezone
+from decimal import Decimal
 from models.player import Player
 from database.db_manager import DatabaseManager
 
@@ -59,10 +60,15 @@ class PlayerService:
             val = getattr(player, attr_name)
             if isinstance(val, datetime):
                 data[attr_name] = val.isoformat()
+            elif isinstance(val, Decimal):
+                # NUMERIC columns arrive as Decimal; json can't serialize it
+                data[attr_name] = float(val)
             else:
                 # lists, dicts, ints, floats, bools, None — all JSON-native
                 data[attr_name] = val
-        return json.dumps(data, ensure_ascii=False)
+        # default= catches Decimals nested inside JSON fields (e.g. pet)
+        return json.dumps(data, ensure_ascii=False,
+                          default=lambda o: float(o) if isinstance(o, Decimal) else str(o))
 
     @staticmethod
     def _deserialize_player(raw: str) -> Player:

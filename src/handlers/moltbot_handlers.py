@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import re
+import time
 import httpx
 import google.generativeai as genai
 from datetime import datetime, timezone, timedelta
@@ -1210,30 +1211,106 @@ class MoltbotHandlers:
         except Exception:
             return False
 
+    # Brave free tier allows about one request per second, while the model
+    # happily asks for 3-5 searches in a single turn. Requests are therefore
+    # serialized process-wide with a minimum gap, a 429 is retried once, and
+    # repeated queries (the model likes spelling variants of the same name)
+    # are answered from a short-lived in-process cache.
+    _BRAVE_MIN_INTERVAL = 1.2      # seconds between two Brave requests
+    _BRAVE_RETRY_DELAY = 1.5       # extra pause before the single retry on 429
+    _BRAVE_CACHE_TTL = 600         # seconds a query result stays reusable
+    _BRAVE_CACHE_MAX = 128
+    _brave_last_call = 0.0
+    _brave_cache: dict = {}
+    _brave_lock = None
+    _brave_lock_loop = None
+
+    @classmethod
+    def _get_brave_lock(cls) -> asyncio.Lock:
+        """One lock per event loop (a Lock is bound to the loop that first used it)."""
+        loop = asyncio.get_running_loop()
+        if cls._brave_lock is None or cls._brave_lock_loop is not loop:
+            cls._brave_lock = asyncio.Lock()
+            cls._brave_lock_loop = loop
+        return cls._brave_lock
+
+    @classmethod
+    def _brave_cache_get(cls, key: str):
+        hit = cls._brave_cache.get(key)
+        if hit is None:
+            return None
+        cached_at, value = hit
+        if time.monotonic() - cached_at > cls._BRAVE_CACHE_TTL:
+            cls._brave_cache.pop(key, None)
+            return None
+        return value
+
+    @classmethod
+    def _brave_cache_put(cls, key: str, value: str):
+        if len(cls._brave_cache) >= cls._BRAVE_CACHE_MAX:
+            oldest = min(cls._brave_cache, key=lambda k: cls._brave_cache[k][0])
+            cls._brave_cache.pop(oldest, None)
+        cls._brave_cache[key] = (time.monotonic(), value)
+
+    @classmethod
+    async def _brave_wait_turn(cls):
+        """Hold the next Brave request until _BRAVE_MIN_INTERVAL has passed."""
+        gap = cls._BRAVE_MIN_INTERVAL - (time.monotonic() - cls._brave_last_call)
+        if gap > 0:
+            await asyncio.sleep(gap)
+        cls._brave_last_call = time.monotonic()
+
+    async def _brave_request(self, query: str, count: int) -> str:
+        """One Brave API call. Raises httpx.HTTPStatusError on a bad status."""
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                headers={"X-Subscription-Token": Settings.BRAVE_API_KEY,
+                         "Accept": "application/json"},
+                params={"q": query, "count": count},
+                timeout=10,
+            )
+            r.raise_for_status()
+            data = r.json()
+            results = []
+            for item in (data.get("web", {}).get("results") or [])[:count]:
+                title = item.get("title", "")
+                desc = item.get("description", "")
+                results.append(f"- {title}: {desc}")
+            return "\n".join(results) if results else ""
+
     async def _brave_search(self, query: str, count: int = 5) -> str:
         """Search the web via Brave Search API. Returns formatted results."""
         if not Settings.BRAVE_API_KEY:
             return ""
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    headers={"X-Subscription-Token": Settings.BRAVE_API_KEY,
-                             "Accept": "application/json"},
-                    params={"q": query, "count": count},
-                    timeout=10,
-                )
-                r.raise_for_status()
-                data = r.json()
-                results = []
-                for item in (data.get("web", {}).get("results") or [])[:count]:
-                    title = item.get("title", "")
-                    desc = item.get("description", "")
-                    results.append(f"- {title}: {desc}")
-                return "\n".join(results) if results else ""
-        except Exception as e:
-            logger.warning(f"MoltBot: Brave search failed: {e}")
-            return ""
+        key = " ".join(query.lower().split())
+        cached = self._brave_cache_get(key)
+        if cached is not None:
+            logger.info(f"MoltBot: Brave cache hit for '{query}'")
+            return cached
+        async with self._get_brave_lock():
+            # Another call may have searched the same thing while we waited
+            cached = self._brave_cache_get(key)
+            if cached is not None:
+                logger.info(f"MoltBot: Brave cache hit for '{query}'")
+                return cached
+            for attempt in range(2):
+                await self._brave_wait_turn()
+                try:
+                    results = await self._brave_request(query, count)
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 429 and attempt == 0:
+                        logger.warning(f"MoltBot: Brave rate-limited on '{query}', retrying once")
+                        await asyncio.sleep(self._BRAVE_RETRY_DELAY)
+                        continue
+                    logger.warning(f"MoltBot: Brave search failed: {e}")
+                    return ""
+                except Exception as e:
+                    logger.warning(f"MoltBot: Brave search failed: {e}")
+                    return ""
+                self._brave_cache_put(key, results)
+                return results
+        return ""
 
     # ------------------------------------------------------------------
     # Web search as a native tool call (OpenAI-compatible function calling).
@@ -1264,9 +1341,18 @@ class MoltbotHandlers:
     }
     # How many rounds of tool calls we allow before forcing a plain answer
     _MAX_TOOL_ROUNDS = 2
+    # The model often asks for a batch of searches at once, and Brave is paced at
+    # ~1 request/second, so the search phase of one reply is capped by wall clock
+    # rather than by call count: whatever fits in the budget runs, the rest is
+    # reported back to the model as skipped.
+    _SEARCH_TIME_BUDGET = 10.0
 
-    async def _execute_tool_call(self, tool_call: dict) -> str:
-        """Run one tool call from the model and return its result as text."""
+    async def _execute_tool_call(self, tool_call: dict, deadline: float = None) -> str:
+        """Run one tool call from the model and return its result as text.
+
+        `deadline` is a `time.monotonic()` stamp: past it, searches are skipped
+        instead of making the reply wait even longer.
+        """
         fn = tool_call.get("function") or {}
         name = fn.get("name") or ""
         raw_args = fn.get("arguments") or "{}"
@@ -1280,6 +1366,12 @@ class MoltbotHandlers:
         query = str(args.get("query") or "").strip()
         if not query:
             return "Ошибка: пустой запрос. Передай query."
+        if deadline is not None and time.monotonic() >= deadline:
+            logger.info(f"MoltBot: search budget spent, skipping '{query}'")
+            return (
+                f"Поиск по запросу '{query}' пропущен: лимит времени на поиск исчерпан. "
+                "Отвечай тем, что уже нашёл, и не выдумывай."
+            )
         logger.info(f"MoltBot: web_search tool → '{query}'")
         results = await self._brave_search(query)
         if not results:
@@ -1302,6 +1394,8 @@ class MoltbotHandlers:
         messages = list(payload["messages"])
         base = {k: v for k, v in payload.items() if k != "messages"}
         tools_supported = True
+        # One budget for the whole reply, shared by every round
+        search_deadline = time.monotonic() + self._SEARCH_TIME_BUDGET
         for round_no in range(self._MAX_TOOL_ROUNDS + 1):
             req = {**base, "messages": messages}
             if tools_supported:
@@ -1324,7 +1418,7 @@ class MoltbotHandlers:
                 return content
             messages.append({"role": "assistant", "content": content or None, "tool_calls": tool_calls})
             for tc in tool_calls:
-                result = await self._execute_tool_call(tc)
+                result = await self._execute_tool_call(tc, deadline=search_deadline)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.get("id") or f"call_{round_no}",
