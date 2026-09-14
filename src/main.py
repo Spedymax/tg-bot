@@ -38,7 +38,7 @@ from handlers.court_handlers import CourtHandlers
 from handlers.weekly_highlight_handlers import WeeklyHighlightHandlers
 from handlers.daily_prophecy_handlers import DailyProphecyHandlers
 from handlers.wordle_handlers import WordleHandlers
-from handlers.boss_handlers import BossHandlers
+from handlers.boss_handlers import BossHandlers, BossRiddleMiddleware
 from handlers.dungeon_handlers import DungeonHandlers
 
 json_handler = RotatingFileHandler('bot.log', maxBytes=10 * 1024 * 1024, backupCount=3)
@@ -104,6 +104,9 @@ async def _main():
     wordle_h = WordleHandlers(bot, db_manager)
     boss_h = BossHandlers(bot, db_manager)
     dungeon_h = DungeonHandlers(bot, db_manager)
+    # Observe riddle answers before router/FSM selection, but always pass the same
+    # message onward so court, shop, prompt, Moltbot and logging still see it once.
+    dp.message.outer_middleware(BossRiddleMiddleware(boss_h))
 
     # ── Load shop data (JSON assets) ──────────────────────────────────────────
     _assets = os.path.join(os.path.dirname(__file__), '..', 'assets', 'data')
@@ -128,8 +131,6 @@ async def _main():
     # handle_reply_to_bot — Max's «ок» is a reply to the loop digest, i.e. a reply to the bot.
     from handlers.prompt_handlers import prompt_router
     dp.include_router(prompt_router)
-    # boss_h BEFORE moltbot: its riddle listener re-raises SkipHandler, so moltbot still
-    # sees every group message; only needs to run first to catch the answer.
     dp.include_router(boss_h.router)
     dp.include_router(moltbot_h.router)
     # wordle_h BEFORE game_h/admin_h: its CommandStart(deep_link=True) handler must see
@@ -165,6 +166,9 @@ async def _main():
     weekly_highlight_h.start_scheduler(Settings.CHAT_IDS['main'])
     daily_prophecy_h.start_scheduler(Settings.CHAT_IDS['main'])
     wordle_h.start_scheduler(Settings.CHAT_IDS['main'])
+    # Populate the synchronous riddle/persona flags before polling starts; otherwise
+    # the first 30 seconds after a restart could miss a valid riddle answer.
+    await boss_h.svc.refresh_caches(boss_h.content)
     boss_h.start_scheduler()
 
     # ── Register Telegram command menu ───────────────────────────────────────

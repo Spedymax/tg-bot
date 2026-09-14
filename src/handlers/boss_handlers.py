@@ -9,17 +9,18 @@ the mini-app process shows up here without any cross-process signalling.
 import asyncio
 import json
 import logging
+import math
 import os
 import random
 import re
 from datetime import datetime, timedelta, timezone
+from html import escape
 from zoneinfo import ZoneInfo
 
-from aiogram import F, Router
-from aiogram.dispatcher.event.bases import SkipHandler
+from aiogram import BaseMiddleware, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
-from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -35,7 +36,17 @@ _PUDGE_IMAGE = os.path.join(_BASE_DIR, 'assets', 'images', 'statuetki', 'pudgini
 
 DEFAULT_HP = 2500
 DEFAULT_DAYS = 14
+LOBBY_WINDOW_SECONDS = 10
 KYIV = ZoneInfo("Europe/Kyiv")
+
+_LOBBY_NAME_OVERRIDES = {
+    'Spatifilum': 'Юра',
+    'Летучий сын мияги 🏴‍☠️': 'Юра',
+    'Богдан.': 'Богдан',
+    'Адольфус': 'Богдан',
+    'Максим': 'Макс',
+    'Максимилиано': 'Макс',
+}
 
 
 def _load_json(name: str) -> dict:
@@ -47,6 +58,21 @@ def _load_json(name: str) -> dict:
         return {}
 
 
+class BossRiddleMiddleware(BaseMiddleware):
+    """Observe riddle answers without consuming messages meant for other handlers."""
+
+    def __init__(self, boss_handlers):
+        self.boss_handlers = boss_handlers
+
+    async def __call__(self, handler, event: Message, data: dict):
+        try:
+            await self.boss_handlers.inspect_riddle_message(event)
+        except Exception as e:
+            # A side event must never stop court/shop/moltbot or message logging.
+            logger.error(f"Boss: riddle middleware failed: {e}", exc_info=True)
+        return await handler(event, data)
+
+
 class BossHandlers:
     def __init__(self, bot, db_manager):
         self.bot = bot
@@ -56,6 +82,12 @@ class BossHandlers:
         self._scheduler = None
         self._last_pin_text: dict[int, str] = {}
         self._tick_lock = asyncio.Lock()
+        self._start_lock = asyncio.Lock()
+        self._lobby_tick_lock = asyncio.Lock()
+        self._last_lobby_text: dict[int, str] = {}
+        self._launch_tasks: set[asyncio.Task] = set()
+        self._launching_lobby_ids: set[int] = set()
+        self._scene_tasks: set[asyncio.Task] = set()
         self.content = _load_json('pudge_event.json')
         self.content['boss_intro'] = _load_json('plot.json').get('boss_intro', [])
         self._register()
@@ -72,19 +104,43 @@ class BossHandlers:
             if not self.svc.enabled:
                 await message.reply("PUDGE_EVENT выключен в .env")
                 return
+            if message.chat.type != 'private':
+                await message.reply("Запускай ивент командой /pudge_start в личке с ботом.")
+                return
             if await self.svc.get_active_event():
                 await message.reply("Ивент уже идёт. /pudge_status или /pudge_stop")
                 return
+            existing = await self.svc.get_open_lobby()
+            if existing:
+                await message.reply("Лобби уже ждёт в основном чате. Второе не создаю.")
+                return
             args = (command.args or '').split()
             nums = [a for a in args if a.isdigit()]
-            hp = int(nums[0]) if len(nums) > 0 else DEFAULT_HP
-            days = int(nums[1]) if len(nums) > 1 else DEFAULT_DAYS
-            here = 'here' in args or 'тут' in args
-            # from a DM the event goes to the main chat unless you say `here` (test mode: the DM itself)
-            chat_id = message.chat.id if (here or message.chat.type != 'private') else Settings.CHAT_IDS['main']
-            asyncio.create_task(self.start_event(chat_id, hp, days))
-            if chat_id != message.chat.id:
-                await message.reply(f"Запускаю в основном чате: {hp} HP, {days} дней")
+            hp = max(1, int(nums[0])) if len(nums) > 0 else DEFAULT_HP
+            days = max(1, int(nums[1])) if len(nums) > 1 else DEFAULT_DAYS
+            players = await self._required_lobby_players()
+            if len(players) != 3:
+                await message.reply(
+                    f"Не могу создать лобби: в игре найдено {len(players)} игроков, а нужно ровно 3."
+                )
+                return
+            chat_id = Settings.CHAT_IDS['main']
+            lobby = await self.svc.create_lobby(chat_id, message.from_user.id, hp, days, players)
+            if not lobby:
+                await message.reply("Не удалось создать лобби. Проверь /pudge_status.")
+                return
+            try:
+                sent = await self.bot.send_message(
+                    chat_id, self._lobby_text(lobby), parse_mode='HTML',
+                    reply_markup=self._lobby_markup(lobby), disable_notification=True,
+                )
+                await self.svc.set_lobby_message_id(lobby['id'], sent.message_id)
+                self._last_lobby_text[lobby['id']] = self._lobby_text(lobby)
+                await message.reply(f"Лобби создано: {hp} HP, {days} дней. Ждём первого нажатия.")
+            except Exception as e:
+                await self.svc.cancel_open_lobby()
+                logger.error(f"Boss: lobby post failed: {e}", exc_info=True)
+                await message.reply("Не смог отправить лобби в группу.")
 
         @self.router.message(Command('pudge_stop'))
         async def pudge_stop(message: Message):
@@ -92,12 +148,35 @@ class BossHandlers:
                 return
             ev = await self.svc.get_active_event()
             if not ev:
-                await message.reply("Активного ивента нет")
+                lobby = await self.svc.cancel_open_lobby()
+                if lobby:
+                    await self._edit_lobby(lobby, "❌ <b>Лобби отменено.</b>", with_button=False)
+                    await message.reply("Лобби Пуджинио отменено.")
+                else:
+                    await message.reply("Активного ивента или лобби нет")
                 return
             await self.svc.finalize(ev['id'], 'stopped')
             await self._unpin(ev)
             await self.svc.refresh_caches(self.content)
             await message.reply("Ивент остановлен без катсцены. Пуджинио уползает в базу.")
+
+        @self.router.callback_query(F.data.startswith('pudge_ready:'))
+        async def pudge_ready(call: CallbackQuery):
+            try:
+                lobby_id = int(call.data.rsplit(':', 1)[1])
+            except (TypeError, ValueError):
+                await call.answer("Это лобби уже не существует.", show_alert=True)
+                return
+            lobby = await self.svc.mark_lobby_ready(lobby_id, call.from_user.id, LOBBY_WINDOW_SECONDS)
+            if not lobby:
+                await call.answer("Ты не в списке или этот раунд уже закрыт.", show_alert=True)
+                return
+            await call.answer("Готовность принята.")
+            if lobby['status'] == 'starting':
+                await self._edit_lobby(lobby, "✅ <b>Все трое на месте. Начинаем...</b>", with_button=False)
+                self._track_launch(lobby)
+            else:
+                await self._edit_lobby(lobby)
 
         @self.router.message(Command('pudge_status'))
         async def pudge_status(message: Message):
@@ -105,7 +184,11 @@ class BossHandlers:
                 return
             ev = await self.svc.get_active_event()
             if not ev:
-                await message.reply("Активного ивента нет")
+                lobby = await self.svc.get_open_lobby()
+                if lobby:
+                    await message.reply(self._lobby_text(lobby), parse_mode='HTML')
+                else:
+                    await message.reply("Активного ивента нет")
                 return
             text = await self.svc.build_pin_text(ev)
             extra = (f"\n\n<i>id={ev['id']} phase={ev['phase']} rage={ev['rage']} "
@@ -136,11 +219,11 @@ class BossHandlers:
             ctx = await self._intro_context(DEFAULT_DAYS)
             fast = 'fast' in (message.text or '')
             await self.play_scene(message.from_user.id, self.content.get('boss_intro', []), ctx, fast=fast,
-                                  image_trigger="ПУДЖИНИО-ФАМОЗА'")
+                                  image_trigger="ПУДЖИНИО-ФАМОЗА", pace=1.2)
 
         @self.router.message(Command('pudge_merchant_test'))
         async def pudge_merchant_test(message: Message):
-            """Force the day-7 merchant return now (needs an active event)."""
+            """Force the day-4 merchant scene now (needs an active event)."""
             if not self._is_admin(message):
                 return
             ev = await self.svc.get_active_event()
@@ -181,7 +264,10 @@ class BossHandlers:
                     "ends_at = NOW() + INTERVAL '1 day' * %s WHERE id = %s",
                     (day - 1, max(0, ev['meta'].get('days', DEFAULT_DAYS) - day + 1), ev['id']),
                 )
-                await message.reply(f"Теперь день {day}. Торговец седьмого дня приходит на тике после 10:00 Kyiv, или сразу: /pudge_merchant_test")
+                await message.reply(
+                    f"Теперь день {day}. Торговец приходит только на 4-й день после 10:00 Kyiv, "
+                    "или принудительно: /pudge_merchant_test"
+                )
             else:
                 await message.reply("Использование: /pudge_day 7  или  /pudge_day end")
             await self.tick()
@@ -219,7 +305,7 @@ class BossHandlers:
                 return
             await message.reply(
                 "🗿 <b>Пуджинио — админка</b>\n"
-                "/pudge_start [hp] [days] [here] — старт (из ЛС без here → основной чат)\n"
+                "/pudge_start [hp] [days] — один раз создать постоянное лобби (только из ЛС)\n"
                 "/pudge_status · /pudge_stop (без катсцены)\n"
                 "/pudge_hit 100 — урон себе в зачёт; фазы: ≤66% захват Джарвиса, ≤33% ярость\n"
                 "/pudge_day 7 · /pudge_day end — перемотка времени\n"
@@ -228,66 +314,182 @@ class BossHandlers:
                 "/pudge_finish win|lose — финал сразу\n"
                 "/pudge_summary — блок для вечерних ответов\n"
                 "/pudge_intro_test [fast] — интро в ЛС\n\n"
-                "Тест-прогон: в ЛС <code>/pudge_start 200 1 here</code> → /pudge_hit 70 (захват) → поговорить с Джарвисом → "
+                "Тест-прогон: в ЛС <code>/pudge_start 200 1</code> → всем троим нажать кнопку за 10 секунд → /pudge_hit 70 (захват) → поговорить с Джарвисом → "
                 "/pudge_hit 70 (ярость) → /pudge_merchant_test → ответить → /pudge_regen_test → /pudge_summary → /pudge_finish win.",
                 parse_mode='HTML',
             )
 
-        # Riddle answers in the event chat. Only matches while a riddle is pending (sync cache),
-        # and always re-raises SkipHandler so moltbot still logs/answers the message.
-        @self.router.message(F.text, lambda m: self.svc.riddle_active and m.chat.id == self.svc.event_chat_id)
-        async def riddle_answer(message: Message):
-            try:
-                riddle = await self.svc.try_answer_riddle(
-                    message.text, message.from_user.id, message.from_user.first_name or 'Игрок'
-                )
-                if riddle:
-                    self.svc.riddle_active = False
-                    ctx = {'solver': message.from_user.first_name or 'Игрок'}
-                    await self.play_scene(message.chat.id, self.content.get('riddle_solved', []), ctx)
-                    await self.tick()
-            except Exception as e:
-                logger.error(f"Boss: riddle_answer failed: {e}")
-            raise SkipHandler()
-
     # ── event flow ────────────────────────────────────────────────────────────
-    async def _intro_context(self, days: int) -> dict:
-        """{summoner} = the player with the most-upgraded characteristic (he fed
-        Pudginio the most), {summon_count} = that level."""
-        summoner, count = 'одному из вас', 'МНОГО'
-        try:
-            rows = await self.db.execute_query("SELECT player_name, characteristics FROM pisunchik_data", ())
-            best = (None, -1)
-            for name, chars in (rows or []):
-                for ch in (chars or []):
-                    parts = str(ch).split(':')
-                    if len(parts) == 2 and parts[1].isdigit() and int(parts[1]) > best[1]:
-                        best = (name, int(parts[1]))
-            if best[0]:
-                summoner, count = best[0], str(best[1])
-        except Exception as e:
-            logger.warning(f"Boss: intro context lookup failed: {e}")
-        return {'summoner': summoner, 'summon_count': count, 'days': str(days)}
+    async def inspect_riddle_message(self, message: Message):
+        """Claim a correct answer if present; never owns or consumes the message."""
+        if (not message.text or not message.from_user or not self.svc.riddle_active
+                or message.chat.id != self.svc.event_chat_id):
+            return
+        riddle = await self.svc.try_answer_riddle(
+            message.text, message.from_user.id, message.from_user.first_name or 'Игрок'
+        )
+        if not riddle:
+            return
+        # Close the cheap sync filter immediately. The SQL update in try_answer_riddle
+        # is the authoritative claim and prevents two simultaneous correct answers.
+        self.svc.riddle_active = False
+        ctx = {'solver': message.from_user.first_name or 'Игрок'}
+        task = asyncio.create_task(self._announce_riddle_solution(message.chat.id, ctx))
+        self._scene_tasks.add(task)
+        task.add_done_callback(self._scene_tasks.discard)
 
-    async def start_event(self, chat_id: int, hp: int, days: int):
+    async def _announce_riddle_solution(self, chat_id: int, ctx: dict):
         try:
-            ctx = await self._intro_context(days)
-            await self.play_scene(chat_id, self.content.get('boss_intro', []), ctx,
-                                  image_trigger="ПУДЖИНИО-ФАМОЗА'")
-            ev = await self.svc.start_event(chat_id, hp, days)
-            text = await self.svc.build_pin_text(ev)
-            sent = await self.bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=self._markup(),
-                                               disable_notification=True)
-            await self.svc.set_message_id(ev['id'], sent.message_id)
-            self._last_pin_text[ev['id']] = text
-            try:
-                await self.bot.pin_chat_message(chat_id, sent.message_id, disable_notification=True)
-            except Exception as e:
-                logger.warning(f"Boss: pin failed: {e}")
-            await self.svc.refresh_caches(self.content)
-            logger.info(f"Boss: event {ev['id']} started in {chat_id}: {hp} HP, {days} days")
+            await self.play_scene(chat_id, self.content.get('riddle_solved', []), ctx)
+            await self.tick()
         except Exception as e:
-            logger.error(f"Boss: start_event failed: {e}", exc_info=True)
+            logger.error(f"Boss: riddle solution scene failed: {e}", exc_info=True)
+
+    async def _required_lobby_players(self) -> dict[str, str]:
+        """Build the exact three-person roster from game accounts, with current chat names."""
+        rows = await self.db.execute_query(
+            "SELECT p.player_id, COALESCE(("
+            "  SELECT m.name FROM messages m WHERE m.user_id = p.player_id "
+            "    AND m.name IS NOT NULL AND m.name <> 'Jarvis' "
+            "  ORDER BY m.timestamp DESC LIMIT 1"
+            "), p.player_name) "
+            "FROM pisunchik_data p ORDER BY p.player_id",
+            (),
+        )
+        players = {}
+        for player_id, raw_name in (rows or []):
+            name = _LOBBY_NAME_OVERRIDES.get(str(raw_name), str(raw_name or player_id))
+            players[str(player_id)] = name
+        return players
+
+    @staticmethod
+    def _ordered_lobby_players(lobby: dict) -> list[tuple[str, str]]:
+        priority = {'Макс': 0, 'Юра': 1, 'Богдан': 2}
+        return sorted(
+            ((str(player_id), str(name)) for player_id, name in lobby['required_players'].items()),
+            key=lambda item: (priority.get(item[1], 99), item[1]),
+        )
+
+    def _lobby_text(self, lobby: dict) -> str:
+        ready = lobby.get('ready_players') or {}
+        lines = ["⚠️ <b>Сегодня здесь должны быть все.</b>", ""]
+        for player_id, name in self._ordered_lobby_players(lobby):
+            lamp = '🟢' if player_id in ready else '⚪️'
+            lines.append(f"{lamp} <b>{escape(name)}</b>")
+        lines.append("")
+        if lobby.get('status') == 'countdown' and lobby.get('deadline'):
+            remaining = max(0, math.ceil((lobby['deadline'] - datetime.now(timezone.utc)).total_seconds()))
+            lines.append(f"⏳ Осталось: <b>{remaining}</b> сек.")
+        elif lobby.get('status') == 'starting':
+            lines.append("✅ <b>Все трое на месте. Начинаем...</b>")
+        else:
+            if lobby.get('attempts', 0) > 0:
+                lines.append("❌ <b>Не собрались.</b> Готовность сброшена.")
+            lines.append("Первое нажатие запустит 10 секунд.")
+        return '\n'.join(lines)
+
+    @staticmethod
+    def _lobby_markup(lobby: dict) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="⚡ Я на месте", callback_data=f"pudge_ready:{lobby['id']}")
+        ]])
+
+    async def _edit_lobby(self, lobby: dict, text: str | None = None, with_button: bool = True):
+        if not lobby.get('message_id'):
+            return
+        rendered = text if text is not None else self._lobby_text(lobby)
+        if self._last_lobby_text.get(lobby['id']) == rendered and text is None:
+            return
+        try:
+            await self.bot.edit_message_text(
+                rendered, chat_id=lobby['chat_id'], message_id=lobby['message_id'],
+                parse_mode='HTML', reply_markup=self._lobby_markup(lobby) if with_button else None,
+            )
+            self._last_lobby_text[lobby['id']] = rendered
+        except TelegramBadRequest as e:
+            if 'not modified' in str(e).lower():
+                self._last_lobby_text[lobby['id']] = rendered
+            else:
+                logger.warning(f"Boss: lobby edit failed: {e}")
+        except Exception as e:
+            logger.warning(f"Boss: lobby edit failed: {e}")
+
+    def _track_launch(self, lobby: dict):
+        lobby_id = lobby['id']
+        if lobby_id in self._launching_lobby_ids:
+            return
+        self._launching_lobby_ids.add(lobby_id)
+        task = asyncio.create_task(self._launch_from_lobby(lobby))
+        self._launch_tasks.add(task)
+        task.add_done_callback(self._launch_tasks.discard)
+
+    async def _launch_from_lobby(self, lobby: dict):
+        lobby_id = lobby['id']
+        try:
+            await self.start_event(lobby['chat_id'], lobby['max_hp'], lobby['days'], lobby=lobby)
+        finally:
+            self._launching_lobby_ids.discard(lobby_id)
+
+    async def _intro_context(self, days: int) -> dict:
+        return {'days': str(days)}
+
+    async def start_event(self, chat_id: int, hp: int, days: int, lobby: dict | None = None):
+        async with self._start_lock:
+            try:
+                # /pudge_start launches a background task, so two quick commands can
+                # otherwise both pass the handler's pre-check before either inserts.
+                active = await self.svc.get_active_event()
+                if active:
+                    logger.warning("Boss: duplicate start ignored")
+                    if lobby:
+                        claimed = await self.svc.mark_lobby_started(lobby['id'], active['id'])
+                        if claimed:
+                            await self._edit_lobby(lobby, "✅ <b>Ивент уже начался.</b>", with_button=False)
+                    return active
+                ctx = await self._intro_context(days)
+                async def save_progress(index: int):
+                    if lobby:
+                        saved = await self.svc.set_lobby_intro_index(lobby['id'], index)
+                        if not saved:
+                            raise RuntimeError("lobby was cancelled while the intro was playing")
+                await self.play_scene(chat_id, self.content.get('boss_intro', []), ctx,
+                                      image_trigger="ПУДЖИНИО-ФАМОЗА",
+                                      start_at=lobby.get('intro_index', 0) if lobby else 0,
+                                      on_progress=save_progress if lobby else None, pace=1.2)
+                if lobby:
+                    fresh_lobby = await self.svc.get_lobby(lobby['id'])
+                    if not fresh_lobby or fresh_lobby['status'] != 'starting':
+                        raise RuntimeError("lobby was cancelled before event creation")
+                ev = await self.svc.start_event(chat_id, hp, days)
+                text = await self.svc.build_pin_text(ev)
+                sent = await self.bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=self._markup(),
+                                                   disable_notification=True)
+                await self.svc.set_message_id(ev['id'], sent.message_id)
+                self._last_pin_text[ev['id']] = text
+                try:
+                    await self.bot.pin_chat_message(chat_id, sent.message_id, disable_notification=True)
+                except Exception as e:
+                    logger.warning(f"Boss: pin failed: {e}")
+                await self.svc.refresh_caches(self.content)
+                if lobby:
+                    claimed = await self.svc.mark_lobby_started(lobby['id'], ev['id'])
+                    if not claimed:
+                        await self.svc.finalize(ev['id'], 'stopped')
+                        await self._unpin(ev)
+                        await self.svc.refresh_caches(self.content)
+                        logger.warning(f"Boss: lobby {lobby['id']} was cancelled during event creation")
+                        return None
+                    await self._edit_lobby(lobby, "✅ <b>Все собрались. Ивент начался.</b>", with_button=False)
+                logger.info(f"Boss: event {ev['id']} started in {chat_id}: {hp} HP, {days} days")
+                return ev
+            except Exception as e:
+                logger.error(f"Boss: start_event failed: {e}", exc_info=True)
+                if lobby:
+                    await self.svc.reset_lobby(lobby['id'])
+                    reset = await self.svc.get_lobby(lobby['id'])
+                    if reset and reset['status'] == 'waiting':
+                        await self._edit_lobby(reset)
+                return None
 
     def _markup(self) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(inline_keyboard=[[
@@ -314,13 +516,16 @@ class BossHandlers:
         return min(cls.MAX_PAUSE, max(base, read))
 
     async def play_scene(self, chat_id: int, lines: list, ctx: dict, fast: bool = False,
-                         image_trigger: str | None = None):
+                         image_trigger: str | None = None, start_at: int = 0,
+                         on_progress=None, pace: float = 1.0):
         """Send a cutscene line by line. The pause before each line depends on how long the
         previous line was (reading time), with a floor of 2.5s (3.5s before an important line:
         shouted caps, *event markers*, the sky-sign line) and 3.5s before the Pudginio picture."""
         prev = None
         after_image = False
         for i, raw in enumerate(lines):
+            if i < start_at:
+                continue
             try:
                 line = raw.format(**ctx) if ctx else raw
             except (KeyError, IndexError):
@@ -331,17 +536,25 @@ class BossHandlers:
                 or (image_trigger is not None and image_trigger in raw)
                 or 'вспышка' in line.lower() or 'ослепляет' in line.lower()
             )
-            if i > 0:
-                await asyncio.sleep(0.05 if fast else self._pause_before(prev, important, after_image))
+            if i > start_at:
+                pause = self._pause_before(prev, important, after_image) * pace
+                await asyncio.sleep(0.05 if fast else pause)
             after_image = False
             try:
                 await self.bot.send_message(chat_id, line, disable_notification=True)
                 if image_trigger and image_trigger in raw and os.path.exists(_PUDGE_IMAGE):
-                    await asyncio.sleep(0.05 if fast else self.IMAGE_PAUSE)
+                    await asyncio.sleep(0.05 if fast else self.IMAGE_PAUSE * pace)
                     await self.bot.send_photo(chat_id, FSInputFile(_PUDGE_IMAGE), disable_notification=True)
                     after_image = True
             except Exception as e:
                 logger.warning(f"Boss: scene line failed: {e}")
+                if on_progress:
+                    raise
+            else:
+                if on_progress:
+                    result = on_progress(i + 1)
+                    if asyncio.iscoroutine(result):
+                        await result
             prev = line
 
     async def _unpin(self, ev: dict):
@@ -386,6 +599,7 @@ class BossHandlers:
         ctx = {
             'mvp': mvp[1], 'mvp_damage': str(mvp[2]),
             'loser': loser[1], 'loser_damage': str(loser[2]),
+            'duration_elapsed': self._duration_elapsed_text(ev['meta'].get('days', DEFAULT_DAYS)),
         }
         extra = {'mvp': {'id': mvp[0], 'name': mvp[1], 'damage': mvp[2]},
                  'loser': {'id': loser[0], 'name': loser[1], 'damage': loser[2]}}
@@ -403,7 +617,59 @@ class BossHandlers:
         await self.svc.refresh_caches(self.content)
         logger.info(f"Boss: event {ev['id']} finished, won={won}, mvp={mvp}, loser={loser}")
 
+    @staticmethod
+    def _duration_text(days: int) -> str:
+        days = int(days)
+        tail = days % 100
+        if 11 <= tail <= 14:
+            word = 'дней'
+        elif days % 10 == 1:
+            word = 'день'
+        elif days % 10 in (2, 3, 4):
+            word = 'дня'
+        else:
+            word = 'дней'
+        return f"{days} {word}"
+
+    @classmethod
+    def _duration_elapsed_text(cls, days: int) -> str:
+        days = int(days)
+        singular = days % 10 == 1 and days % 100 != 11
+        return f"{cls._duration_text(days)} {'прошёл' if singular else 'прошло'}"
+
     # ── periodic tick ─────────────────────────────────────────────────────────
+    async def lobby_tick(self):
+        """Refresh the countdown and atomically resolve an expired lobby round."""
+        if self._lobby_tick_lock.locked():
+            return
+        async with self._lobby_tick_lock:
+            try:
+                lobby = await self.svc.get_open_lobby()
+                if not lobby:
+                    return
+                if lobby['status'] == 'starting':
+                    await self._edit_lobby(lobby, "✅ <b>Все трое на месте. Начинаем...</b>", with_button=False)
+                    self._track_launch(lobby)
+                    return
+                if lobby['status'] != 'countdown':
+                    return
+                if lobby.get('deadline') and lobby['deadline'] > datetime.now(timezone.utc):
+                    await self._edit_lobby(lobby)
+                    return
+
+                resolved = await self.svc.resolve_lobby_round(lobby['id'])
+                if not resolved:
+                    return
+                if resolved['status'] == 'starting':
+                    await self._edit_lobby(
+                        resolved, "✅ <b>Все трое на месте. Начинаем...</b>", with_button=False,
+                    )
+                    self._track_launch(resolved)
+                else:
+                    await self._edit_lobby(resolved)
+            except Exception as e:
+                logger.error(f"Boss: lobby tick failed: {e}", exc_info=True)
+
     async def tick(self):
         if self._tick_lock.locked():
             return
@@ -429,10 +695,15 @@ class BossHandlers:
                     await self._finish(ev, won=False)
                     return
 
-                if (not ev['meta'].get('merchant_done') and self.svc.day_number(ev) >= MERCHANT_DAY
-                        and datetime.now(KYIV).hour >= 10):
-                    await self._merchant_return(ev)
-                    ev = await self.svc.get_active_event() or ev
+                event_day = self.svc.day_number(ev)
+                if not ev['meta'].get('merchant_done'):
+                    if event_day == MERCHANT_DAY and datetime.now(KYIV).hour >= 10:
+                        await self._merchant_return(ev)
+                        ev = await self.svc.get_active_event() or ev
+                    elif event_day > MERCHANT_DAY:
+                        # Never deliver a delayed day-4 riddle close to the day-6 rage unlock.
+                        await self.svc.update_meta(ev['id'], merchant_done=True, merchant_skipped=True)
+                        ev = await self.svc.get_active_event() or ev
 
                 await self._refresh_pin(ev)
                 await self.svc.refresh_caches(self.content)
@@ -461,7 +732,8 @@ class BossHandlers:
         # the 30s tick would otherwise log two INFO lines a minute forever
         logging.getLogger('apscheduler.executors.default').setLevel(logging.WARNING)
         self._scheduler = AsyncIOScheduler(timezone=KYIV)
+        self._scheduler.add_job(self.lobby_tick, IntervalTrigger(seconds=1), max_instances=1, coalesce=True)
         self._scheduler.add_job(self.tick, IntervalTrigger(seconds=30), max_instances=1, coalesce=True)
         self._scheduler.add_job(self.daily_regen, CronTrigger(hour=4, minute=0, timezone=KYIV))
         self._scheduler.start()
-        logger.info("Boss: scheduler started (tick 30s, regen check 04:00 Kyiv)")
+        logger.info("Boss: scheduler started (lobby 1s, tick 30s, regen check 04:00 Kyiv)")

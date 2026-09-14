@@ -281,6 +281,90 @@
         "Как сигма надо сказать нет.",
         "Базару нет."
       ]
+    },
+    {
+      "name": "Горилла Тони с арбузом",
+      "emoji": "🦍",
+      "hp": 22,
+      "atk": 3,
+      "image": "/miniapp/img/dungeon/tony.png",
+      "intro": "Горилла Тони ест арбуз. Даже если ты не любишь горилл, смотреть придётся.",
+      "taunts": [
+        "Ты хочешь посмотреть, как горилла Тони ест арбуз.",
+        "Даже если ты не любишь горилл.",
+        "*спокойно доедает арбуз*",
+        "Это не мороженое со сливами."
+      ]
+    },
+    {
+      "name": "Оператор банка №101",
+      "emoji": "🎧",
+      "hp": 14,
+      "atk": 5,
+      "image": "/miniapp/img/dungeon/bank101.png",
+      "intro": "Waiting time: one hundred and one minutes. Вместо музыки играет reverb + slowed + bassboosted breakcore.",
+      "taunts": [
+        "Your call is very important to us.",
+        "Waiting time: one hundred and one minutes.",
+        "Оставайтесь на линии.",
+        "*bassboosted breakcore становится громче*"
+      ]
+    },
+    {
+      "name": "Пожиратель контекста 10%",
+      "emoji": "🧠",
+      "hp": 13,
+      "atk": 5,
+      "image": "/miniapp/img/dungeon/context10.png",
+      "intro": "Макс обрубил ему контекст до 10%. Он не помнит, зачем пришёл, но уже атакует.",
+      "taunts": [
+        "Понял. А мы о чём?",
+        "Каждый новый чат — как с чистого листа.",
+        "Тему закрыл, контекст целым оставь.",
+        "Кто такой Пуджинио?"
+      ]
+    },
+    {
+      "name": "Чебурек-мимик",
+      "emoji": "🫓",
+      "hp": 10,
+      "atk": 7,
+      "image": "/miniapp/img/dungeon/cheburek.png",
+      "intro": "В кармане лежит помятый чебурек. Юра его не съел. Значит, это не чебурек.",
+      "taunts": [
+        "Зачем мне в кармане помятый чебурек?",
+        "Я бы его очевидно съел.",
+        "*брызгает маслом*",
+        "The universe sings for me."
+      ]
+    },
+    {
+      "name": "Shareholder Value",
+      "emoji": "📈",
+      "hp": 18,
+      "atk": 5,
+      "image": "/miniapp/img/dungeon/shareholder.png",
+      "intro": "На вопрос Ass or tits? он ответил: Shareholder Value. Теперь требует квартальный отчёт.",
+      "taunts": [
+        "А правильный ответ — Shareholder Value.",
+        "Your suffering is priced in.",
+        "Это не баг. Это quarterly growth.",
+        "Сократить ваш HP на 15%."
+      ]
+    },
+    {
+      "name": "Арсен Макарян Training Camp",
+      "emoji": "💪",
+      "hp": 20,
+      "atk": 4,
+      "image": "/miniapp/img/dungeon/makaryan.png",
+      "intro": "Training Camp открыт. Здесь выращивают мужчин, а тебя почему-то сразу записали в оппоненты.",
+      "taunts": [
+        "Будем выращивать мужчин.",
+        "Dont even joke, lad.",
+        "Начнём с базы.",
+        "Это Training Camp, братан."
+      ]
     }
   ],
   "highlight_enemy": {
