@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
+from decimal import Decimal
 import json
 
 @dataclass
@@ -69,7 +70,13 @@ class Player:
     def from_db_row(cls, row: tuple, column_names: List[str]) -> 'Player':
         """Create a Player instance from a database row"""
         data = dict(zip(column_names, row))
-        
+
+        # NUMERIC columns (miniapp_total_winnings) come back as Decimal, which the
+        # dataclass declares as float and json (Redis cache) cannot serialize.
+        for field_name, value in data.items():
+            if isinstance(value, Decimal):
+                data[field_name] = float(value)
+
         # Handle JSON fields
         for field_name in ['items', 'characteristics', 'player_stocks', 'statuetki',
                           'chat_id', 'correct_answers', 'nnn_checkins', 'pet', 'pet_titles']:

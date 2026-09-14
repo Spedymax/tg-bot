@@ -11,7 +11,6 @@ import time
 import urllib.parse
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-from decimal import Decimal
 import asyncio
 import threading
 
@@ -271,8 +270,10 @@ def spin_wheel():
                 if prize['type'] != 'lose':
                     player.coins = int(player.coins) + int(prize['value'])
                     coins_gained = int(prize['value'])
-                    player.miniapp_total_winnings = getattr(player, 'miniapp_total_winnings', Decimal('0')) + Decimal(
-                        str(prize['value']))
+                    # Player fields are plain floats (NUMERIC is normalized away in
+                    # Player.from_db_row), so keep the arithmetic float-only.
+                    player.miniapp_total_winnings = float(
+                        getattr(player, 'miniapp_total_winnings', 0.0) or 0.0) + float(prize['value'])
                 player.miniapp_daily_spins = current_spins + 1
                 player.miniapp_last_spin_date = datetime.now(timezone.utc)
                 run_async(player_service.save_player(player))

@@ -1,5 +1,5 @@
 """Tests for the web_search tool loop and the legacy SEARCH: safety net."""
-import sys, os, importlib.util, types, json
+import sys, os, importlib.util, types, json, asyncio
 
 _src = os.path.join(os.path.dirname(__file__), '..', 'src')
 sys.path.insert(0, _src)
@@ -174,3 +174,138 @@ class TestRoutedNeverLeaksMarker:
         h._call_persona = AsyncMock(side_effect=["SEARCH: курс доллара", "41.5 грн"])
         out = await h._ask_moltbot_routed("Макс", "курс?", "", None)
         assert out == "41.5 грн"
+
+
+@pytest.fixture
+def brave_state(monkeypatch):
+    """Isolate the process-wide Brave throttle/cache and make the pacing test-fast."""
+    MoltbotHandlers._brave_cache.clear()
+    MoltbotHandlers._brave_last_call = 0.0
+    MoltbotHandlers._brave_lock = None
+    MoltbotHandlers._brave_lock_loop = None
+    monkeypatch.setattr(MoltbotHandlers, "_BRAVE_MIN_INTERVAL", 0.05)
+    monkeypatch.setattr(MoltbotHandlers, "_BRAVE_RETRY_DELAY", 0.01)
+    monkeypatch.setattr(_mod.Settings, "BRAVE_API_KEY", "k", raising=False)
+    yield
+    MoltbotHandlers._brave_cache.clear()
+    MoltbotHandlers._brave_last_call = 0.0
+    MoltbotHandlers._brave_lock = None
+    MoltbotHandlers._brave_lock_loop = None
+
+
+def _http_error(status):
+    request = _mod.httpx.Request("GET", "https://api.search.brave.com/res/v1/web/search")
+    response = _mod.httpx.Response(status, request=request)
+    return _mod.httpx.HTTPStatusError(f"{status}", request=request, response=response)
+
+
+class TestBraveThrottle:
+    """Brave free tier is ~1 req/s and the model fires searches in batches."""
+
+    @pytest.mark.asyncio
+    async def test_calls_are_spaced_out(self, brave_state):
+        h = MoltbotHandlers.__new__(MoltbotHandlers)
+        h._brave_request = AsyncMock(return_value="- res")
+        t0 = _mod.time.monotonic()
+        for q in ("a", "b", "c"):
+            await h._brave_search(q)
+        elapsed = _mod.time.monotonic() - t0
+        assert h._brave_request.await_count == 3
+        # three calls → at least two gaps of _BRAVE_MIN_INTERVAL
+        assert elapsed >= 2 * MoltbotHandlers._BRAVE_MIN_INTERVAL
+
+    @pytest.mark.asyncio
+    async def test_repeat_query_served_from_cache(self, brave_state):
+        h = MoltbotHandlers.__new__(MoltbotHandlers)
+        h._brave_request = AsyncMock(return_value="- res")
+        first = await h._brave_search("Эдуардо Гундини")
+        second = await h._brave_search("  эдуардо   ГУНДИНИ ")  # same query, sloppier
+        assert first == second == "- res"
+        h._brave_request.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_429_is_retried_once(self, brave_state):
+        h = MoltbotHandlers.__new__(MoltbotHandlers)
+        h._brave_request = AsyncMock(side_effect=[_http_error(429), "- res"])
+        assert await h._brave_search("курс") == "- res"
+        assert h._brave_request.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_429_twice_gives_up_quietly(self, brave_state):
+        h = MoltbotHandlers.__new__(MoltbotHandlers)
+        h._brave_request = AsyncMock(side_effect=[_http_error(429), _http_error(429)])
+        assert await h._brave_search("курс") == ""
+        assert h._brave_request.await_count == 2
+        assert MoltbotHandlers._brave_cache == {}  # a rate-limited miss is not cached
+
+    @pytest.mark.asyncio
+    async def test_other_http_error_is_not_retried(self, brave_state):
+        h = MoltbotHandlers.__new__(MoltbotHandlers)
+        h._brave_request = AsyncMock(side_effect=_http_error(500))
+        assert await h._brave_search("курс") == ""
+        h._brave_request.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_no_api_key_short_circuits(self, brave_state, monkeypatch):
+        monkeypatch.setattr(_mod.Settings, "BRAVE_API_KEY", "", raising=False)
+        h = MoltbotHandlers.__new__(MoltbotHandlers)
+        h._brave_request = AsyncMock(return_value="- res")
+        assert await h._brave_search("курс") == ""
+        h._brave_request.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cache_is_bounded(self, brave_state, monkeypatch):
+        monkeypatch.setattr(MoltbotHandlers, "_BRAVE_CACHE_MAX", 3)
+        monkeypatch.setattr(MoltbotHandlers, "_BRAVE_MIN_INTERVAL", 0.0)
+        h = MoltbotHandlers.__new__(MoltbotHandlers)
+        h._brave_request = AsyncMock(return_value="- res")
+        for q in ("a", "b", "c", "d"):
+            await h._brave_search(q)
+        assert len(MoltbotHandlers._brave_cache) == 3
+        assert "a" not in MoltbotHandlers._brave_cache  # oldest evicted
+
+
+class TestSearchBudget:
+    """A reply may spend ~10s on searching; whatever doesn't fit is skipped."""
+
+    @pytest.mark.asyncio
+    async def test_call_past_deadline_is_skipped(self):
+        h = _handler()
+        out = await h._execute_tool_call(
+            {"function": {"name": "web_search", "arguments": json.dumps({"query": "курс"})}},
+            deadline=_mod.time.monotonic() - 1,
+        )
+        assert "пропущен" in out
+        h._brave_search.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_call_within_deadline_runs(self):
+        h = _handler()
+        out = await h._execute_tool_call(
+            {"function": {"name": "web_search", "arguments": json.dumps({"query": "курс"})}},
+            deadline=_mod.time.monotonic() + 10,
+        )
+        assert "Результаты поиска" in out
+        h._brave_search.assert_awaited_once_with("курс")
+
+    @pytest.mark.asyncio
+    async def test_budget_is_shared_by_the_whole_reply(self, monkeypatch):
+        """A batch that eats the budget leaves the later calls skipped, not queued."""
+        monkeypatch.setattr(MoltbotHandlers, "_SEARCH_TIME_BUDGET", 0.05)
+        h = _handler()
+
+        async def slow_search(query):
+            await asyncio.sleep(0.06)
+            return "- res"
+
+        h._brave_search = AsyncMock(side_effect=slow_search)
+        post = AsyncMock(side_effect=[
+            _resp(None, [_tool_call("a", "c1"), _tool_call("b", "c2"), _tool_call("c", "c3")]),
+            _resp("ответ"),
+        ])
+        out = await h._complete_with_tools(post, {"model": "m", "messages": []}, 10)
+        assert out == "ответ"
+        assert h._brave_search.await_count == 1  # budget spent on the first one
+        tool_msgs = [m for m in post.await_args_list[1].args[0]["messages"] if m["role"] == "tool"]
+        assert len(tool_msgs) == 3
+        assert "пропущен" in tool_msgs[1]["content"] and "пропущен" in tool_msgs[2]["content"]
