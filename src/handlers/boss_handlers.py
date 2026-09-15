@@ -13,12 +13,14 @@ import math
 import os
 import random
 import re
+import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from html import escape
 from zoneinfo import ZoneInfo
 
 from aiogram import BaseMiddleware, F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -38,6 +40,18 @@ DEFAULT_HP = 2500
 DEFAULT_DAYS = 14
 LOBBY_WINDOW_SECONDS = 10
 KYIV = ZoneInfo("Europe/Kyiv")
+
+# Telegram allows roughly 20 messages per minute per group and counts message
+# edits towards the same budget. The 35-line intro and the lobby countdown used
+# to spend it at the same time, which earned the bot a flood ban on the whole
+# chat — Jarvis went mute for half a minute and the event failed to launch.
+# Every chat write from the event now goes through one per-chat gate.
+CHAT_RATE_LIMIT = 18
+CHAT_RATE_WINDOW = 60.0
+# Countdown refresh: never more often than this, and rounded to whole steps so
+# a 10-second round costs two edits instead of ten.
+LOBBY_EDIT_MIN_INTERVAL = 3.0
+LOBBY_COUNTDOWN_STEP = 5
 
 _LOBBY_NAME_OVERRIDES = {
     'Spatifilum': 'Юра',
@@ -84,7 +98,10 @@ class BossHandlers:
         self._tick_lock = asyncio.Lock()
         self._start_lock = asyncio.Lock()
         self._lobby_tick_lock = asyncio.Lock()
-        self._last_lobby_text: dict[int, str] = {}
+        self._last_lobby_text: dict[int, tuple] = {}
+        self._last_lobby_edit: dict[int, float] = {}
+        self._chat_calls: dict[int, deque] = {}
+        self._flood_until: dict[int, float] = {}
         self._launch_tasks: set[asyncio.Task] = set()
         self._launching_lobby_ids: set[int] = set()
         self._scene_tasks: set[asyncio.Task] = set()
@@ -130,12 +147,13 @@ class BossHandlers:
                 await message.reply("Не удалось создать лобби. Проверь /pudge_status.")
                 return
             try:
-                sent = await self.bot.send_message(
+                sent = await self._chat_write(chat_id, lambda: self.bot.send_message(
                     chat_id, self._lobby_text(lobby), parse_mode='HTML',
                     reply_markup=self._lobby_markup(lobby), disable_notification=True,
-                )
+                ))
                 await self.svc.set_lobby_message_id(lobby['id'], sent.message_id)
-                self._last_lobby_text[lobby['id']] = self._lobby_text(lobby)
+                self._last_lobby_text[lobby['id']] = (self._lobby_text(lobby), True)
+                self._last_lobby_edit[lobby['id']] = time.monotonic()
                 await message.reply(f"Лобби создано: {hp} HP, {days} дней. Ждём первого нажатия.")
             except Exception as e:
                 await self.svc.cancel_open_lobby()
@@ -150,7 +168,7 @@ class BossHandlers:
             if not ev:
                 lobby = await self.svc.cancel_open_lobby()
                 if lobby:
-                    await self._edit_lobby(lobby, "❌ <b>Лобби отменено.</b>", with_button=False)
+                    await self._edit_lobby(lobby, "❌ <b>Лобби отменено.</b>", with_button=False, wait=True)
                     await message.reply("Лобби Пуджинио отменено.")
                 else:
                     await message.reply("Активного ивента или лобби нет")
@@ -379,7 +397,10 @@ class BossHandlers:
         lines.append("")
         if lobby.get('status') == 'countdown' and lobby.get('deadline'):
             remaining = max(0, math.ceil((lobby['deadline'] - datetime.now(timezone.utc)).total_seconds()))
-            lines.append(f"⏳ Осталось: <b>{remaining}</b> сек.")
+            # Rounded up to whole steps: a per-second number would mean a per-second
+            # edit, and edits count against the chat's flood limit.
+            shown = math.ceil(remaining / LOBBY_COUNTDOWN_STEP) * LOBBY_COUNTDOWN_STEP
+            lines.append(f"⏳ Осталось: <b>~{shown}</b> сек.")
         elif lobby.get('status') == 'starting':
             lines.append("✅ <b>Все трое на месте. Начинаем...</b>")
         else:
@@ -394,21 +415,94 @@ class BossHandlers:
             InlineKeyboardButton(text="⚡ Я на месте", callback_data=f"pudge_ready:{lobby['id']}")
         ]])
 
-    async def _edit_lobby(self, lobby: dict, text: str | None = None, with_button: bool = True):
+    # ── per-chat write budget ────────────────────────────────────────────────
+    def _chat_slot_delay(self, chat_id: int) -> float:
+        """Seconds to wait before the next write to this chat (0 = go ahead)."""
+        now = time.monotonic()
+        delay = max(0.0, self._flood_until.get(chat_id, 0.0) - now)
+        calls = self._chat_calls.setdefault(chat_id, deque())
+        while calls and now - calls[0] >= CHAT_RATE_WINDOW:
+            calls.popleft()
+        if len(calls) >= CHAT_RATE_LIMIT:
+            delay = max(delay, CHAT_RATE_WINDOW - (now - calls[0]))
+        return delay
+
+    def _note_chat_write(self, chat_id: int):
+        self._chat_calls.setdefault(chat_id, deque()).append(time.monotonic())
+
+    def _note_flood(self, chat_id: int, e: TelegramRetryAfter):
+        """Telegram said stop. Hold every write to this chat until it is over."""
+        until = time.monotonic() + e.retry_after + 1
+        if until > self._flood_until.get(chat_id, 0.0):
+            self._flood_until[chat_id] = until
+            logger.warning(f"Boss: chat {chat_id} flood-limited, holding writes for {e.retry_after}s")
+
+    async def _chat_write(self, chat_id: int, send, fast: bool = False):
+        """One chat write: wait out the budget, retry once if Telegram floods us.
+
+        Used by everything that must not be dropped (cutscene lines, the pinned
+        message). Periodic refreshes skip instead of waiting — see _edit_lobby.
+        """
+        if fast:
+            return await send()
+        for attempt in range(2):
+            delay = self._chat_slot_delay(chat_id)
+            if delay > 0:
+                logger.info(f"Boss: holding a write to {chat_id} for {delay:.1f}s")
+                await asyncio.sleep(delay)
+            try:
+                result = await send()
+            except TelegramRetryAfter as e:
+                self._note_flood(chat_id, e)
+                if attempt == 0:
+                    continue
+                raise
+            self._note_chat_write(chat_id)
+            return result
+
+    async def _edit_lobby(self, lobby: dict, text: str | None = None, with_button: bool = True,
+                          wait: bool = False):
+        """Edit the lobby message. Periodic refreshes are dropped when the chat's
+        budget is spent; `wait=True` (the last word on a lobby: started, cancelled)
+        holds for a free slot instead, so that line is never lost."""
         if not lobby.get('message_id'):
             return
         rendered = text if text is not None else self._lobby_text(lobby)
-        if self._last_lobby_text.get(lobby['id']) == rendered and text is None:
+        state = (rendered, with_button)
+        # Nothing to say. This also covers the tick repeating "Начинаем..." every
+        # second while the intro plays: an edit rejected as "not modified" still
+        # spends a slot of the chat's budget.
+        if self._last_lobby_text.get(lobby['id']) == state:
             return
-        try:
-            await self.bot.edit_message_text(
+        now = time.monotonic()
+        if text is None and now - self._last_lobby_edit.get(lobby['id'], 0.0) < LOBBY_EDIT_MIN_INTERVAL:
+            return  # countdown refresh, not worth a slot yet
+        if not wait and self._chat_slot_delay(lobby['chat_id']) > 0:
+            return  # the chat is busy or flood-limited; the next tick will retry
+
+        def edit():
+            return self.bot.edit_message_text(
                 rendered, chat_id=lobby['chat_id'], message_id=lobby['message_id'],
                 parse_mode='HTML', reply_markup=self._lobby_markup(lobby) if with_button else None,
             )
-            self._last_lobby_text[lobby['id']] = rendered
+
+        def accept():
+            self._last_lobby_text[lobby['id']] = state
+            self._last_lobby_edit[lobby['id']] = time.monotonic()
+
+        try:
+            if wait:
+                await self._chat_write(lobby['chat_id'], edit)
+            else:
+                await edit()
+                self._note_chat_write(lobby['chat_id'])
+            accept()
+        except TelegramRetryAfter as e:
+            self._note_flood(lobby['chat_id'], e)
         except TelegramBadRequest as e:
+            self._note_chat_write(lobby['chat_id'])
             if 'not modified' in str(e).lower():
-                self._last_lobby_text[lobby['id']] = rendered
+                accept()
             else:
                 logger.warning(f"Boss: lobby edit failed: {e}")
         except Exception as e:
@@ -444,7 +538,8 @@ class BossHandlers:
                     if lobby:
                         claimed = await self.svc.mark_lobby_started(lobby['id'], active['id'])
                         if claimed:
-                            await self._edit_lobby(lobby, "✅ <b>Ивент уже начался.</b>", with_button=False)
+                            await self._edit_lobby(lobby, "✅ <b>Ивент уже начался.</b>",
+                                                   with_button=False, wait=True)
                     return active
                 ctx = await self._intro_context(days)
                 async def save_progress(index: int):
@@ -462,8 +557,8 @@ class BossHandlers:
                         raise RuntimeError("lobby was cancelled before event creation")
                 ev = await self.svc.start_event(chat_id, hp, days)
                 text = await self.svc.build_pin_text(ev)
-                sent = await self.bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=self._markup(),
-                                                   disable_notification=True)
+                sent = await self._chat_write(chat_id, lambda: self.bot.send_message(
+                    chat_id, text, parse_mode='HTML', reply_markup=self._markup(), disable_notification=True))
                 await self.svc.set_message_id(ev['id'], sent.message_id)
                 self._last_pin_text[ev['id']] = text
                 try:
@@ -479,9 +574,17 @@ class BossHandlers:
                         await self.svc.refresh_caches(self.content)
                         logger.warning(f"Boss: lobby {lobby['id']} was cancelled during event creation")
                         return None
-                    await self._edit_lobby(lobby, "✅ <b>Все собрались. Ивент начался.</b>", with_button=False)
+                    await self._edit_lobby(lobby, "✅ <b>Все собрались. Ивент начался.</b>",
+                                           with_button=False, wait=True)
                 logger.info(f"Boss: event {ev['id']} started in {chat_id}: {hp} HP, {days} days")
                 return ev
+            except TelegramRetryAfter as e:
+                # Flood control is temporary. Leave the lobby 'starting' so the tick
+                # relaunches and the intro resumes from its checkpoint instead of
+                # making everyone press the button again.
+                self._note_flood(chat_id, e)
+                logger.warning(f"Boss: launch paused by flood control, will resume: {e}")
+                return None
             except Exception as e:
                 logger.error(f"Boss: start_event failed: {e}", exc_info=True)
                 if lobby:
@@ -499,8 +602,11 @@ class BossHandlers:
     # Cutscene pacing. People read ~15 chars/s in a chat, so the pause before a line
     # grows with the length of the line they are still reading.
     READ_CHARS_PER_SEC = 15
-    MIN_PAUSE = 2.5
-    MIN_PAUSE_IMPORTANT = 3.5
+    # The floor stays above CHAT_RATE_WINDOW / CHAT_RATE_LIMIT (3.33s), so a long
+    # cutscene paces itself inside the chat's budget instead of being held up by
+    # the gate mid-scene, which would read as a random stall.
+    MIN_PAUSE = 3.4
+    MIN_PAUSE_IMPORTANT = 4.2
     MAX_PAUSE = 8.0
     IMAGE_PAUSE = 3.5
     IMAGE_VIEW_TIME = 4.0
@@ -519,8 +625,11 @@ class BossHandlers:
                          image_trigger: str | None = None, start_at: int = 0,
                          on_progress=None, pace: float = 1.0):
         """Send a cutscene line by line. The pause before each line depends on how long the
-        previous line was (reading time), with a floor of 2.5s (3.5s before an important line:
-        shouted caps, *event markers*, the sky-sign line) and 3.5s before the Pudginio picture."""
+        previous line was (reading time), with a floor of 3.4s (4.2s before an important line:
+        shouted caps, *event markers*, the sky-sign line) and 3.5s before the Pudginio picture.
+
+        Every line goes through the per-chat write gate, so a flood penalty pauses
+        the scene instead of killing it halfway."""
         prev = None
         after_image = False
         for i, raw in enumerate(lines):
@@ -541,10 +650,14 @@ class BossHandlers:
                 await asyncio.sleep(0.05 if fast else pause)
             after_image = False
             try:
-                await self.bot.send_message(chat_id, line, disable_notification=True)
+                await self._chat_write(
+                    chat_id, lambda: self.bot.send_message(chat_id, line, disable_notification=True), fast=fast)
                 if image_trigger and image_trigger in raw and os.path.exists(_PUDGE_IMAGE):
                     await asyncio.sleep(0.05 if fast else self.IMAGE_PAUSE * pace)
-                    await self.bot.send_photo(chat_id, FSInputFile(_PUDGE_IMAGE), disable_notification=True)
+                    await self._chat_write(
+                        chat_id,
+                        lambda: self.bot.send_photo(chat_id, FSInputFile(_PUDGE_IMAGE), disable_notification=True),
+                        fast=fast)
                     after_image = True
             except Exception as e:
                 logger.warning(f"Boss: scene line failed: {e}")
@@ -570,10 +683,15 @@ class BossHandlers:
         text = await self.svc.build_pin_text(ev)
         if self._last_pin_text.get(ev['id']) == text:
             return
+        if self._chat_slot_delay(ev['chat_id']) > 0:
+            return  # the next tick will refresh it
         try:
             await self.bot.edit_message_text(text, chat_id=ev['chat_id'], message_id=ev['message_id'],
                                              parse_mode='HTML', reply_markup=self._markup())
+            self._note_chat_write(ev['chat_id'])
             self._last_pin_text[ev['id']] = text
+        except TelegramRetryAfter as e:
+            self._note_flood(ev['chat_id'], e)
         except TelegramBadRequest as e:
             if 'not modified' in str(e):
                 self._last_pin_text[ev['id']] = text
@@ -719,8 +837,9 @@ class BossHandlers:
             if healed > 0:
                 taunts = self.content.get('regen_taunts') or []
                 if taunts:
-                    await self.bot.send_message(ev['chat_id'], random.choice(taunts).format(heal=healed),
-                                                disable_notification=True)
+                    taunt = random.choice(taunts).format(heal=healed)
+                    await self._chat_write(ev['chat_id'], lambda: self.bot.send_message(
+                        ev['chat_id'], taunt, disable_notification=True))
                 await self.tick()
         except Exception as e:
             logger.error(f"Boss: daily_regen failed: {e}")

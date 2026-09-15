@@ -421,3 +421,225 @@ async def test_cancelled_lobby_cannot_be_marked_started():
 
 async def _record_async(target, value):
     target.append(value)
+
+
+# ── chat write budget ────────────────────────────────────────────────────────
+# Telegram allows ~20 messages/min per group and counts edits. A per-second
+# lobby countdown plus a 35-line intro blew through that on 2026-09-15: the
+# chat was flood-banned for ~35s and the event failed to launch.
+
+class _AsyncioWithFakeSleep:
+    """Everything real except sleep — patching asyncio.sleep globally would
+    reach the test loop itself."""
+
+    def __init__(self, real, sleep):
+        self._real = real
+        self.sleep = sleep
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def _patch_sleep(monkeypatch):
+    """Make boss_handlers' sleeps instant; returns the list of slept seconds."""
+    import asyncio as _asyncio
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    module = sys.modules[BossHandlers.__module__]
+    monkeypatch.setattr(module, "asyncio", _AsyncioWithFakeSleep(_asyncio, fake_sleep))
+    return slept
+
+
+def _retry_after(seconds: int):
+    from aiogram.methods import SendMessage
+    from aiogram.exceptions import TelegramRetryAfter
+    return TelegramRetryAfter(SendMessage(chat_id=-100, text="x"), "Too Many Requests", seconds)
+
+
+def _gated_handler():
+    handler = object.__new__(BossHandlers)
+    handler._chat_calls = {}
+    handler._flood_until = {}
+    handler._last_lobby_text = {}
+    handler._last_lobby_edit = {}
+    return handler
+
+
+def _spend_budget(handler, chat_id):
+    from handlers.boss_handlers import CHAT_RATE_LIMIT
+    import time as _time
+    from collections import deque
+    handler._chat_calls[chat_id] = deque([_time.monotonic()] * CHAT_RATE_LIMIT)
+
+
+class RecordingBot:
+    def __init__(self, fail_times=0, retry_after=1):
+        self.edits = []
+        self.messages = []
+        self.fail_times = fail_times
+        self.retry_after = retry_after
+
+    async def edit_message_text(self, text, **kwargs):
+        self.edits.append(text)
+
+    async def send_message(self, chat_id, text, **kwargs):
+        if self.fail_times > 0:
+            self.fail_times -= 1
+            raise _retry_after(self.retry_after)
+        self.messages.append((chat_id, text))
+
+
+def _countdown_lobby(seconds):
+    return {
+        "id": 4, "chat_id": -100, "message_id": 77, "status": "countdown",
+        "attempts": 0, "required_players": {"11": "Макс", "22": "Юра", "33": "Богдан"},
+        "ready_players": {"11": True},
+        "deadline": datetime.now(timezone.utc) + timedelta(seconds=seconds),
+    }
+
+
+def test_countdown_is_rounded_instead_of_ticking_every_second():
+    handler = object.__new__(BossHandlers)
+    assert "~10" in handler._lobby_text(_countdown_lobby(9))
+    assert "~10" in handler._lobby_text(_countdown_lobby(7))
+    assert "~5" in handler._lobby_text(_countdown_lobby(4))
+
+
+@pytest.mark.asyncio
+async def test_same_text_is_never_re_sent():
+    """The tick repeats "Начинаем..." every second while the intro plays; an edit
+    rejected as "not modified" still costs a slot of the chat's budget."""
+    handler = _gated_handler()
+    handler.bot = RecordingBot()
+    lobby = _countdown_lobby(10)
+
+    for _ in range(5):
+        await handler._edit_lobby(lobby, "✅ Начинаем...", with_button=False)
+
+    assert handler.bot.edits == ["✅ Начинаем..."]
+
+
+@pytest.mark.asyncio
+async def test_countdown_refresh_is_throttled():
+    handler = _gated_handler()
+    handler.bot = RecordingBot()
+
+    await handler._edit_lobby(_countdown_lobby(10))
+    await handler._edit_lobby(_countdown_lobby(3))  # different text, too soon
+
+    assert len(handler.bot.edits) == 1
+
+
+@pytest.mark.asyncio
+async def test_edit_is_skipped_when_the_chat_budget_is_spent():
+    handler = _gated_handler()
+    handler.bot = RecordingBot()
+    _spend_budget(handler, -100)
+
+    await handler._edit_lobby(_countdown_lobby(10), "✅ Начинаем...", with_button=False)
+
+    assert handler.bot.edits == []
+
+
+@pytest.mark.asyncio
+async def test_flood_response_holds_every_write_to_that_chat():
+    handler = _gated_handler()
+    handler.bot = RecordingBot()
+    handler._note_flood(-100, _retry_after(30))
+
+    assert handler._chat_slot_delay(-100) > 25
+    assert handler._chat_slot_delay(-999) == 0  # other chats unaffected
+    await handler._edit_lobby(_countdown_lobby(10), "✅ Начинаем...", with_button=False)
+    assert handler.bot.edits == []
+
+
+@pytest.mark.asyncio
+async def test_chat_write_waits_out_a_flood_and_retries_once(monkeypatch):
+    slept = _patch_sleep(monkeypatch)
+    handler = _gated_handler()
+    bot = RecordingBot(fail_times=1, retry_after=7)
+
+    await handler._chat_write(-100, lambda: bot.send_message(-100, "строка"))
+
+    assert bot.messages == [(-100, "строка")]
+    assert slept and slept[0] >= 7  # waited out the penalty instead of hammering
+    assert len(handler._chat_calls[-100]) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_write_gives_up_after_the_second_flood(monkeypatch):
+    _patch_sleep(monkeypatch)
+    handler = _gated_handler()
+    bot = RecordingBot(fail_times=2)
+    from aiogram.exceptions import TelegramRetryAfter
+
+    with pytest.raises(TelegramRetryAfter):
+        await handler._chat_write(-100, lambda: bot.send_message(-100, "строка"))
+
+
+@pytest.mark.asyncio
+async def test_cutscene_paces_itself_inside_the_budget(monkeypatch):
+    """35 intro lines must not spend the whole per-minute budget in one burst."""
+    from handlers.boss_handlers import CHAT_RATE_LIMIT, CHAT_RATE_WINDOW
+    slept = _patch_sleep(monkeypatch)
+    handler = _gated_handler()
+    handler.bot = RecordingBot()
+
+    await handler.play_scene(-100, ["строка номер один"] * 5, {})
+
+    assert len(handler.bot.messages) == 5
+    # pacing floor keeps the scene under the budget on its own
+    assert min(slept) >= CHAT_RATE_WINDOW / CHAT_RATE_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_flood_during_the_intro_keeps_the_lobby_startable(monkeypatch):
+    """A flood ban must not cost the players their round: the lobby stays
+    'starting' and the tick resumes the intro from its checkpoint."""
+    _patch_sleep(monkeypatch)
+    handler = _gated_handler()
+    handler.bot = RecordingBot(fail_times=99, retry_after=30)
+    handler._start_lock = __import__('asyncio').Lock()
+    handler.content = {"boss_intro": ["первая строка"]}
+    resets = []
+
+    class LobbyService:
+        async def get_active_event(self):
+            return None
+
+        async def set_lobby_intro_index(self, lobby_id, index):
+            return True
+
+        async def reset_lobby(self, lobby_id):
+            resets.append(lobby_id)
+
+    handler.svc = LobbyService()
+    handler._intro_context = lambda days: _record_value({"days": str(days)})
+
+    result = await handler.start_event(-100, 2500, 14, lobby={"id": 4, "chat_id": -100, "intro_index": 0})
+
+    assert result is None
+    assert resets == []                       # the round is not thrown away
+    assert handler._chat_slot_delay(-100) > 25  # and the chat is left alone meanwhile
+
+
+async def _record_value(value):
+    return value
+
+
+@pytest.mark.asyncio
+async def test_final_lobby_line_waits_for_a_slot_instead_of_being_dropped(monkeypatch):
+    """After a 35-line intro the budget is spent, but "Ивент начался" still has
+    to land — otherwise the lobby message is stuck on "Начинаем..." forever."""
+    slept = _patch_sleep(monkeypatch)
+    handler = _gated_handler()
+    handler.bot = RecordingBot()
+    _spend_budget(handler, -100)
+
+    await handler._edit_lobby(_countdown_lobby(10), "✅ Ивент начался.", with_button=False, wait=True)
+
+    assert handler.bot.edits == ["✅ Ивент начался."]
+    assert slept and slept[0] > 0
