@@ -165,7 +165,7 @@
     <h1 id="introTitle"></h1>
     <div class="line" id="il1">Каменные ступени уходят во тьму.</div>
     <div class="line" id="il2">Из глубины пахнет сыростью и дешёвым пивом.</div>
-    <div class="line" id="il3">Десять комнат. Один заход. В конце — он.</div>
+    <div class="line" id="il3">Десять комнат. Один заход в день. В конце — Мини-Пуджик.</div>
     <div class="line date" id="il4"></div>
     <div class="tap" id="itap">КОСНИСЬ, ЧТОБЫ СПУСТИТЬСЯ</div>
   </div>
@@ -199,7 +199,7 @@
   const BTN_CLASS = id => id === 'attack' ? 'red' : id === 'defend' ? 'blue' : id === 'special' ? 'gold' : (id === 'potion' || id === 'rest') ? 'green'
                         : id === 'next' ? 'gold wide' : id === 'leave' ? 'wide' : id.startsWith('buy:') ? 'purple' : '';
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  // "🛡️ Блок: урон ½, ответ 2" → main label + small detail so buttons stay readable
+  // "🛡️ Блок: урон по вам ÷2, удар 2" → main label + small detail so buttons stay readable
   function btnLabel(l){
     let main = l, sub = '';
     const c = l.indexOf(': ');
@@ -250,6 +250,8 @@
     let m = '';
     if (r.text && r.type !== 'fight' && r.type !== 'boss') m += `<div class="text">${esc(r.text)}</div>`;
     m += show.map((l, i) => `<div class="ev ${i >= show.length - nNew ? 'new' : ''}">${esc(l)}</div>`).join('');
+    if (r.hint) m += `<div class="text">${esc(r.hint)}</div>`;
+    if (r.warning) m += `<div class="text" role="status">${esc(r.warning)}</div>`;
     m += `<span class="cur">▼</span>`;
     $('msg').innerHTML = m; $('msg').scrollTop = $('msg').scrollHeight;
     lastLogLen = log.length;
@@ -273,7 +275,7 @@
     const end = $('end');
     if (v.phase === 'dead' || v.phase === 'won') {
       const won = v.phase === 'won';
-      end.innerHTML = `<div class="big">${won ? '👑' : '💀'}</div><h2>${won ? 'МИНИ-ПУДЖИК УБИТ' : 'ВЫ ПОГИБЛИ'}</h2>
+      end.innerHTML = `<div class="big">${won ? '👑' : '💀'}</div><h2>${won ? 'МИНИ-ПУДЖИК ПОБЕЖДЁН' : 'ВЫ ПОГИБЛИ'}</h2>
         <div>${won ? 'Все 10 комнат пройдены. Завтра — новый данж.' : `Пройдено комнат: ${v.rooms_cleared} из ${v.rooms_total}. Завтра — новый данж.`}</div>
         <div class="others">${(payload.others || []).map(o => `<div>${esc(o.line)}</div>`).join('')}</div>
         ${payload.boss ? `<div class="boss">ПУДЖИНИО-ФАМОЗА ${payload.boss.hp}/${payload.boss.max_hp} HP${payload.boss.rage ? ' · ЯРОСТЬ' : ''}</div>` : ''}`;
@@ -313,10 +315,10 @@
     try {
       const res = await fetch('/miniapp/api/dungeon/state?init_data=' + encodeURIComponent(initData));
       const data = await res.json();
-      if (!data.success) return fail(data.error === 'invalid_auth' ? 'ОТКРОЙ ДАНЖ ИЗ TELEGRAM, БРАТИК' : ('ОШИБКА: ' + data.error));
+      if (!data.success) return fail(data.error === 'invalid_auth' ? 'Открой данж кнопкой в боте Telegram.' : 'Не удалось загрузить данж. Попробуй открыть его ещё раз.');
       if (data.data.is_new || location.search.includes('intro')) playIntro(data.data.date, data.data.view && data.data.view.modifier);
       render(data.data);
-    } catch (e) { fail('ДАНЖ НЕ ОТВЕЧАЕТ'); }
+    } catch (e) { fail('Данж не отвечает. Попробуй открыть его чуть позже.'); }
   }
   async function act(action){
     if (busy) return; busy = true;

@@ -148,7 +148,7 @@ class CourtHandlers:
                 parse_mode='HTML',
             )
 
-        @self.router.message(CourtStates.private_waiting_defendant)
+        @self.router.message(CourtStates.private_waiting_defendant, F.text, ~F.text.startswith('/'))
         async def handle_private_waiting_defendant(message: Message, state: FSMContext):
             user_id = message.from_user.id
             defendant = (message.text or "").strip()
@@ -163,7 +163,7 @@ class CourtHandlers:
                 parse_mode='HTML',
             )
 
-        @self.router.message(CourtStates.private_waiting_crime)
+        @self.router.message(CourtStates.private_waiting_crime, F.text, ~F.text.startswith('/'))
         async def handle_private_waiting_crime(message: Message, state: FSMContext):
             user_id = message.from_user.id
             crime = (message.text or "").strip()
@@ -178,7 +178,7 @@ class CourtHandlers:
 
         # ── Private final word (FSMContext-based) ────────────────────────────
 
-        @self.router.message(CourtStates.waiting_final_word)
+        @self.router.message(CourtStates.waiting_final_word, F.text, ~F.text.startswith('/'))
         async def handle_final_word(message: Message, state: FSMContext):
             user_id = message.from_user.id
             data = await state.get_data()
@@ -215,6 +215,7 @@ class CourtHandlers:
 
         @self.router.message(
             F.chat.type.in_({'group', 'supergroup'}),
+            ~F.text.startswith('/'),
             F.reply_to_message.as_('reply'),
             F.func(lambda m, self=self: (
                 self._bot_id is not None

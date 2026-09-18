@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 from config.game_config import GameConfig
 from config.settings import Settings
 from states.registration import RegistrationStates
+from states.game import GameStates
 from utils.helpers import safe_split_callback, safe_int, escape_html, safe_username
 
 class GameHandlers:
@@ -57,13 +58,13 @@ class GameHandlers:
                 await message.reply("Добро пожаловать! Напишите ваше имя:")
                 await state.set_state(RegistrationStates.waiting_name)
 
-        @self.router.message(RegistrationStates.waiting_name)
+        @self.router.message(RegistrationStates.waiting_name, F.text, ~F.text.startswith('/'))
         async def registration_name(message: Message, state: FSMContext):
             await state.update_data(name=message.text.strip(), player_id=message.from_user.id)
             await message.reply("Расскажите как вы нашли этого бота?")
             await state.set_state(RegistrationStates.waiting_how_found)
 
-        @self.router.message(RegistrationStates.waiting_how_found)
+        @self.router.message(RegistrationStates.waiting_how_found, F.text, ~F.text.startswith('/'))
         async def registration_how_found(message: Message, state: FSMContext):
             data = await state.get_data()
             name = data['name']
@@ -159,7 +160,7 @@ class GameHandlers:
             except Exception as _e:
                 logger.warning(f"Boss hook (pisunchik) failed: {_e}")
 
-            pet_badge = await _pet_svc.get_pet_badge(player)
+            pet_badge = _pet_svc.get_pet_badge(player)
 
             reply_message = (
                 f"Ваш писюнчик{pet_badge}: {result['new_size']} см\n"
@@ -209,8 +210,8 @@ class GameHandlers:
 
                         if i < 5:
                             await asyncio.sleep(GameConfig.CASINO_DICE_DELAY)
-                except Exception:
-                    pass  # Partial result — still deliver summary below
+                except Exception as e:
+                    logger.warning("Casino: sent %s/6 slots before Telegram error: %s", len(dice_msg_ids), e)
 
                 # Wait for last animation to finish, then delete all dice
                 await asyncio.sleep(GameConfig.CASINO_ANIMATION_WAIT)
@@ -237,6 +238,8 @@ class GameHandlers:
                     summary = f"🎰 Казино: {total_wins}/6 побед! Выигрыш: {total_wins * GameConfig.CASINO_JACKPOT_REWARD} BTC 🎉"
                 else:
                     summary = "🎰 Казино: 0/6. Ничего не выиграл."
+                if len(dice_msg_ids) < 6:
+                    summary += f"\n⚠️ Telegram отправил только {len(dice_msg_ids)} из 6 слотов. Результат учитывает отправленные."
                 if got_food:
                     summary += f"\n🍖 {player.player_name} получил +1 корм для питомца!"
                 await self.bot.send_message(message.chat.id, summary, disable_notification=True)
@@ -282,7 +285,7 @@ class GameHandlers:
                 await _pet_svc.record_game_activity(player, 'roll', datetime.now(timezone.utc))
                 await self._maybe_send_death_notice(call.message.chat.id, player)
                 await self.player_service.save_player(player)
-                pet_badge = await _pet_svc.get_pet_badge(player)
+                pet_badge = _pet_svc.get_pet_badge(player)
             else:
                 pet_badge = ''
 
@@ -429,7 +432,7 @@ class GameHandlers:
             await message.reply(f"Следующее изменение писюнчика будет: {player.ballzzz_number} см.")
 
         @self.router.message(Command('masturbator'))
-        async def masturbator_command(message: Message):
+        async def masturbator_command(message: Message, state: FSMContext):
             """Handle /masturbator command"""
             player_id = message.from_user.id
             player = await self.player_service.get_player(player_id)
@@ -448,8 +451,12 @@ class GameHandlers:
                 "Чем больше размер пожертвован, тем больше BTC выиграно. "
                 "1 см = 4 БТС + 5 БТС за каждые 5 см.\n\nВведите количество см для пожертвования:"
             )
-            # Pass player_id instead of player object to avoid stale data
-            self.bot.register_next_step_handler(message, lambda msg: asyncio.create_task(self.handle_masturbator_input(msg, player_id)))
+            await state.set_state(GameStates.waiting_donation)
+
+        @self.router.message(GameStates.waiting_donation, F.text, ~F.text.startswith('/'))
+        async def masturbator_input(message: Message, state: FSMContext):
+            if await self.handle_masturbator_input(message, message.from_user.id):
+                await state.clear()
 
         @self.router.message(Command('zelie_pisunchika'))
         async def potion_command(message: Message):
@@ -494,27 +501,30 @@ class GameHandlers:
         async def large_potion_command(message: Message):
             await self.handle_potion_command(message, 'large', 10)
 
-    async def handle_masturbator_input(self, message: Message, player_id: int):
+    async def handle_masturbator_input(self, message: Message, player_id: int) -> bool:
         """Handle masturbator donation amount input"""
         try:
             # Fetch fresh player data to avoid stale state
             player = await self.player_service.get_player(player_id)
             if not player:
                 await message.reply("Игрок не найден")
-                return
+                return False
 
             donation_amount = int(message.text)
             result = await self.game_service.use_masturbator(player, donation_amount)
 
             if not result['success']:
                 await message.reply(result['message'])
-                return
+                return False
 
             await message.reply(
                 f"Вы задонатили {result['donated']} см вашего писюнчика и получили {result['coins_received']} БТС взамен"
             )
-        except ValueError:
+            return True
+        except (ValueError, TypeError):
             await message.reply("Пожалуйста, введите корректное число.")
+
+        return False
 
     async def handle_potion_command(self, message: Message, size, increase_amount):
         """Handle potion commands"""

@@ -535,6 +535,7 @@ class BossHandlers:
                 active = await self.svc.get_active_event()
                 if active:
                     logger.warning("Boss: duplicate start ignored")
+                    await self._refresh_pin(active)
                     if lobby:
                         claimed = await self.svc.mark_lobby_started(lobby['id'], active['id'])
                         if claimed:
@@ -678,9 +679,19 @@ class BossHandlers:
                 logger.warning(f"Boss: unpin failed: {e}")
 
     async def _refresh_pin(self, ev: dict):
-        if not ev.get('message_id'):
-            return
         text = await self.svc.build_pin_text(ev)
+        if not ev.get('message_id'):
+            sent = await self._chat_write(ev['chat_id'], lambda: self.bot.send_message(
+                ev['chat_id'], text, parse_mode='HTML', reply_markup=self._markup(),
+                disable_notification=True))
+            await self.svc.set_message_id(ev['id'], sent.message_id)
+            ev['message_id'] = sent.message_id
+            self._last_pin_text[ev['id']] = text
+            try:
+                await self.bot.pin_chat_message(ev['chat_id'], sent.message_id, disable_notification=True)
+            except Exception as e:
+                logger.warning(f"Boss: pin failed: {e}")
+            return
         if self._last_pin_text.get(ev['id']) == text:
             return
         if self._chat_slot_delay(ev['chat_id']) > 0:
@@ -695,6 +706,10 @@ class BossHandlers:
         except TelegramBadRequest as e:
             if 'not modified' in str(e):
                 self._last_pin_text[ev['id']] = text
+            elif 'message to edit not found' in str(e).lower():
+                await self.svc.set_message_id(ev['id'], None)
+                ev['message_id'] = None
+                await self._refresh_pin(ev)
             else:
                 logger.warning(f"Boss: pin edit failed: {e}")
         except Exception as e:
@@ -707,8 +722,31 @@ class BossHandlers:
             return
         riddle = random.choice(riddles)
         await self.svc.set_riddle(ev['id'], riddle)
-        await self.play_scene(ev['chat_id'], self.content.get('merchant_return', []), {'riddle': riddle['question']})
+        fresh = await self.svc.get_event(ev['id'])
+        await self._resume_merchant(fresh)
         await self.svc.refresh_caches(self.content)
+
+    async def _resume_merchant(self, ev: dict):
+        if not ev['meta'].get('merchant_pending'):
+            return
+        # An expired question must not be posted after a long outage.
+        if self.svc.riddle_is_open(ev):
+            await self.play_scene(
+                ev['chat_id'], self.content.get('merchant_return', []),
+                {'riddle': ev['meta']['riddle']['question']},
+                start_at=ev['meta'].get('merchant_index', 0),
+                on_progress=lambda index: self.svc.update_meta(ev['id'], merchant_index=index))
+        await self.svc.update_meta(ev['id'], merchant_pending=False)
+
+    async def _resume_finale(self, ev: dict):
+        await self.svc.refresh_caches(self.content)
+        await self._refresh_pin(ev)
+        await self._unpin(ev)
+        await self.play_scene(
+            ev['chat_id'], self.content.get('win_scene' if ev['status'] == 'won' else 'lose_scene', []),
+            ev['meta']['finale_context'], start_at=ev['meta'].get('finale_index', 0),
+            on_progress=lambda index: self.svc.update_meta(ev['id'], finale_index=index))
+        await self.svc.update_meta(ev['id'], finale_pending=False)
 
     async def _finish(self, ev: dict, won: bool):
         standings = await self.svc.standings(ev)
@@ -724,15 +762,12 @@ class BossHandlers:
         if won:
             until = datetime.now(timezone.utc).replace(microsecond=0)
             extra['respect'] = {'id': mvp[0], 'name': mvp[1], 'until': (until + timedelta(days=RESPECT_DAYS)).isoformat()}
+        extra.update(finale_pending=True, finale_context=ctx, finale_index=0)
         await self.svc.finalize(ev['id'], 'won' if won else 'lost', extra)
-        # Final pin state, then unpin so the list doesn't accumulate like Wordle used to.
         fresh = await self.svc.get_event(ev['id'])
         if fresh:
             self._last_pin_text.pop(ev['id'], None)
-            await self._refresh_pin(fresh)
-        await self._unpin(ev)
-        await self.play_scene(ev['chat_id'], self.content.get('win_scene' if won else 'lose_scene', []), ctx)
-        await self.svc.refresh_caches(self.content)
+            await self._resume_finale(fresh)
         logger.info(f"Boss: event {ev['id']} finished, won={won}, mvp={mvp}, loser={loser}")
 
     @staticmethod
@@ -795,17 +830,29 @@ class BossHandlers:
             try:
                 ev = await self.svc.get_active_event()
                 if not ev:
+                    last = await self.svc.get_last_event()
+                    if last and last['status'] in ('won', 'lost') and last['meta'].get('finale_pending'):
+                        await self._resume_finale(last)
                     await self.svc.refresh_caches(self.content)
                     return
                 now = datetime.now(timezone.utc)
 
-                for scene in await self.svc.pop_pending_scenes(ev['id']):
+                for scene in ev['meta'].get('pending', []):
                     if scene == 'win':
                         await self._finish(ev, won=True)
                         return
                     if scene in ('hijack', 'rage'):
-                        await self.play_scene(ev['chat_id'], self.content.get(f'{scene}_scene', []), {})
+                        await self.play_scene(
+                            ev['chat_id'], self.content.get(f'{scene}_scene', []), {},
+                            start_at=ev['meta'].get('scene_index', 0),
+                            on_progress=lambda index: self.svc.update_meta(ev['id'], scene_index=index))
+                    await self.svc.ack_pending_scene(ev['id'], scene)
+                    ev['meta'].pop('scene_index', None)
 
+                ev = await self.svc.get_active_event()
+                if not ev:
+                    return
+                now = datetime.now(timezone.utc)
                 if ev['hp'] <= 0:
                     await self._finish(ev, won=True)
                     return
@@ -823,6 +870,7 @@ class BossHandlers:
                         await self.svc.update_meta(ev['id'], merchant_done=True, merchant_skipped=True)
                         ev = await self.svc.get_active_event() or ev
 
+                await self._resume_merchant(ev)
                 await self._refresh_pin(ev)
                 await self.svc.refresh_caches(self.content)
             except Exception as e:

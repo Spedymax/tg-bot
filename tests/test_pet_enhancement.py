@@ -1,4 +1,5 @@
 import sys
+import pytest
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -83,12 +84,13 @@ def test_happiness_decay_applies():
     svc.apply_happiness_decay(p, now)
     assert p.pet_happiness == 50
 
-def test_record_game_activity_increases_happiness():
+@pytest.mark.asyncio
+async def test_record_game_activity_increases_happiness():
     svc = PetService()
     p = make_player_with_live_pet()
     p.pet_happiness = 50
     now = datetime.now(timezone.utc)
-    svc.record_game_activity(p, 'trivia', now)
+    await svc.record_game_activity(p, 'trivia', now)
     assert p.pet_happiness == 55
 
 def test_format_pet_display_shows_hunger_bar():

@@ -1,7 +1,7 @@
 import json
 import random
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List, Tuple
 
 logger = logging.getLogger(__name__)
@@ -231,7 +231,6 @@ class PetService:
     def apply_hunger_decay(self, player, now: datetime) -> bool:
         """Apply accumulated hunger decay ticks (every 12h = -10).
         Returns True if pet just died."""
-        from datetime import timedelta
         if not player.pet or not player.pet.get('is_alive'):
             return False
         last = getattr(player, 'pet_hunger_last_decay', None)
@@ -251,7 +250,6 @@ class PetService:
 
     def apply_happiness_decay(self, player, now: datetime):
         """Apply accumulated happiness decay ticks (every 24h = -10)."""
-        from datetime import timedelta
         if not player.pet or not player.pet.get('is_alive'):
             return
         last = getattr(player, 'pet_happiness_last_activity', None)
@@ -305,7 +303,6 @@ class PetService:
 
     def get_ulta_cooldown_remaining(self, player) -> 'Optional[timedelta]':
         """Return remaining ulta cooldown as timedelta, or None if ready/never used."""
-        from datetime import timedelta
         used = getattr(player, 'pet_ulta_used_date', None)
         if used is None:
             return None

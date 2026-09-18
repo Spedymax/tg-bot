@@ -83,6 +83,12 @@ class DatabaseManager:
             logger.error(f"Error executing query: {error}")
             return None
 
+    async def execute_query_strict(self, query, params=None):
+        """Execute durable state writes without hiding database failures."""
+        async with self.connection() as conn:
+            cursor = await conn.execute(query, params)
+            return await cursor.fetchall() if cursor.description else None
+
     def get_pool_status(self):
         """Get current status of the connection pool."""
         return dict(self._connection_metrics)

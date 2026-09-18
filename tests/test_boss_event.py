@@ -643,3 +643,165 @@ async def test_final_lobby_line_waits_for_a_slot_instead_of_being_dropped(monkey
 
     assert handler.bot.edits == ["✅ Ивент начался."]
     assert slept and slept[0] > 0
+
+
+class RestartService:
+    """Persisted data outlives each newly constructed handler in these tests."""
+    def __init__(self, event):
+        self.event = event
+        self.enabled = True
+
+    async def get_active_event(self):
+        import copy
+        return copy.deepcopy(self.event) if self.event['status'] == 'active' else None
+
+    async def get_last_event(self):
+        import copy
+        return copy.deepcopy(self.event)
+
+    async def get_event(self, event_id):
+        return await self.get_last_event()
+
+    async def update_meta(self, event_id, **fields):
+        self.event['meta'].update(fields)
+
+    async def ack_pending_scene(self, event_id, scene):
+        assert self.event['meta']['pending'][0] == scene
+        self.event['meta']['pending'].pop(0)
+        self.event['meta'].pop('scene_index', None)
+
+    async def refresh_caches(self, content):
+        pass
+
+    day_number = staticmethod(BossService.day_number)
+    riddle_is_open = staticmethod(BossService.riddle_is_open)
+
+
+def restarted_handler(service, sent, fail_on=None):
+    import asyncio
+    handler = object.__new__(BossHandlers)
+    handler.svc = service
+    handler._tick_lock = asyncio.Lock()
+    handler.content = {'hijack_scene': ['h1', 'h2'], 'rage_scene': ['r1', 'r2'],
+                       'win_scene': ['w1', 'w2'], 'merchant_return': ['m1', '{riddle}']}
+    handler._refresh_pin = lambda ev: _record_async([], None)
+    handler._unpin = lambda ev: _record_async([], None)
+
+    class Bot:
+        async def send_message(self, chat_id, text, **kwargs):
+            if text == fail_on:
+                raise RuntimeError('process interrupted / Telegram unavailable')
+            sent.append(text)
+
+    handler.bot = Bot()
+    real_play = handler.play_scene
+
+    async def fast_play(*args, **kwargs):
+        await real_play(*args, **kwargs, fast=True)
+
+    handler.play_scene = fast_play
+    return handler
+
+
+def restart_event():
+    now = datetime.now(timezone.utc)
+    return {'id': 7, 'chat_id': -100, 'status': 'active', 'hp': 600, 'max_hp': 1000,
+            'started_at': now, 'ends_at': now + timedelta(days=14),
+            'meta': {'pending': ['hijack', 'rage'], 'merchant_done': True}}
+
+
+@pytest.mark.asyncio
+async def test_phase_scenes_resume_after_restart_without_losing_next_scene():
+    service = RestartService(restart_event())
+    sent = []
+    await restarted_handler(service, sent, fail_on='h2').tick()
+    assert sent == ['h1']
+    assert service.event['meta']['pending'] == ['hijack', 'rage']
+    assert service.event['meta']['scene_index'] == 1
+
+    await restarted_handler(service, sent).tick()
+    assert sent == ['h1', 'h2', 'r1', 'r2']
+    assert service.event['meta']['pending'] == []
+    await restarted_handler(service, sent).tick()
+    assert len(sent) == 4
+
+
+@pytest.mark.asyncio
+async def test_finalized_event_resumes_finale_after_restart():
+    event = restart_event()
+    event['status'] = 'won'
+    event['meta'].update(finale_pending=True, finale_context={}, finale_index=0)
+    service = RestartService(event)
+    sent = []
+    await restarted_handler(service, sent, fail_on='w2').tick()
+    assert event['meta']['finale_pending'] is True
+    assert event['meta']['finale_index'] == 1
+    await restarted_handler(service, sent).tick()
+    assert sent == ['w1', 'w2']
+    assert event['meta']['finale_pending'] is False
+    await restarted_handler(service, sent).tick()
+    assert sent == ['w1', 'w2']
+
+
+@pytest.mark.asyncio
+async def test_merchant_resumes_same_question_after_restart():
+    event = restart_event()
+    event['meta'].update(pending=[], merchant_pending=True, merchant_index=0,
+                         riddle={'question': 'Вопрос'}, riddle_solved=False,
+                         riddle_expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())
+    service = RestartService(event)
+    sent = []
+    await restarted_handler(service, sent, fail_on='Вопрос').tick()
+    assert event['meta']['merchant_index'] == 1
+    await restarted_handler(service, sent).tick()
+    assert sent == ['m1', 'Вопрос']
+    assert event['meta']['merchant_pending'] is False
+
+
+@pytest.mark.asyncio
+async def test_restart_does_not_post_expired_merchant_question():
+    event = restart_event()
+    event['meta'].update(pending=[], merchant_pending=True, riddle={'question': 'Вопрос'},
+                         riddle_expires_at=(datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat())
+    sent = []
+    await restarted_handler(RestartService(event), sent).tick()
+    assert sent == []
+    assert event['meta']['merchant_pending'] is False
+
+
+@pytest.mark.asyncio
+async def test_missing_hp_message_is_recreated_after_restart():
+    handler = object.__new__(BossHandlers)
+    sent, saved, pinned = [], [], []
+    class Service:
+        async def build_pin_text(self, ev):
+            return 'HP 600/1000'
+        async def set_message_id(self, event_id, message_id):
+            saved.append((event_id, message_id))
+    class Bot:
+        async def send_message(self, chat_id, text, **kwargs):
+            sent.append(text)
+            return SimpleNamespace(message_id=99)
+        async def pin_chat_message(self, chat_id, message_id, **kwargs):
+            pinned.append(message_id)
+    handler.svc, handler.bot = Service(), Bot()
+    handler._last_pin_text = {}
+    handler._chat_write = lambda chat_id, operation: operation()
+    handler._markup = lambda: None
+    event = restart_event()
+    await handler._refresh_pin(event)
+    assert sent == ['HP 600/1000']
+    assert saved == [(7, 99)]
+    assert pinned == [99]
+
+
+@pytest.mark.asyncio
+async def test_boss_state_writes_propagate_database_failures():
+    class DB:
+        async def execute_query(self, *args):
+            raise AssertionError('legacy swallowing API must not be used')
+        async def execute_query_strict(self, *args):
+            raise RuntimeError('database disconnected')
+    service = BossService(DB())
+    with pytest.raises(RuntimeError, match='database disconnected'):
+        await service.update_meta(7, scene_index=1)

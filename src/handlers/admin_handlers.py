@@ -198,14 +198,14 @@ class AdminHandlers:
                 await message.reply("Добро пожаловать! Напишите ваше имя:")
                 await state.set_state(RegistrationStates.waiting_name)
 
-        @self.router.message(RegistrationStates.waiting_name)
+        @self.router.message(RegistrationStates.waiting_name, F.text, ~F.text.startswith('/'))
         async def handle_registration_name(message: Message, state: FSMContext):
             """Collect player name during registration."""
             await state.update_data(name=message.text.strip())
             await message.reply("Расскажите как вы нашли этого бота?")
             await state.set_state(RegistrationStates.waiting_how_found)
 
-        @self.router.message(RegistrationStates.waiting_how_found)
+        @self.router.message(RegistrationStates.waiting_how_found, F.text, ~F.text.startswith('/'))
         async def handle_registration_how_found(message: Message, state: FSMContext):
             """Collect 'how found' answer and send approval request to admin."""
             data = await state.get_data()
@@ -303,16 +303,18 @@ class AdminHandlers:
         # ── /cancel — abort any pending admin action ───────────────────────────
 
         @self.router.message(Command('cancel'))
-        async def cancel_admin_action(message: Message):
+        async def cancel_admin_action(message: Message, state: FSMContext):
             """Cancel current pending admin action."""
-            if message.from_user.id in self.admin_actions:
-                del self.admin_actions[message.from_user.id]
-                await message.reply("❌ Действие отменено.")
+            cancelled = self.admin_actions.pop(message.from_user.id, None) is not None
+            if await state.get_state():
+                await state.clear()
+                cancelled = True
+            await message.reply("❌ Действие отменено." if cancelled else "Нет действия для отмены.")
 
         # ── Admin text input (dict-based multi-step flow) ─────────────────────
         # StateFilter(None) ensures FSM states (shop, court, registration) take priority.
 
-        @self.router.message(StateFilter(None), F.func(lambda m: m.from_user.id in self.admin_actions))
+        @self.router.message(StateFilter(None), F.text, ~F.text.startswith('/'), F.func(lambda m: m.from_user.id in self.admin_actions))
         async def handle_admin_text_input(message: Message):
             """Handle text input for admin actions."""
             if message.from_user.id not in Settings.ADMIN_IDS:

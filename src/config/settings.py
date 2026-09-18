@@ -36,6 +36,11 @@ class Settings:
     SONGS_BOT_TOKEN = os.getenv('SONGS_BOT_TOKEN')
     YOUR_CHAT_ID = os.getenv('YOUR_CHAT_ID', -1001294162183)  # Default to main chat
     MAX_ID = int(os.getenv('MAX_ID', 741542965))  # Default to admin ID
+    PLAYER_IDS = {
+        'MAX': MAX_ID,
+        'YURA': int(os.getenv('YURA_ID', 742272644)),
+        'BODYA': int(os.getenv('BODYA_ID', 855951767)),
+    }
     
     # Database connection string
     DB_CONN_STRING = os.getenv('DB_CONN_STRING', f"postgresql://{os.getenv('DB_USER', 'postgres')}:{os.getenv('DB_PASSWORD', '')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', 5432)}/{os.getenv('DB_NAME', 'server-tg-pisunchik')}")

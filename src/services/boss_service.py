@@ -65,6 +65,10 @@ class BossService:
         self.event_active: bool = False
         self.event_chat_id: int | None = None
 
+    async def _query(self, query, params=None):
+        execute = getattr(self.db, 'execute_query_strict', self.db.execute_query)
+        return await execute(query, params)
+
     @property
     def enabled(self) -> bool:
         return _ENABLED
@@ -73,7 +77,7 @@ class BossService:
     async def ensure_tables(self):
         if self._tables_ready:
             return
-        await self.db.execute_query(
+        await self._query(
             "CREATE TABLE IF NOT EXISTS boss_events ("
             "id SERIAL PRIMARY KEY, "
             "name TEXT NOT NULL, "
@@ -92,7 +96,7 @@ class BossService:
             "meta JSONB NOT NULL DEFAULT '{}')",
             (),
         )
-        await self.db.execute_query(
+        await self._query(
             "CREATE TABLE IF NOT EXISTS boss_damage_log ("
             "id SERIAL PRIMARY KEY, "
             "event_id INTEGER NOT NULL REFERENCES boss_events(id), "
@@ -103,10 +107,10 @@ class BossService:
             "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             (),
         )
-        await self.db.execute_query(
+        await self._query(
             "CREATE INDEX IF NOT EXISTS boss_damage_log_event_idx ON boss_damage_log (event_id, created_at)", ()
         )
-        await self.db.execute_query(
+        await self._query(
             "CREATE TABLE IF NOT EXISTS boss_lobbies ("
             "id SERIAL PRIMARY KEY, "
             "chat_id BIGINT NOT NULL, "
@@ -125,11 +129,11 @@ class BossService:
             "updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             (),
         )
-        await self.db.execute_query(
+        await self._query(
             "ALTER TABLE boss_lobbies ADD COLUMN IF NOT EXISTS intro_index INTEGER NOT NULL DEFAULT 0",
             (),
         )
-        await self.db.execute_query(
+        await self._query(
             "CREATE UNIQUE INDEX IF NOT EXISTS boss_lobbies_one_open_idx ON boss_lobbies ((1)) "
             "WHERE status IN ('waiting', 'countdown', 'starting')",
             (),
@@ -152,7 +156,7 @@ class BossService:
 
     async def get_open_lobby(self) -> Optional[dict]:
         await self.ensure_tables()
-        rows = await self.db.execute_query(
+        rows = await self._query(
             f"SELECT {self._LOBBY_COLS} FROM boss_lobbies "
             "WHERE status IN ('waiting', 'countdown', 'starting') ORDER BY id DESC LIMIT 1",
             (),
@@ -161,7 +165,7 @@ class BossService:
 
     async def get_countdown_lobby(self) -> Optional[dict]:
         await self.ensure_tables()
-        rows = await self.db.execute_query(
+        rows = await self._query(
             f"SELECT {self._LOBBY_COLS} FROM boss_lobbies "
             "WHERE status = 'countdown' ORDER BY id DESC LIMIT 1",
             (),
@@ -171,7 +175,7 @@ class BossService:
     async def create_lobby(self, chat_id: int, created_by: int, max_hp: int,
                            days: int, required_players: dict) -> Optional[dict]:
         await self.ensure_tables()
-        rows = await self.db.execute_query(
+        rows = await self._query(
             "INSERT INTO boss_lobbies (chat_id, created_by, max_hp, days, required_players) "
             "VALUES (%s, %s, %s, %s, %s::jsonb) RETURNING id",
             (chat_id, created_by, max_hp, days, json.dumps(required_players, ensure_ascii=False)),
@@ -180,13 +184,13 @@ class BossService:
 
     async def get_lobby(self, lobby_id: int) -> Optional[dict]:
         await self.ensure_tables()
-        rows = await self.db.execute_query(
+        rows = await self._query(
             f"SELECT {self._LOBBY_COLS} FROM boss_lobbies WHERE id = %s", (lobby_id,)
         )
         return self._row_to_lobby(rows[0]) if rows else None
 
     async def set_lobby_message_id(self, lobby_id: int, message_id: int):
-        await self.db.execute_query(
+        await self._query(
             "UPDATE boss_lobbies SET message_id = %s, updated_at = NOW() WHERE id = %s",
             (message_id, lobby_id),
         )
@@ -194,7 +198,7 @@ class BossService:
     async def mark_lobby_ready(self, lobby_id: int, player_id: int, window_seconds: int = 10) -> Optional[dict]:
         """Atomically mark one required player ready; the first click starts the window."""
         player_key = str(player_id)
-        rows = await self.db.execute_query(
+        rows = await self._query(
             "WITH target AS ("
             "  SELECT id FROM boss_lobbies WHERE id = %s "
             "    AND status IN ('waiting', 'countdown') "
@@ -216,7 +220,7 @@ class BossService:
 
     async def resolve_lobby_round(self, lobby_id: int) -> Optional[dict]:
         """At the deadline, either claim the lobby for launch or reset the same message."""
-        rows = await self.db.execute_query(
+        rows = await self._query(
             "WITH target AS ("
             "  SELECT id, NOT EXISTS ("
             "    SELECT 1 FROM jsonb_object_keys(required_players) required(player_id) "
@@ -237,7 +241,7 @@ class BossService:
         return await self.get_lobby(lobby_id) if rows else None
 
     async def mark_lobby_started(self, lobby_id: int, event_id: int) -> bool:
-        rows = await self.db.execute_query(
+        rows = await self._query(
             "UPDATE boss_lobbies SET status = 'started', event_id = %s, updated_at = NOW() "
             "WHERE id = %s AND status = 'starting' RETURNING id",
             (event_id, lobby_id),
@@ -245,7 +249,7 @@ class BossService:
         return bool(rows)
 
     async def set_lobby_intro_index(self, lobby_id: int, intro_index: int) -> bool:
-        rows = await self.db.execute_query(
+        rows = await self._query(
             "UPDATE boss_lobbies SET intro_index = %s, updated_at = NOW() "
             "WHERE id = %s AND status = 'starting' RETURNING id",
             (intro_index, lobby_id),
@@ -253,7 +257,7 @@ class BossService:
         return bool(rows)
 
     async def reset_lobby(self, lobby_id: int):
-        await self.db.execute_query(
+        await self._query(
             "UPDATE boss_lobbies SET status = 'waiting', ready_players = '{}'::jsonb, "
             "deadline = NULL, intro_index = 0, updated_at = NOW() WHERE id = %s AND status = 'starting'",
             (lobby_id,),
@@ -263,7 +267,7 @@ class BossService:
         lobby = await self.get_open_lobby()
         if not lobby:
             return None
-        await self.db.execute_query(
+        await self._query(
             "UPDATE boss_lobbies SET status = 'cancelled', updated_at = NOW() WHERE id = %s",
             (lobby['id'],),
         )
@@ -288,18 +292,18 @@ class BossService:
         if not self.enabled:
             return None
         await self.ensure_tables()
-        rows = await self.db.execute_query(
+        rows = await self._query(
             f"SELECT {self._COLS} FROM boss_events WHERE status = 'active' ORDER BY id DESC LIMIT 1", ()
         )
         return self._row_to_event(rows[0]) if rows else None
 
     async def get_last_event(self) -> Optional[dict]:
         await self.ensure_tables()
-        rows = await self.db.execute_query(f"SELECT {self._COLS} FROM boss_events ORDER BY id DESC LIMIT 1", ())
+        rows = await self._query(f"SELECT {self._COLS} FROM boss_events ORDER BY id DESC LIMIT 1", ())
         return self._row_to_event(rows[0]) if rows else None
 
     async def get_event(self, event_id: int) -> Optional[dict]:
-        rows = await self.db.execute_query(f"SELECT {self._COLS} FROM boss_events WHERE id = %s", (event_id,))
+        rows = await self._query(f"SELECT {self._COLS} FROM boss_events WHERE id = %s", (event_id,))
         return self._row_to_event(rows[0]) if rows else None
 
     async def is_active(self) -> bool:
@@ -309,7 +313,7 @@ class BossService:
     async def start_event(self, chat_id: int, max_hp: int, days: int, name: str = "Пуджинио-Фамоза") -> dict:
         await self.ensure_tables()
         ends_at = _now() + timedelta(days=days)
-        rows = await self.db.execute_query(
+        rows = await self._query(
             "INSERT INTO boss_events (name, chat_id, max_hp, hp, ends_at, last_damage_at, meta) "
             "VALUES (%s, %s, %s, %s, %s, NOW(), %s) RETURNING id",
             (name, chat_id, max_hp, max_hp, ends_at, json.dumps({'days': days, 'pending': []})),
@@ -317,25 +321,25 @@ class BossService:
         return await self.get_event(rows[0][0])
 
     async def set_message_id(self, event_id: int, message_id: int):
-        await self.db.execute_query("UPDATE boss_events SET message_id = %s WHERE id = %s", (message_id, event_id))
+        await self._query("UPDATE boss_events SET message_id = %s WHERE id = %s", (message_id, event_id))
 
     async def finalize(self, event_id: int, status: str, extra_meta: Optional[dict] = None):
         fields = {'finished_at': _now().isoformat()}
         if extra_meta:
             fields.update(extra_meta)
-        await self.db.execute_query(
+        await self._query(
             "UPDATE boss_events SET status = %s, meta = COALESCE(meta, '{}'::jsonb) || %s::jsonb WHERE id = %s",
             (status, json.dumps(fields), event_id),
         )
 
     async def update_meta(self, event_id: int, **fields):
-        await self.db.execute_query(
+        await self._query(
             "UPDATE boss_events SET meta = COALESCE(meta, '{}'::jsonb) || %s::jsonb WHERE id = %s",
             (json.dumps(fields), event_id),
         )
 
     async def pop_pending_scenes(self, event_id: int) -> list:
-        rows = await self.db.execute_query(
+        rows = await self._query(
             "WITH target AS ("
             "  SELECT id, COALESCE(meta->'pending', '[]'::jsonb) AS pending "
             "  FROM boss_events WHERE id = %s FOR UPDATE"
@@ -351,6 +355,16 @@ class BossService:
         if isinstance(pending, str):
             pending = json.loads(pending)
         return list(pending or [])
+
+    async def ack_pending_scene(self, event_id: int, scene: str):
+        # Remove only the delivered head, preserving scenes queued by concurrent hits.
+        await self._query(
+            "UPDATE boss_events SET meta = jsonb_set("
+            "  COALESCE(meta, '{}'::jsonb) - 'scene_index', '{pending}', "
+            "  (meta->'pending') - 0, true) "
+            "WHERE id = %s AND meta->'pending'->>0 = %s",
+            (event_id, scene),
+        )
 
     # ── damage ────────────────────────────────────────────────────────────────
     def multiplier(self, ev: dict) -> int:
@@ -372,12 +386,12 @@ class BossService:
             # mutate the active row in one SQL statement so two hits cannot both read
             # the same HP and overwrite each other. Phase transitions and their queued
             # scenes are part of that same mutation, which also prevents duplicates.
-            rows = await self.db.execute_query(
+            rows = await self._query(
                 "WITH target AS ("
                 "  SELECT id, hp AS old_hp, max_hp, phase AS old_phase, "
                 "    CASE WHEN rage OR weak_until > NOW() THEN 2 ELSE 1 END AS multiplier, "
                 "    started_at <= NOW() - %s * INTERVAL '1 day' AS rage_available "
-                "  FROM boss_events WHERE status = 'active' AND hp > 0 "
+                "  FROM boss_events WHERE status = 'active' AND hp > 0 AND ends_at > NOW() "
                 "  ORDER BY id DESC LIMIT 1 FOR UPDATE"
                 "), calc AS ("
                 "  SELECT *, GREATEST(0, old_hp - %s * multiplier) AS new_hp FROM target"
@@ -434,12 +448,12 @@ class BossService:
     async def regen_if_idle(self) -> int:
         """+5% max HP if nobody hit the boss for a full day. Returns HP restored."""
         await self.ensure_tables()
-        rows = await self.db.execute_query(
+        rows = await self._query(
             "WITH target AS ("
             "  SELECT id, hp AS old_hp, max_hp, FLOOR(max_hp * %s)::integer AS heal "
             "  FROM boss_events WHERE status = 'active' "
             "    AND COALESCE(last_damage_at, started_at) <= NOW() - INTERVAL '24 hours' "
-            "    AND hp < max_hp ORDER BY id DESC LIMIT 1 FOR UPDATE"
+            "    AND hp > 0 AND hp < max_hp AND ends_at > NOW() ORDER BY id DESC LIMIT 1 FOR UPDATE"
             "), updated AS ("
             "  UPDATE boss_events b SET hp = LEAST(t.max_hp, t.old_hp + t.heal), last_damage_at = NOW() "
             "  FROM target t WHERE b.id = t.id AND t.heal > 0 RETURNING b.hp - t.old_hp AS applied"
@@ -456,7 +470,7 @@ class BossService:
         expires_at = ev['started_at'] + timedelta(days=RIDDLE_EXPIRES_OFFSET_DAYS)
         await self.update_meta(
             event_id, merchant_done=True, riddle=riddle, riddle_solved=False,
-            riddle_expires_at=expires_at.isoformat(),
+            riddle_expires_at=expires_at.isoformat(), merchant_pending=True, merchant_index=0,
         )
 
     @staticmethod
@@ -485,12 +499,12 @@ class BossService:
         if guess not in answers and not any(a and a in guess.split() for a in answers):
             return None
         solver = json.dumps({'id': player_id, 'name': player_name}, ensure_ascii=False)
-        rows = await self.db.execute_query(
+        rows = await self._query(
             "UPDATE boss_events SET weak_until = LEAST("
             "  NOW() + %s * INTERVAL '1 hour', started_at + %s * INTERVAL '1 day'), "
             "meta = jsonb_set(jsonb_set(COALESCE(meta, '{}'::jsonb), '{riddle_solved}', 'true'::jsonb, true), "
             "                 '{riddle_solver}', %s::jsonb, true) "
-            "WHERE id = %s AND status = 'active' "
+            "WHERE id = %s AND status = 'active' AND hp > 0 AND ends_at > NOW() "
             "  AND NOT COALESCE((meta->>'riddle_solved')::boolean, false) "
             "  AND (meta->>'riddle_expires_at')::timestamptz > NOW() RETURNING id",
             (WEAK_HOURS, RAGE_UNLOCK_OFFSET_DAYS, solver, ev['id']),
@@ -506,7 +520,7 @@ class BossService:
             start = datetime.now(KYIV).replace(hour=0, minute=0, second=0, microsecond=0)
             where = " AND created_at >= %s"
             params = (event_id, start)
-        rows = await self.db.execute_query(
+        rows = await self._query(
             "SELECT player_id, MAX(player_name), SUM(amount) FROM boss_damage_log "
             f"WHERE event_id = %s{where} GROUP BY player_id ORDER BY 3 DESC", params
         )
@@ -515,7 +529,7 @@ class BossService:
     async def registered_players(self, chat_id: int) -> list:
         """[(player_id, name)] for everyone playing the main game — so a player with
         zero damage still shows up (and can be the loser)."""
-        rows = await self.db.execute_query("SELECT player_id, player_name FROM pisunchik_data", ())
+        rows = await self._query("SELECT player_id, player_name FROM pisunchik_data", ())
         return [(r[0], r[1] or 'Игрок') for r in (rows or [])]
 
     async def standings(self, ev: dict, today_only: bool = False) -> list:

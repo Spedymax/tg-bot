@@ -19,6 +19,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from config.settings import Settings
 from services.wordle_logic import build_message_text, word_for_date
+from services.boss_service import get_boss_service
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,19 @@ class WordleHandlers:
         except Exception as e:
             logger.error(f"Wordle: failed to create tables: {e}")
 
+    async def _should_pin_daily_wordle(self, chat_id: int) -> bool:
+        try:
+            boss = get_boss_service(self.db)
+            event = await boss.get_active_event()
+            if event and event['chat_id'] == chat_id:
+                logger.info("Wordle: skipping pin while Pudginio event is active in %s", chat_id)
+                return False
+            return True
+        except Exception:
+            # The game is still posted if event lookup fails; preserve its pin.
+            logger.warning("Wordle: cannot check boss event, skipping pin", exc_info=True)
+            return False
+
     async def post_daily_wordle(self, chat_id: int):
         await self._ensure_tables()
         try:
@@ -158,10 +172,11 @@ class WordleHandlers:
                 "VALUES (%s, %s, %s, %s) ON CONFLICT (date) DO NOTHING",
                 (today, word, chat_id, sent.message_id),
             )
-            try:
-                await self.bot.pin_chat_message(chat_id, sent.message_id, disable_notification=True)
-            except Exception as e:
-                logger.warning(f"Wordle: failed to pin daily message: {e}")
+            if await self._should_pin_daily_wordle(chat_id):
+                try:
+                    await self.bot.pin_chat_message(chat_id, sent.message_id, disable_notification=True)
+                except Exception as e:
+                    logger.warning(f"Wordle: failed to pin daily message: {e}")
             logger.info(f"Wordle: posted daily puzzle for {today} in chat {chat_id}")
         except Exception as e:
             logger.error(f"Wordle: post_daily_wordle failed: {e}", exc_info=True)

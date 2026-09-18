@@ -201,10 +201,10 @@ class DungeonService:
     @staticmethod
     def result_line(name: str, rooms: int, won: bool, finished: bool) -> str:
         if won:
-            return f"👑 {name} — прошёл всё, мини-пуджик убит"
+            return f"👑 {name} — прошёл все 10 комнат. Мини-Пуджик побеждён"
         if finished:
             return f"💀 {name} — погиб в комнате {min(rooms + 1, logic.ROOMS)}"
-        return f"🚶 {name} — идёт, комната {min(rooms + 1, logic.ROOMS)}"
+        return f"🚶 {name} — проходит данж, комната {min(rooms + 1, logic.ROOMS)}"
 
     async def summary_block(self) -> str:
         """Block for the evening «правильные ответы» post."""
@@ -214,7 +214,7 @@ class DungeonService:
             logger.warning(f"Dungeon: summary failed: {e}")
             return ""
         if not results:
-            return "\n\n🏰 <b>Данж дня</b>\nСегодня в подземелье никто не спускался. Мини-пуджик выспался."
+            return "\n\n🏰 <b>Данж дня</b>\nСегодня в подземелье никто не спускался. Мини-Пуджик выспался."
         lines = ["", "", "🏰 <b>Данж дня</b>"]
         for name, rooms, won, finished in results:
             lines.append(escape(self.result_line(name, rooms, won, finished)))

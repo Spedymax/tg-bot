@@ -8,6 +8,7 @@ a request can never re-roll an outcome.
 
 State shape (stored as JSONB per player per day):
 {
+  "balance_version": int, "history": [action_record, ...],
   "seed": str, "step": int, "room_index": int,           # 0-based, 9 = mini-Pudge
   "rooms": [room, ...],                                    # from generate_layout (hidden keys included)
   "player": {"hp","max_hp","atk","gold","potions","shield","special_used"},
@@ -28,6 +29,7 @@ BASE_PLAYER = {'hp': 32, 'max_hp': 32, 'atk': 5, 'gold': 0, 'potions': 1, 'shiel
 POTION_HEAL = 12
 REST_HEAL = 14
 CRIT_CHANCE = 0.15
+BALANCE_VERSION = 2
 
 
 def _rng(seed: str, step) -> random.Random:
@@ -41,6 +43,10 @@ def daily_modifier(day_seed: str) -> str:
     """One «правило дня» for everyone; 'none' roughly one day in four."""
     r = _rng(day_seed, 'modifier')
     return 'none' if r.random() < 0.25 else r.choice(MODIFIER_KEYS[1:])
+
+
+def _new_balance(state: dict) -> bool:
+    return state.get('balance_version', 1) >= 2
 
 
 def _mod(state: dict) -> str:
@@ -99,11 +105,27 @@ def generate_layout(seed: str, content: dict, lore: Optional[dict] = None, rage:
     extras = ['treasure', 'trap'] + (['npc'] if messages else [])
     r.shuffle(extras)
     kinds += extras[:2]
-    # constraints: merchant not in the first 3 rooms, rest not first, no two fights back to back at start
-    for _ in range(200):
+    def recoverable(order):
+        if not 3 <= order.index('rest') <= 5 or not 4 <= order.index('merchant') <= 7:
+            return False
+        fights = 0
+        for kind in order + ['boss']:
+            if kind in ('rest', 'merchant'):
+                fights = 0
+            elif kind in ('fight', 'boss'):
+                fights += 1
+                if fights > 2:
+                    return False
+        return True
+
+    for _ in range(2000):
         r.shuffle(kinds)
-        if kinds.index('merchant') >= 3 and kinds[0] != 'rest' and kinds[0] != 'merchant':
+        if recoverable(kinds):
             break
+    else:
+        # Guaranteed valid fallback, still using the day's selected extra rooms.
+        kinds = ['riddle', 'fight', 'fight', 'rest', 'puzzle', 'merchant',
+                 'fight', *extras[:2]]
 
     enemies = list(content.get('enemies') or [])
     r.shuffle(enemies)
@@ -148,9 +170,13 @@ def generate_layout(seed: str, content: dict, lore: Optional[dict] = None, rage:
         elif kind == 'trap':
             t = traps[idx % len(traps)] if traps else {'title': 'Ловушка', 'emoji': '⚠️', 'text': '', 'options': ['А', 'Б', 'В']}
             outcomes = list(t.get('outcomes') or ['safe', 'hurt', 'loot'])
-            r.shuffle(outcomes)
+            if len(outcomes) != len(t['options']):
+                raise ValueError(f"Trap outcomes do not match options: {t['title']}")
+            random_choice = 'outcomes' not in t
+            if random_choice:
+                r.shuffle(outcomes)
             room['trap'] = {'title': t['title'], 'emoji': t['emoji'], 'text': t['text'], 'options': list(t['options']),
-                            'image': t.get('image'), 'results': t.get('results') or {}}
+                            'image': t.get('image'), 'results': t.get('results') or {}, 'random_choice': random_choice}
             room['hidden'] = {'outcomes': outcomes, 'dmg': 6, 'gold': 8 + idx, 'heal': 8}
         elif kind == 'npc':
             m = r.choice(messages)
@@ -167,12 +193,14 @@ def generate_layout(seed: str, content: dict, lore: Optional[dict] = None, rage:
                       'intro': mp.get('intro', ''), 'taunts': list(mp.get('taunts') or []), 'bite': mp.get('bite', ''),
                       'image': mp.get('image')}}
     rooms.append(boss)
+    rooms[0]['balance_version'] = BALANCE_VERSION
     return rooms
 
 
 # ── run state ─────────────────────────────────────────────────────────────────
 def new_run(seed: str, rooms: list, modifier: str = 'none') -> dict:
     state = {
+        'balance_version': rooms[0].get('balance_version', 1), 'history': [],
         'seed': seed, 'step': 0, 'room_index': 0, 'rooms': rooms, 'modifier': modifier,
         'player': dict(BASE_PLAYER), 'phase': 'room', 'room_state': {},
         'log': [], 'rooms_cleared': 0, 'boss_killed': False,
@@ -204,7 +232,8 @@ def _enter_room(state: dict):
         state['room_state'] = {'enemy_hp': room['enemy']['hp'], 'turn': 0, 'atk_bonus': 1 if _mod(state) == 'prime' else 0}
         if room['enemy'].get('intro'):
             _log(state, f"{room['enemy']['emoji']} {room['enemy']['intro']}")
-        _log(state, f"{room['enemy']['emoji']} {room['enemy']['name']} — {room['enemy']['hp']} HP, атака {room['enemy']['atk']}.")
+        hp_text = '?' if _mod(state) == 'lowkey' else str(room['enemy']['hp'])
+        _log(state, f"{room['enemy']['emoji']} {room['enemy']['name']} — {hp_text} HP, атака {room['enemy']['atk']}.")
     elif room['type'] == 'merchant':
         state['room_state'] = {'bought': []}
 
@@ -236,18 +265,29 @@ def _hurt(state: dict, dmg: int, text: str) -> bool:
     return False
 
 
-def _heal(state: dict, amount: int):
+def _healing_amount(state: dict, amount: int) -> int:
+    return int(amount * 1.3) if _mod(state) == 'no_negativity' else amount
+
+
+def _heal(state: dict, amount: int) -> int:
     p = state['player']
-    if _mod(state) == 'no_negativity':
-        amount = int(amount * 1.3)
+    amount = _healing_amount(state, amount)
+    before = p['hp']
     p['hp'] = min(p['max_hp'], p['hp'] + amount)
+    healed = p['hp'] - before
+    state['_action_healed'] = state.get('_action_healed', 0) + healed
+    return healed
 
 
 # ── actions available right now ───────────────────────────────────────────────
 def available_actions(state: dict, content: dict) -> list:
     phase = state['phase']
     if phase == 'cleared':
-        return [{'id': 'next', 'label': 'Дальше ➡️'}]
+        acts = [{'id': 'next', 'label': 'Дальше ➡️'}]
+        p = state['player']
+        if _new_balance(state) and p['potions'] > 0 and p['hp'] < p['max_hp']:
+            acts.insert(0, {'id': 'potion', 'label': f"🧪 Зелье: +{_healing_amount(state, POTION_HEAL)} HP, без атаки врага ({p['potions']})"})
+        return acts
     if phase in ('dead', 'won'):
         return []
     room = _room(state)
@@ -255,11 +295,12 @@ def available_actions(state: dict, content: dict) -> list:
     t = room['type']
     if t in ('fight', 'boss'):
         acts = [{'id': 'attack', 'label': f"⚔️ Удар {p['atk']}–{p['atk'] + 2}"},
-                {'id': 'defend', 'label': '🛡️ Блок: урон ½, ответ 2'}]
+                {'id': 'defend', 'label': (f"🛡️ Блок: защита 60%, удар {math.ceil(p['atk'] / 2)}"
+                           if _new_balance(state) else '🛡️ Блок: урон по вам ÷2, удар 2')}]
         if not p['special_used']:
-            acts.append({'id': 'special', 'label': f"🗿 Статуэтка {p['atk'] * 2}–{p['atk'] * 2 + 3} (1 раз)"})
+            acts.append({'id': 'special', 'label': f"🗿 Статуэтка: {p['atk'] * 2}–{p['atk'] * 2 + 3} урона, раз за заход — без расхода предмета"})
         if p['potions'] > 0:
-            acts.append({'id': 'potion', 'label': f"🧪 Зелье +{POTION_HEAL} HP ({p['potions']})"})
+            acts.append({'id': 'potion', 'label': f"🧪 Зелье: +{_healing_amount(state, POTION_HEAL)} HP, враг ответит ({p['potions']})"})
         return acts
     if t in ('riddle', 'puzzle'):
         return [{'id': f'answer:{i}', 'label': o} for i, o in enumerate(room['riddle']['options'])]
@@ -270,7 +311,7 @@ def available_actions(state: dict, content: dict) -> list:
     if t == 'trap':
         return [{'id': f'trap:{i}', 'label': o} for i, o in enumerate(room['trap']['options'])]
     if t == 'rest':
-        return [{'id': 'rest', 'label': f'🔥 Отдохнуть (+{REST_HEAL} HP)'}, {'id': 'sharpen', 'label': '🔪 Заточить (+1 атака)'}]
+        return [{'id': 'rest', 'label': f'🔥 Отдохнуть (+{_healing_amount(state, REST_HEAL)} HP)'}, {'id': 'sharpen', 'label': '🔪 Заточить оружие (+1 атака)'}]
     if t == 'merchant':
         items = (content.get('merchant') or {}).get('items') or {}
         acts = []
@@ -284,6 +325,27 @@ def available_actions(state: dict, content: dict) -> list:
 
 # ── resolve one action ────────────────────────────────────────────────────────
 def apply_action(state: dict, action: str, content: dict) -> dict:
+    if action not in {a['id'] for a in available_actions(state, content) if not a.get('disabled')}:
+        return state
+    before = dict(state['player'])
+    room_number = state['room_index'] + 1
+    state['_action_healed'] = 0
+    _apply_action(state, action, content)
+    healed = state.pop('_action_healed', 0)
+    after = dict(state['player'])
+    state.setdefault('history', []).append({
+        'step': state['step'], 'room': room_number, 'action': action,
+        'balance_version': state.get('balance_version', 1), 'modifier': _mod(state),
+        'hp_before': before['hp'], 'hp_after': after['hp'], 'healed': healed,
+        'damage_taken': max(0, before['hp'] + healed - after['hp']),
+        'gold_before': before['gold'], 'gold_after': after['gold'],
+        'potions_before': before['potions'], 'potions_after': after['potions'],
+        'phase_after': state['phase'],
+    })
+    return state
+
+
+def _apply_action(state: dict, action: str, content: dict) -> dict:
     """Mutates and returns state. Unknown/illegal actions are ignored (no step consumed)."""
     ids = {a['id'] for a in available_actions(state, content) if not a.get('disabled')}
     if action not in ids:
@@ -294,6 +356,12 @@ def apply_action(state: dict, action: str, content: dict) -> dict:
     p = state['player']
     rs = state['room_state']
     t = room['type']
+
+    if action == 'potion' and state['phase'] == 'cleared':
+        p['potions'] -= 1
+        healed = _heal(state, POTION_HEAL)
+        _log(state, f"🧪 Вы пьёте зелье между комнатами: +{healed} HP. Никто не атакует.")
+        return state
 
     if action == 'next':
         state['room_index'] += 1
@@ -309,19 +377,20 @@ def apply_action(state: dict, action: str, content: dict) -> dict:
             crit = r.random() < (0.30 if _mod(state) == 'dai_bozhe' else CRIT_CHANCE)
             if crit:
                 player_dmg *= 2
-            _log(state, f"⚔️ Вы бьёте {enemy['name']} на {player_dmg}{' — КРИТ!' if crit else ''}.")
+            _log(state, f"⚔️ {enemy['name']} получает {player_dmg} урона{' — КРИТ!' if crit else '.'}")
         elif action == 'special':
             p['special_used'] = True
             player_dmg = p['atk'] * 2 + r.randint(0, 3)
-            _log(state, f"🗿 Вы достаёте статуэтку Капрала и с размаху — {player_dmg} урона!")
+            _log(state, f"🗿 Удар статуэткой Капрала — {player_dmg} урона!")
         elif action == 'defend':
             defended = True
-            player_dmg = 2
-            _log(state, "🛡️ Вы уходите в блок и тычете в ответ на 2.")
+            player_dmg = math.ceil(p['atk'] / 2) if _new_balance(state) else 2
+            protection = 60 if _new_balance(state) else 50
+            _log(state, f"🛡️ Блок снижает входящий урон на {protection}%. Контрудар: {player_dmg} урона.")
         elif action == 'potion':
             p['potions'] -= 1
-            _heal(state, POTION_HEAL)
-            _log(state, f"🧪 Фиолетовая жидкость. +{POTION_HEAL} HP (теперь {p['hp']}).")
+            healed = _heal(state, POTION_HEAL)
+            _log(state, f"🧪 Фиолетовая жидкость. +{healed} HP (теперь {p['hp']}).")
         rs['enemy_hp'] = max(0, rs['enemy_hp'] - player_dmg)
         if rs['enemy_hp'] <= 0:
             gold = r.randint(4, 8) + room['index']
@@ -341,11 +410,11 @@ def apply_action(state: dict, action: str, content: dict) -> dict:
             dmg *= 2
             _log(state, enemy.get('bite') or 'Босс кусает!')
         if defended:
-            dmg = math.ceil(dmg / 2)
+            dmg = (dmg * 2 + 4) // 5 if _new_balance(state) else math.ceil(dmg / 2)
         dmg = max(0, dmg)
         taunts = enemy.get('taunts') or ([enemy['taunt']] if enemy.get('taunt') else [])
         taunt = f" «{r.choice(taunts)}»" if taunts and r.random() < 0.4 else ''
-        _hurt(state, dmg, f"💥 {enemy['name']} бьёт на {dmg}.{taunt} У вас {{hp}} HP.")
+        _hurt(state, dmg, f"💥 {enemy['name']} наносит {dmg} урона.{taunt} У вас {{hp}} HP.")
         return state
 
     if t in ('riddle', 'puzzle', 'npc') and action.startswith('answer:'):
@@ -354,7 +423,7 @@ def apply_action(state: dict, action: str, content: dict) -> dict:
         if correct:
             gold, heal = 6 + room['index'], 4
             p['gold'] += gold
-            _heal(state, heal)
+            heal = _heal(state, heal)
             _clear_room(state, f"✅ Верно! +{gold} золота, +{heal} HP.")
         else:
             opts = room['riddle']['options'] if t != 'npc' else room['npc']['options']
@@ -397,7 +466,7 @@ def apply_action(state: dict, action: str, content: dict) -> dict:
         if outcome == 'loot':
             p['gold'] += h['gold']
         elif outcome == 'heal':
-            _heal(state, h.get('heal', 8))
+            actual_heal = _heal(state, h.get('heal', 8))
         elif outcome == 'atk':
             p['atk'] += 1
         elif outcome == 'potion':
@@ -407,13 +476,13 @@ def apply_action(state: dict, action: str, content: dict) -> dict:
         elif outcome == 'jackpot':
             p['gold'] += max(p['gold'], 5)  # double, or +5 if you came in broke
         text = tpl.get(outcome, tpl.get('safe', 'Пронесло.'))
-        _clear_room(state, text.format(gold=(h['gold'] if outcome == 'loot' else p['gold']), dmg=h['dmg'], heal=h.get('heal', 8)))
+        _clear_room(state, text.format(gold=(h['gold'] if outcome == 'loot' else p['gold']), dmg=h['dmg'], heal=actual_heal if outcome == 'heal' else h.get('heal', 8)))
         return state
 
     if t == 'rest':
         if action == 'rest':
-            _heal(state, REST_HEAL)
-            _clear_room(state, f"🔥 Вы греетесь у костра. +{REST_HEAL} HP (теперь {p['hp']}).")
+            healed = _heal(state, REST_HEAL)
+            _clear_room(state, f"🔥 Вы греетесь у костра. +{healed} HP (теперь {p['hp']}).")
         else:
             p['atk'] += 1
             _clear_room(state, f"🔪 Вы точите оружие о статуэтку. Атака {p['atk']}.")
@@ -435,7 +504,7 @@ def apply_action(state: dict, action: str, content: dict) -> dict:
         elif key == 'shield':
             p['shield'] = 1
         rs.setdefault('bought', []).append(key)
-        _log(state, f"🛒 Куплено: {item['label']} за {item['price']}💰. Осталось {p['gold']}.")
+        _log(state, f"🛒 Куплено: {item['label']}. Цена: {item['price']} золота. Осталось: {p['gold']}.")
         return state
 
     return state
@@ -457,6 +526,11 @@ def public_view(state: dict, content: dict) -> dict:
             else:
                 image = next((x.get('image') for x in content.get('enemies', []) if x['name'] == e['name']), None)
         view_room.update({
+            'warning': ('⚠️ Мини-Пуджик готовится укусить! Следующий удар — двойной. Можно поставить блок.'
+                        if _new_balance(state) and t == 'boss' and state['phase'] == 'room'
+                        and (state['room_state'].get('turn', 0) + 1) % (3 if _mod(state) == 'old_god' else 4) == 0 else ''),
+            'hint': ('🗿 Статуэтка: сильный удар раз за заход. Предмет из инвентаря не тратится.'
+                     if not state['player']['special_used'] and state['phase'] == 'room' else ''),
             'title': e['name'], 'emoji': e['emoji'], 'text': e.get('intro', ''), 'image': image,
             'enemy': {'name': e['name'], 'hp': state['room_state'].get('enemy_hp', e['hp']), 'max_hp': e['max_hp'],
                       'atk': e['atk'] + state['room_state'].get('atk_bonus', 0), 'hidden_hp': _mod(state) == 'lowkey'},
@@ -474,6 +548,8 @@ def public_view(state: dict, content: dict) -> dict:
         view_room.update({'title': tr.get('title', 'Сокровищница'), 'emoji': tr.get('emoji', '💰'), 'text': tr.get('text', ''), 'image': tr.get('image')})
     elif t == 'trap':
         tp = room['trap']
+        if tp.get('random_choice'):
+            view_room['warning'] = '🎲 Здесь исход случаен: последствия вариантов заранее неизвестны.'
         view_room.update({'title': tp['title'], 'emoji': tp['emoji'], 'text': tp['text'], 'image': tp.get('image') or content.get('trap_image')})
     elif t == 'rest':
         rs = content.get('rest') or {}
@@ -485,13 +561,14 @@ def public_view(state: dict, content: dict) -> dict:
     m = mods.get(_mod(state)) or {'name': 'Обычный день', 'desc': ''}
     return {
         'phase': state['phase'],
+        'balance_version': state.get('balance_version', 1),
         'modifier': {'key': _mod(state), 'name': m.get('name', ''), 'desc': m.get('desc', '')},
         'room': view_room,
         'rooms_total': ROOMS,
         'rooms_cleared': state['rooms_cleared'],
         'player': dict(state['player']),
-        'stats_line': (f"Атака {state['player']['atk']}–{state['player']['atk'] + 2} · крит {int(CRIT_CHANCE * 100)}% (x2)"
-                       + (" · 🛡 щит: следующий удар в 0" if state['player']['shield'] else "")),
+        'stats_line': (f"Атака {state['player']['atk']}–{state['player']['atk'] + 2} · крит {int((0.30 if _mod(state) == 'dai_bozhe' else CRIT_CHANCE) * 100)}% (x2)"
+                       + (" · 🛡 щит поглотит следующий удар" if state['player']['shield'] else "")),
         'actions': available_actions(state, content),
         'log': state['log'][-25:],
         'boss_killed': state['boss_killed'],

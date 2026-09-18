@@ -1,0 +1,552 @@
+{
+  "days": 20,
+  "players_per_day": 10,
+  "baseline_ref": "HEAD",
+  "answer_accuracy": 0.75,
+  "rage": true,
+  "trap_policy": "authored intended outcomes, not hidden map outcomes",
+  "notes": "Synthetic simulations; all nine modifiers equally weighted, not real-player win rates.",
+  "results": [
+    {
+      "version": "baseline",
+      "strategy": "attack",
+      "modifier": "none",
+      "runs": 200,
+      "wins": 55,
+      "win_pct": 27.5,
+      "mean_rooms": 7.88,
+      "winner_hp": 13.1
+    },
+    {
+      "version": "baseline",
+      "strategy": "attack",
+      "modifier": "no_negativity",
+      "runs": 200,
+      "wins": 91,
+      "win_pct": 45.5,
+      "mean_rooms": 8.28,
+      "winner_hp": 13.4
+    },
+    {
+      "version": "baseline",
+      "strategy": "attack",
+      "modifier": "lowkey",
+      "runs": 200,
+      "wins": 55,
+      "win_pct": 27.5,
+      "mean_rooms": 7.88,
+      "winner_hp": 13.1
+    },
+    {
+      "version": "baseline",
+      "strategy": "attack",
+      "modifier": "prime",
+      "runs": 200,
+      "wins": 60,
+      "win_pct": 30.0,
+      "mean_rooms": 7.99,
+      "winner_hp": 11.2
+    },
+    {
+      "version": "baseline",
+      "strategy": "attack",
+      "modifier": "sheva",
+      "runs": 200,
+      "wins": 71,
+      "win_pct": 35.5,
+      "mean_rooms": 8.37,
+      "winner_hp": 12.8
+    },
+    {
+      "version": "baseline",
+      "strategy": "attack",
+      "modifier": "reveal",
+      "runs": 200,
+      "wins": 49,
+      "win_pct": 24.5,
+      "mean_rooms": 7.67,
+      "winner_hp": 13.8
+    },
+    {
+      "version": "baseline",
+      "strategy": "attack",
+      "modifier": "dai_bozhe",
+      "runs": 200,
+      "wins": 87,
+      "win_pct": 43.5,
+      "mean_rooms": 8.29,
+      "winner_hp": 13.7
+    },
+    {
+      "version": "baseline",
+      "strategy": "attack",
+      "modifier": "torsion",
+      "runs": 200,
+      "wins": 43,
+      "win_pct": 21.5,
+      "mean_rooms": 7.59,
+      "winner_hp": 12.6
+    },
+    {
+      "version": "baseline",
+      "strategy": "attack",
+      "modifier": "old_god",
+      "runs": 200,
+      "wins": 53,
+      "win_pct": 26.5,
+      "mean_rooms": 7.87,
+      "winner_hp": 12.9
+    },
+    {
+      "version": "baseline",
+      "strategy": "block",
+      "modifier": "none",
+      "runs": 200,
+      "wins": 0,
+      "win_pct": 0.0,
+      "mean_rooms": 3.94,
+      "winner_hp": null
+    },
+    {
+      "version": "baseline",
+      "strategy": "block",
+      "modifier": "no_negativity",
+      "runs": 200,
+      "wins": 0,
+      "win_pct": 0.0,
+      "mean_rooms": 4.18,
+      "winner_hp": null
+    },
+    {
+      "version": "baseline",
+      "strategy": "block",
+      "modifier": "lowkey",
+      "runs": 200,
+      "wins": 0,
+      "win_pct": 0.0,
+      "mean_rooms": 3.94,
+      "winner_hp": null
+    },
+    {
+      "version": "baseline",
+      "strategy": "block",
+      "modifier": "prime",
+      "runs": 200,
+      "wins": 0,
+      "win_pct": 0.0,
+      "mean_rooms": 3.38,
+      "winner_hp": null
+    },
+    {
+      "version": "baseline",
+      "strategy": "block",
+      "modifier": "sheva",
+      "runs": 200,
+      "wins": 0,
+      "win_pct": 0.0,
+      "mean_rooms": 4.5,
+      "winner_hp": null
+    },
+    {
+      "version": "baseline",
+      "strategy": "block",
+      "modifier": "reveal",
+      "runs": 200,
+      "wins": 0,
+      "win_pct": 0.0,
+      "mean_rooms": 3.75,
+      "winner_hp": null
+    },
+    {
+      "version": "baseline",
+      "strategy": "block",
+      "modifier": "dai_bozhe",
+      "runs": 200,
+      "wins": 0,
+      "win_pct": 0.0,
+      "mean_rooms": 3.94,
+      "winner_hp": null
+    },
+    {
+      "version": "baseline",
+      "strategy": "block",
+      "modifier": "torsion",
+      "runs": 200,
+      "wins": 0,
+      "win_pct": 0.0,
+      "mean_rooms": 3.85,
+      "winner_hp": null
+    },
+    {
+      "version": "baseline",
+      "strategy": "block",
+      "modifier": "old_god",
+      "runs": 200,
+      "wins": 0,
+      "win_pct": 0.0,
+      "mean_rooms": 3.94,
+      "winner_hp": null
+    },
+    {
+      "version": "baseline",
+      "strategy": "tactical",
+      "modifier": "none",
+      "runs": 200,
+      "wins": 61,
+      "win_pct": 30.5,
+      "mean_rooms": 7.91,
+      "winner_hp": 12.0
+    },
+    {
+      "version": "baseline",
+      "strategy": "tactical",
+      "modifier": "no_negativity",
+      "runs": 200,
+      "wins": 89,
+      "win_pct": 44.5,
+      "mean_rooms": 8.27,
+      "winner_hp": 14.4
+    },
+    {
+      "version": "baseline",
+      "strategy": "tactical",
+      "modifier": "lowkey",
+      "runs": 200,
+      "wins": 61,
+      "win_pct": 30.5,
+      "mean_rooms": 7.91,
+      "winner_hp": 12.0
+    },
+    {
+      "version": "baseline",
+      "strategy": "tactical",
+      "modifier": "prime",
+      "runs": 200,
+      "wins": 61,
+      "win_pct": 30.5,
+      "mean_rooms": 8.0,
+      "winner_hp": 11.3
+    },
+    {
+      "version": "baseline",
+      "strategy": "tactical",
+      "modifier": "sheva",
+      "runs": 200,
+      "wins": 73,
+      "win_pct": 36.5,
+      "mean_rooms": 8.38,
+      "winner_hp": 12.8
+    },
+    {
+      "version": "baseline",
+      "strategy": "tactical",
+      "modifier": "reveal",
+      "runs": 200,
+      "wins": 54,
+      "win_pct": 27.0,
+      "mean_rooms": 7.69,
+      "winner_hp": 12.7
+    },
+    {
+      "version": "baseline",
+      "strategy": "tactical",
+      "modifier": "dai_bozhe",
+      "runs": 200,
+      "wins": 87,
+      "win_pct": 43.5,
+      "mean_rooms": 8.29,
+      "winner_hp": 13.9
+    },
+    {
+      "version": "baseline",
+      "strategy": "tactical",
+      "modifier": "torsion",
+      "runs": 200,
+      "wins": 44,
+      "win_pct": 22.0,
+      "mean_rooms": 7.6,
+      "winner_hp": 12.0
+    },
+    {
+      "version": "baseline",
+      "strategy": "tactical",
+      "modifier": "old_god",
+      "runs": 200,
+      "wins": 45,
+      "win_pct": 22.5,
+      "mean_rooms": 7.83,
+      "winner_hp": 12.0
+    },
+    {
+      "version": "package_1",
+      "strategy": "attack",
+      "modifier": "none",
+      "runs": 200,
+      "wins": 75,
+      "win_pct": 37.5,
+      "mean_rooms": 8.98,
+      "winner_hp": 9.3
+    },
+    {
+      "version": "package_1",
+      "strategy": "attack",
+      "modifier": "no_negativity",
+      "runs": 200,
+      "wins": 116,
+      "win_pct": 58.0,
+      "mean_rooms": 9.24,
+      "winner_hp": 12.0
+    },
+    {
+      "version": "package_1",
+      "strategy": "attack",
+      "modifier": "lowkey",
+      "runs": 200,
+      "wins": 75,
+      "win_pct": 37.5,
+      "mean_rooms": 8.98,
+      "winner_hp": 9.3
+    },
+    {
+      "version": "package_1",
+      "strategy": "attack",
+      "modifier": "prime",
+      "runs": 200,
+      "wins": 81,
+      "win_pct": 40.5,
+      "mean_rooms": 9.09,
+      "winner_hp": 8.7
+    },
+    {
+      "version": "package_1",
+      "strategy": "attack",
+      "modifier": "sheva",
+      "runs": 200,
+      "wins": 100,
+      "win_pct": 50.0,
+      "mean_rooms": 9.27,
+      "winner_hp": 9.7
+    },
+    {
+      "version": "package_1",
+      "strategy": "attack",
+      "modifier": "reveal",
+      "runs": 200,
+      "wins": 70,
+      "win_pct": 35.0,
+      "mean_rooms": 8.86,
+      "winner_hp": 8.6
+    },
+    {
+      "version": "package_1",
+      "strategy": "attack",
+      "modifier": "dai_bozhe",
+      "runs": 200,
+      "wins": 123,
+      "win_pct": 61.5,
+      "mean_rooms": 9.4,
+      "winner_hp": 11.9
+    },
+    {
+      "version": "package_1",
+      "strategy": "attack",
+      "modifier": "torsion",
+      "runs": 200,
+      "wins": 70,
+      "win_pct": 35.0,
+      "mean_rooms": 8.92,
+      "winner_hp": 8.1
+    },
+    {
+      "version": "package_1",
+      "strategy": "attack",
+      "modifier": "old_god",
+      "runs": 200,
+      "wins": 60,
+      "win_pct": 30.0,
+      "mean_rooms": 8.9,
+      "winner_hp": 8.8
+    },
+    {
+      "version": "package_1",
+      "strategy": "block",
+      "modifier": "none",
+      "runs": 200,
+      "wins": 11,
+      "win_pct": 5.5,
+      "mean_rooms": 7.96,
+      "winner_hp": 4.3
+    },
+    {
+      "version": "package_1",
+      "strategy": "block",
+      "modifier": "no_negativity",
+      "runs": 200,
+      "wins": 15,
+      "win_pct": 7.5,
+      "mean_rooms": 8.52,
+      "winner_hp": 10.3
+    },
+    {
+      "version": "package_1",
+      "strategy": "block",
+      "modifier": "lowkey",
+      "runs": 200,
+      "wins": 11,
+      "win_pct": 5.5,
+      "mean_rooms": 7.96,
+      "winner_hp": 4.3
+    },
+    {
+      "version": "package_1",
+      "strategy": "block",
+      "modifier": "prime",
+      "runs": 200,
+      "wins": 0,
+      "win_pct": 0.0,
+      "mean_rooms": 7.21,
+      "winner_hp": null
+    },
+    {
+      "version": "package_1",
+      "strategy": "block",
+      "modifier": "sheva",
+      "runs": 200,
+      "wins": 8,
+      "win_pct": 4.0,
+      "mean_rooms": 8.46,
+      "winner_hp": 5.1
+    },
+    {
+      "version": "package_1",
+      "strategy": "block",
+      "modifier": "reveal",
+      "runs": 200,
+      "wins": 10,
+      "win_pct": 5.0,
+      "mean_rooms": 7.68,
+      "winner_hp": 4.5
+    },
+    {
+      "version": "package_1",
+      "strategy": "block",
+      "modifier": "dai_bozhe",
+      "runs": 200,
+      "wins": 11,
+      "win_pct": 5.5,
+      "mean_rooms": 7.96,
+      "winner_hp": 4.3
+    },
+    {
+      "version": "package_1",
+      "strategy": "block",
+      "modifier": "torsion",
+      "runs": 200,
+      "wins": 4,
+      "win_pct": 2.0,
+      "mean_rooms": 7.66,
+      "winner_hp": 3.5
+    },
+    {
+      "version": "package_1",
+      "strategy": "block",
+      "modifier": "old_god",
+      "runs": 200,
+      "wins": 10,
+      "win_pct": 5.0,
+      "mean_rooms": 7.95,
+      "winner_hp": 2.4
+    },
+    {
+      "version": "package_1",
+      "strategy": "tactical",
+      "modifier": "none",
+      "runs": 200,
+      "wins": 72,
+      "win_pct": 36.0,
+      "mean_rooms": 8.96,
+      "winner_hp": 9.4
+    },
+    {
+      "version": "package_1",
+      "strategy": "tactical",
+      "modifier": "no_negativity",
+      "runs": 200,
+      "wins": 113,
+      "win_pct": 56.5,
+      "mean_rooms": 9.22,
+      "winner_hp": 13.0
+    },
+    {
+      "version": "package_1",
+      "strategy": "tactical",
+      "modifier": "lowkey",
+      "runs": 200,
+      "wins": 72,
+      "win_pct": 36.0,
+      "mean_rooms": 8.96,
+      "winner_hp": 9.4
+    },
+    {
+      "version": "package_1",
+      "strategy": "tactical",
+      "modifier": "prime",
+      "runs": 200,
+      "wins": 80,
+      "win_pct": 40.0,
+      "mean_rooms": 9.08,
+      "winner_hp": 9.6
+    },
+    {
+      "version": "package_1",
+      "strategy": "tactical",
+      "modifier": "sheva",
+      "runs": 200,
+      "wins": 100,
+      "win_pct": 50.0,
+      "mean_rooms": 9.27,
+      "winner_hp": 10.7
+    },
+    {
+      "version": "package_1",
+      "strategy": "tactical",
+      "modifier": "reveal",
+      "runs": 200,
+      "wins": 68,
+      "win_pct": 34.0,
+      "mean_rooms": 8.85,
+      "winner_hp": 8.5
+    },
+    {
+      "version": "package_1",
+      "strategy": "tactical",
+      "modifier": "dai_bozhe",
+      "runs": 200,
+      "wins": 120,
+      "win_pct": 60.0,
+      "mean_rooms": 9.38,
+      "winner_hp": 11.7
+    },
+    {
+      "version": "package_1",
+      "strategy": "tactical",
+      "modifier": "torsion",
+      "runs": 200,
+      "wins": 62,
+      "win_pct": 31.0,
+      "mean_rooms": 8.88,
+      "winner_hp": 8.6
+    },
+    {
+      "version": "package_1",
+      "strategy": "tactical",
+      "modifier": "old_god",
+      "runs": 200,
+      "wins": 63,
+      "win_pct": 31.5,
+      "mean_rooms": 8.92,
+      "winner_hp": 8.7
+    }
+  ],
+  "baseline_commit": "41e5cb84be6e480271fbe1e31b8a0fd819936fee"
+}

@@ -131,10 +131,10 @@ class TriviaHandlers:
         except Exception as e:
             logger.error(f"Failed to send death notice: {e}")
 
-    def get_question_from_gemini(self):
+    async def get_question_from_gemini(self):
         """Generate a trivia question using TriviaService"""
         try:
-            result = self.trivia_service.generate_question("system", "Handler")
+            result = await self.trivia_service.generate_question("system", "Handler")
             if result["success"]:
                 return {
                     "question": result["question"]["text"],

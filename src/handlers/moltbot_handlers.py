@@ -2039,7 +2039,7 @@ class MoltbotHandlers:
     def _register(self):
         router = self.router
 
-        @router.message(StateFilter(None), F.func(lambda m: bool(
+        @router.message(StateFilter(None), ~F.text.startswith('/'), F.func(lambda m: bool(
             m.entities and m.text and any(e.type == 'mention' for e in m.entities)
         )))
         async def handle_mention(message: Message):
@@ -2291,7 +2291,7 @@ class MoltbotHandlers:
             _save_lore_lines(lines)
             await message.reply(f"🗑 Откреплено: {removed}")
 
-        @router.message(StateFilter(None), F.func(lambda m: (
+        @router.message(StateFilter(None), ~F.text.startswith('/'), F.func(lambda m: (
             m.reply_to_message is not None
             and m.reply_to_message.from_user is not None
             and m.reply_to_message.from_user.is_bot

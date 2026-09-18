@@ -49,7 +49,7 @@ class DungeonHandlers:
         @self.router.message(CommandStart(deep_link=True, magic=F.args == 'dungeon'))
         async def dungeon_deep_link(message: Message, command: CommandObject):
             await message.answer(
-                "🏰 Десять комнат, в конце мини-пуджик. Один заход в день, данж у всех сегодня одинаковый.",
+                "🏰 Десять комнат, в конце — Мини-Пуджик. Один заход в день. Комнаты и правило дня одинаковые для всех.",
                 reply_markup=self._markup(private=True),
             )
 
