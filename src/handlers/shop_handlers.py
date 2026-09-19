@@ -2,16 +2,19 @@ import asyncio
 import json
 import logging
 import random
+import math
+from decimal import Decimal
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
-    Message, CallbackQuery,
+    Message, CallbackQuery, FSInputFile,
     InlineKeyboardMarkup, InlineKeyboardButton,
 )
 from services.stock_service import StockService
 from states.shop import ShopStates
 from utils.helpers import safe_split_callback, safe_int
+from config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -120,9 +123,8 @@ class ShopHandlers:
                     description = self.statuetki_data['description'].get(statuetka, 'No description available')
                     item_image_filename = item_images.get(statuetka, '/home/spedymax/tg-bot/assets/images/statuetki/pudginio.jpg')
                     try:
-                        with open(item_image_filename, 'rb') as photo:
-                            await asyncio.sleep(1)
-                            await self.bot.send_photo(message.chat.id, photo, caption=f"{statuetka} - {description}")
+                        await asyncio.sleep(1)
+                        await self.bot.send_photo(message.chat.id, FSInputFile(item_image_filename), caption=f"{statuetka} - {description}")
                     except FileNotFoundError:
                         await self.bot.send_message(message.chat.id, f"{statuetka} - {description}")
 
@@ -247,7 +249,9 @@ class ShopHandlers:
 
                 if player.spend_coins(discounted_price):
                     player.add_item(item_name)
-                    await self.player_service.save_player(player)
+                    if await self.player_service.save_player(player) is False:
+                        await self.bot.send_message(call.message.chat.id, "Не удалось сохранить покупку. Попробуйте позже.")
+                        return
                     display_name = self.shop_data.get('names', {}).get(item_name, item_name)
                     await self.bot.send_message(call.message.chat.id, f"Вы купили {display_name} за {discounted_price} BTC.")
                 else:
@@ -265,9 +269,14 @@ class ShopHandlers:
             item_price = self.statuetki_data['prices'].get(item_name, 0)
 
             if player and item_price > 0:
+                if item_name in player.statuetki:
+                    await self.bot.send_message(call.message.chat.id, "Эта статуэтка у вас уже есть.")
+                    return
                 if player.spend_coins(item_price):
                     player.statuetki.append(item_name)
-                    await self.player_service.save_player(player)
+                    if await self.player_service.save_player(player) is False:
+                        await self.bot.send_message(call.message.chat.id, "Не удалось сохранить покупку. Попробуйте позже.")
+                        return
                     await self.bot.send_message(call.message.chat.id, f"Вы купили {item_name} за {item_price} BTC.")
                 else:
                     await self.bot.send_message(call.message.chat.id, "Недостаточно денег((")
@@ -403,8 +412,7 @@ class ShopHandlers:
         @self.router.message(Command('stocks_update'))
         async def stocks_update(message: Message):
             """Handle /stocks_update command (admin only)"""
-            from config.settings import ADMIN_IDS
-            if message.from_user.id in ADMIN_IDS:
+            if message.from_user.id in Settings.ADMIN_IDS:
                 try:
                     async with self.player_service.db.connection() as conn:
                         cursor = await conn.execute("SELECT company_name, price FROM stocks")
@@ -413,7 +421,7 @@ class ShopHandlers:
 
                         for company, old_price in old_stock_data.items():
                             change_percent = random.uniform(-0.1, 0.4)
-                            new_price = round(old_price * (1 + change_percent), 2) or 1
+                            new_price = round(Decimal(str(old_price)) * (1 + Decimal(str(change_percent))), 2) or 1
                             await conn.execute("UPDATE stocks SET price = %s WHERE company_name = %s", (new_price, company))
                         await conn.commit()
 
@@ -536,13 +544,19 @@ class ShopHandlers:
             await self.bot.send_message(call.message.chat.id, f"Сколько акций компании {company} вы хотите продать?")
 
         # Stock quantity input handlers (FSM states)
-        @self.router.message(ShopStates.waiting_buy_quantity, F.text.regexp(r'^\d+$'))
+        @self.router.message(ShopStates.waiting_buy_quantity, F.text, ~F.text.startswith('/'))
         async def handle_quantity_selection(message: Message, state: FSMContext):
             """Handle stock purchase quantity input"""
             data = await state.get_data()
-            await state.clear()
             try:
                 quantity = int(message.text)
+            except ValueError:
+                await message.reply("Введите целое число акций больше нуля. /cancel — отменить.")
+                return
+            if quantity <= 0:
+                await message.reply("Количество акций должно быть больше нуля.")
+                return
+            try:
                 company = data['company']
 
                 player = await self.player_service.get_player(message.from_user.id)
@@ -558,7 +572,7 @@ class ShopHandlers:
                         return
 
                 stock_price = result[0]
-                total_cost = stock_price * quantity
+                total_cost = math.ceil(stock_price * quantity)
 
                 if player.coins < total_cost:
                     await message.reply(f"Недостаточно BTC для покупки. Надо {total_cost} BTC")
@@ -572,22 +586,32 @@ class ShopHandlers:
                     player_stocks_set, company, quantity, stock_price, True
                 )
 
-                player.spend_coins(int(cost))
+                player.spend_coins(math.ceil(cost))
                 player.player_stocks = list(updated_stocks)
-                await self.player_service.save_player(player)
+                if await self.player_service.save_player(player) is False:
+                    await message.reply("Не удалось сохранить покупку. Попробуйте позже.")
+                    return
+                await state.clear()
 
                 await message.reply(f"Мои поздравления! Вы купили {quantity} акций компании {company}.")
 
             except Exception as e:
-                await message.reply(f"An error occurred: {str(e)}")
+                logger.error("Stock purchase failed: %s", e)
+                await message.reply("Не удалось купить акции. Попробуйте позже.")
 
-        @self.router.message(ShopStates.waiting_sell_quantity, F.text.regexp(r'^\d+$'))
+        @self.router.message(ShopStates.waiting_sell_quantity, F.text, ~F.text.startswith('/'))
         async def handle_sell_quantity_selection(message: Message, state: FSMContext):
             """Handle stock sale quantity input"""
             data = await state.get_data()
-            await state.clear()
             try:
                 quantity = int(message.text)
+            except ValueError:
+                await message.reply("Введите целое число акций больше нуля. /cancel — отменить.")
+                return
+            if quantity <= 0:
+                await message.reply("Количество акций должно быть больше нуля.")
+                return
+            try:
                 company = data['company_to_sell']
 
                 player = await self.player_service.get_player(message.from_user.id)
@@ -595,7 +619,7 @@ class ShopHandlers:
                     await message.reply("Игрок не найден")
                     return
 
-                user_stock = next((stock for stock in player.player_stocks if stock.startswith(company)), None)
+                user_stock = next((stock for stock in player.player_stocks if stock.startswith(f'{company}:')), None)
                 if not user_stock:
                     await message.reply(f"У вас нет акций компании {company}")
                     return
@@ -626,12 +650,16 @@ class ShopHandlers:
 
                 player.add_coins(int(abs(earnings)))
                 player.player_stocks = list(updated_stocks)
-                await self.player_service.save_player(player)
+                if await self.player_service.save_player(player) is False:
+                    await message.reply("Не удалось сохранить продажу. Попробуйте позже.")
+                    return
+                await state.clear()
 
                 await message.reply(f"Вы успешно продали {quantity} акций компании {company}.\nИ вы заработали: {abs(earnings)}")
 
             except Exception as e:
-                await message.reply(f"An error occurred: {str(e)}")
+                logger.error("Stock sale failed: %s", e)
+                await message.reply("Не удалось продать акции. Попробуйте позже.")
 
     async def _handle_all_statuetki_collected(self, player, message):
         """Handle special event when player collects all statuetki"""

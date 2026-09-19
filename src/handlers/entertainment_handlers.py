@@ -11,7 +11,7 @@ import asyncio
 
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 from utils.helpers import safe_split_callback, safe_int, escape_html, safe_username
 
@@ -164,9 +164,8 @@ class EntertainmentHandlers:
                 elif prompt == "расскажи анекдот про маму Юры":
                     await self.bot.send_message(message.chat.id, "Ну ладно")
                     try:
-                        with open('/home/spedymax/tg-bot/assets/images/bezobidno.jpg', 'rb') as photo:
-                            await asyncio.sleep(1)
-                            await self.bot.send_photo(message.chat.id, photo)
+                        await asyncio.sleep(1)
+                        await self.bot.send_photo(message.chat.id, FSInputFile('/home/spedymax/tg-bot/assets/images/bezobidno.jpg'))
                     except FileNotFoundError:
                         await self.bot.send_message(message.chat.id, "Файл изображения не найден")
                 elif prompt == "что-то жарко стало":
@@ -324,13 +323,13 @@ class EntertainmentHandlers:
     async def send_furry_pics(self, chat_id):
         """Send furry pictures"""
         # Try to get images from APIs first
-        image_urls = self.get_furry_images_from_multiple_sources()
+        image_urls = await asyncio.to_thread(self.get_furry_images_from_multiple_sources)
 
         # If no images from APIs, try parsing a simple gallery site
         if not image_urls:
             try:
                 # Use a more reliable source
-                filtered = self.parse_furry_images('https://www.furaffinity.net/browse/', 'url')
+                filtered = await asyncio.to_thread(self.parse_furry_images, 'https://www.furaffinity.net/browse/', 'url')
                 if filtered:
                     image_urls = filtered
             except Exception as e:
@@ -392,8 +391,7 @@ class EntertainmentHandlers:
             random_song = random.choice(song_files)
 
             # Send the selected song to the user
-            with open(os.path.join(songs_folder, random_song), 'rb') as audio_file:
-                await self.bot.send_audio(message.chat.id, audio_file)
+            await self.bot.send_audio(message.chat.id, FSInputFile(os.path.join(songs_folder, random_song)))
 
         except Exception as e:
             logger.error(f"Error sending pirate song: {e}")

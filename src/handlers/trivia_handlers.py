@@ -252,7 +252,8 @@ class TriviaHandlers:
                 return
 
             # Check if user already answered
-            if user_id in question_data["players_responses"]:
+            # JSON object keys become strings when restored after a restart.
+            if user_id in question_data["players_responses"] or str(user_id) in question_data["players_responses"]:
                 await call.answer("Вы уже ответили на этот вопрос")
                 return
 

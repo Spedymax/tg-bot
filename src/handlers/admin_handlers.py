@@ -13,6 +13,7 @@ import logging
 import asyncio
 
 from states.registration import RegistrationStates
+from utils.helpers import registration_callback_data
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +220,7 @@ class AdminHandlers:
                 [
                     InlineKeyboardButton(
                         text="✅ Принять",
-                        callback_data=f"reg_approve_{user.id}_{name[:30]}"
+                        callback_data=registration_callback_data(user.id, name)
                     ),
                     InlineKeyboardButton(
                         text="❌ Отклонить",
@@ -236,7 +237,7 @@ class AdminHandlers:
             )
             for admin_id in Settings.ADMIN_IDS:
                 try:
-                    await self.bot.send_message(admin_id, admin_text, reply_markup=markup)
+                    await self.bot.send_message(admin_id, admin_text, reply_markup=markup, parse_mode=None)
                 except Exception as e:
                     logger.error(f"Failed to notify admin {admin_id}: {e}")
 

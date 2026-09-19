@@ -6,6 +6,12 @@ from typing import Optional, Tuple, List
 logger = logging.getLogger(__name__)
 
 
+def registration_callback_data(player_id: int, name: str) -> str:
+    prefix = f'reg_approve_{player_id}_'
+    remaining = 64 - len(prefix.encode('utf-8'))
+    return prefix + name.encode('utf-8')[:max(0, remaining)].decode('utf-8', errors='ignore')
+
+
 def safe_split_callback(callback_data: str, delimiter: str = "_", expected_parts: int = 2) -> Optional[List[str]]:
     """
     Safely split callback_data and validate the number of parts.

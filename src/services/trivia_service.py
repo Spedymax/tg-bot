@@ -695,7 +695,8 @@ class TriviaService:
         """Generate a new trivia question for a user."""
         try:
             # Generate question using AI
-            question = self.generate_question_with_ai()
+            import asyncio
+            question = await asyncio.to_thread(self.generate_question_with_ai)
             if not question:
                 return {
                     "success": False,
@@ -712,6 +713,7 @@ class TriviaService:
             # Save question to database
             if not await self.save_question_to_database(question):
                 logger.warning("Failed to save question to database")
+                return {'success': False, 'message': 'Не удалось сохранить вопрос. Попробуйте позже.'}
 
             # Create question ID
             question_id = str(uuid.uuid4())[:8]

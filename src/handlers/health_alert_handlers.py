@@ -8,6 +8,8 @@ import time
 import os
 import asyncio
 import logging
+from html import escape
+from config.settings import Settings
 from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
@@ -29,6 +31,9 @@ class HealthAlertHandlers:
         @self.router.callback_query(F.data.startswith("health_"))
         async def health_alert_callback(call: CallbackQuery):
             """Handle interactive button callbacks from health monitoring alerts"""
+            if call.from_user.id not in Settings.ADMIN_IDS:
+                await call.answer("Нет доступа.", show_alert=True)
+                return
 
             # Parse callback data: health_action_botname_issuetype
             # Example: health_snooze_main-bot_process_down
@@ -64,7 +69,7 @@ class HealthAlertHandlers:
                 alert['snoozed_by'] = user_name
                 alert['snoozed_at'] = timestamp
                 await call.answer("🔕 Snoozed for 24 hours")
-                updated_text = f"{call.message.text}\n\n🔕 <b>Snoozed</b> by {user_name} for 24 hours"
+                updated_text = f"{escape(call.message.text or '')}\n\n🔕 <b>Snoozed</b> by {escape(user_name)} for 24 hours"
 
             elif action == 'maintenance':
                 alert['marked_maintenance'] = True
@@ -72,7 +77,7 @@ class HealthAlertHandlers:
                 alert['marked_maintenance_by'] = user_name
                 alert['dismiss_until'] = timestamp + (30 * 24 * 3600)  # 30 days
                 await call.answer("⏸️ Maintenance mode (30 days)")
-                updated_text = f"{call.message.text}\n\n⏸️ <b>Maintenance Mode</b> by {user_name}\n🔕 Suppressed for 30 days"
+                updated_text = f"{escape(call.message.text or '')}\n\n⏸️ <b>Maintenance Mode</b> by {escape(user_name)}\n🔕 Suppressed for 30 days"
 
             elif action == 'resolved':
                 alert['marked_resolved'] = True
@@ -86,7 +91,7 @@ class HealthAlertHandlers:
                 alert.pop('acknowledged', None)
                 alert.pop('dismiss_until', None)
                 await call.answer("✓ Marked as resolved")
-                updated_text = f"{call.message.text}\n\n✓ <b>Resolved</b> by {user_name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                updated_text = f"{escape(call.message.text or '')}\n\n✓ <b>Resolved</b> by {escape(user_name)} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
             else:
                 await call.answer("Unknown action")

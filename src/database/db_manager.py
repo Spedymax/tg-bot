@@ -4,6 +4,7 @@ import time
 from contextlib import asynccontextmanager
 
 from psycopg_pool import AsyncConnectionPool
+from psycopg.conninfo import make_conninfo
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -24,12 +25,7 @@ class DatabaseManager:
         WORKER_COUNT = int(os.getenv('GUNICORN_WORKERS', '4'))
         MAX_CONN_PER_WORKER = max(3, 20 // WORKER_COUNT)
 
-        conninfo = (
-            f"host={Settings.DB_CONFIG['host']} "
-            f"dbname={Settings.DB_CONFIG['dbname']} "
-            f"user={Settings.DB_CONFIG['user']} "
-            f"password={Settings.DB_CONFIG['password']}"
-        )
+        conninfo = make_conninfo(**Settings.DB_CONFIG)
 
         self._pool = AsyncConnectionPool(
             conninfo=conninfo,

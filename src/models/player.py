@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+import math
 
 @dataclass
 class Player:
@@ -173,6 +174,8 @@ class Player:
 
     def spend_coins(self, amount: float) -> bool:
         """Spend coins if player has enough. Returns True if successful, False if insufficient funds"""
+        if not math.isfinite(amount) or amount < 0:
+            return False
         if self.coins >= amount:
             self.coins -= amount
             return True

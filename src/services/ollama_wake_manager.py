@@ -27,6 +27,7 @@ class WakeRequest:
 
 
 class OllamaWakeManager:
+    HEARTBEAT_FAILURE_LIMIT = 5
     _instance: Optional["OllamaWakeManager"] = None
     _lock = threading.Lock()
 
@@ -79,7 +80,7 @@ class OllamaWakeManager:
 
     async def _heartbeat_tick(self):
         """Called by async loop every 120s. Detects PC going to sleep.
-        Requires 2 consecutive failures before going OFFLINE to avoid false triggers
+        Requires 5 consecutive failures before going OFFLINE to avoid false triggers
         when Ollama is busy processing a request."""
         if self._state != WakeState.ONLINE:
             return
@@ -90,12 +91,12 @@ class OllamaWakeManager:
             self._heartbeat_failures = 0
         except Exception:
             self._heartbeat_failures += 1
-            if self._heartbeat_failures >= 5:
+            if self._heartbeat_failures >= self.HEARTBEAT_FAILURE_LIMIT:
                 self._heartbeat_failures = 0
                 self._set_state(WakeState.OFFLINE)
                 await self._notify_admin("😴 PC went to sleep (Ollama unreachable)")
             else:
-                logger.info(f"OllamaWakeManager: heartbeat fail {self._heartbeat_failures}/3, retrying")
+                logger.info(f"OllamaWakeManager: heartbeat fail {self._heartbeat_failures}/{self.HEARTBEAT_FAILURE_LIMIT}, retrying")
 
     async def _notify_admin(self, text: str):
         """Send DM to admin. No-op if bot or admin_id not configured."""
@@ -242,8 +243,8 @@ class OllamaWakeManager:
                 return
             except Exception:
                 await asyncio.sleep(interval)
-        logger.warning("OllamaWakeManager: PC did not wake within timeout, using Claude fallback")
-        await self._notify_admin("⚠️ PC did not wake (3 min timeout) — using Claude fallback")
+        logger.warning("OllamaWakeManager: PC did not wake within timeout, using Together fallback")
+        await self._notify_admin("⚠️ PC did not wake (3 min timeout) — using Together fallback")
         await self._drain_queue(self._call_together_fallback)
         self._set_state(WakeState.OFFLINE)
 

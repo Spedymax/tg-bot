@@ -94,6 +94,7 @@ class PlayerService:
             await self._redis.set(key, self._serialize_player(player), ex=self._cache_expiry_seconds)
         except Exception as e:
             logger.warning(f"Redis cache SET failed for player {player.player_id}: {e}")
+            await self.remove_from_cache(player.player_id)
 
     async def _get_cached_player(self, player_id: int) -> Optional[Player]:
         """Get player from Redis cache (returns None on miss or error)."""
@@ -159,7 +160,7 @@ class PlayerService:
             logger.error(f"Error getting player {player_id}: {e}")
             return None
 
-    async def save_player(self, player: Player) -> bool:
+    async def save_player(self, player: Player, *, create_only: bool = False) -> bool:
         """Save a player to the database and update cache"""
         try:
             async with self.db.connection() as conn:
@@ -170,6 +171,9 @@ class PlayerService:
                         (player.player_id,),
                     )
                     exists = await cursor.fetchone() is not None
+
+                    if exists and create_only:
+                        return False
 
                     if exists:
                         update_query = """
@@ -288,6 +292,9 @@ class PlayerService:
 
     async def create_player(self, player_id: int, player_name: str) -> Player:
         """Create a new player with default values"""
+        existing = await self.get_player(player_id)
+        if existing is not None:
+            return existing
         player = Player(
             player_id=player_id,
             player_name=player_name,
@@ -303,9 +310,12 @@ class PlayerService:
             notified=False
         )
 
-        if await self.save_player(player):
+        if await self.save_player(player, create_only=True):
             return player
         else:
+            existing = await self.get_player(player_id)
+            if existing is not None:
+                return existing
             raise Exception(f"Failed to create player {player_id}")
 
     async def player_exists(self, player_id: int) -> bool:

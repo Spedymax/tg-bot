@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from html import escape
 from datetime import datetime, timezone
 from aiogram import Router, F, Bot
 from aiogram.filters import Command, StateFilter
@@ -159,7 +160,7 @@ class CourtHandlers:
             await state.set_state(CourtStates.private_waiting_crime)
             await self.bot.send_message(
                 user_id,
-                f"📋 Подсудимый: <b>{defendant}</b>\n\nОпишите преступление:",
+                f"📋 Подсудимый: <b>{escape(defendant)}</b>\n\nОпишите преступление:",
                 parse_mode='HTML',
             )
 
@@ -317,7 +318,7 @@ class CourtHandlers:
                 state_data['state'] = 'waiting_crime'
                 await self.bot.send_message(
                     chat_id,
-                    f"📋 Подсудимый: <b>{defendant}</b>\n\nТеперь опишите преступление:\n\n<i>Ответьте реплаем на это сообщение.</i>",
+                    f"📋 Подсудимый: <b>{escape(defendant)}</b>\n\nТеперь опишите преступление:\n\n<i>Ответьте реплаем на это сообщение.</i>",
                     parse_mode='HTML',
                 )
 
@@ -521,6 +522,7 @@ class CourtHandlers:
             prosecutor_cards, lawyer_cards, witness_cards = await self.court_service.generate_cards(defendant, crime)
             if not prosecutor_cards:
                 await self.bot.send_message(user_id, "❌ Ошибка генерации карт. Попробуй /court_test ещё раз.")
+                await self.court_service.set_status(game_id, 'aborted')
                 return
 
             await self.court_service.save_cards(game_id, prosecutor_cards, lawyer_cards, witness_cards)
@@ -559,7 +561,7 @@ class CourtHandlers:
 
             speech = await self.court_service.player_argue(game_id, 'lawyer', card, round_num)
             if speech:
-                await self.bot.send_message(chat_id, f"🛡️ <i>{speech}</i>", parse_mode='HTML')
+                await self.bot.send_message(chat_id, f"🛡️ <i>{escape(speech)}</i>", parse_mode='HTML')
 
             reaction, signal = await self.court_service.judge_react(game_id, 'lawyer', card, round_num)
             if reaction:
@@ -642,13 +644,13 @@ class CourtHandlers:
         plays = 4 if role == 'prosecutor' else 2
         text = f"⚖️ <b>Твоя роль: {role_ru}</b>\n\n<b>Твои карты ({len(cards)} шт, играешь {plays}):</b>\n"
         for i, card in enumerate(cards, 1):
-            text += f"{i}. {card}\n"
+            text += f"{i}. {escape(card)}\n"
 
         if partner_cards and partner_role:
             partner_ru = ROLE_NAMES[partner_role]
             text += f"\n<b>Карты {partner_ru} (для координации):</b>\n"
             for i, card in enumerate(partner_cards, 1):
-                text += f"{i}. {card}\n"
+                text += f"{i}. {escape(card)}\n"
 
         markup = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
@@ -675,7 +677,7 @@ class CourtHandlers:
         logger.info(f"[COURT] _process_played_card: game={game_id} chat={chat_id} role={role} round={round_num} card='{card[:60]}'")
         try:
             role_ru = ROLE_NAMES[role]
-            await self.bot.send_message(chat_id, f"🃏 <b>{role_ru}</b> играет карту:\n\n«{card}»", parse_mode='HTML')
+            await self.bot.send_message(chat_id, f"🃏 <b>{role_ru}</b> играет карту:\n\n«{escape(card)}»", parse_mode='HTML')
             logger.info(f"[COURT] _process_played_card: card announced in group")
 
             await self.court_service.record_played_card(game_id, role, card, round_num)
@@ -717,7 +719,7 @@ class CourtHandlers:
         try:
             await self.court_service.log_message(game_id, role, speech, round_num)
             role_icon = "⚔️" if role == "prosecutor" else ("🛡️" if role == "lawyer" else "👁️")
-            await self.bot.send_message(chat_id, f"{role_icon} <i>{speech}</i>", parse_mode='HTML')
+            await self.bot.send_message(chat_id, f"{role_icon} <i>{escape(speech)}</i>", parse_mode='HTML')
 
             await self.bot.send_chat_action(chat_id, 'typing')
 
@@ -726,7 +728,7 @@ class CourtHandlers:
             logger.info(f"[COURT] _after_speech_received: judge reaction='{str(reaction)[:80]}' signal={signal}")
 
             if reaction:
-                judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
+                judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{escape(reaction)}</i>", parse_mode='HTML')
                 await self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
 
             await self._handle_judge_signal(game_id, chat_id, signal, round_num, last_role=role)
@@ -1110,7 +1112,7 @@ class CourtHandlers:
             logger.info(f"[COURT] _process_judge_reply: game={game_id} role={role} signal={signal} reaction='{str(reaction)[:60]}'")
 
             if reaction:
-                judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{reaction}</i>", parse_mode='HTML')
+                judge_msg = await self.bot.send_message(chat_id, f"⚖️ <i>{escape(reaction)}</i>", parse_mode='HTML')
                 await self.court_service.set_last_judge_msg(game_id, judge_msg.message_id)
 
             await self._handle_judge_signal(game_id, chat_id, signal, round_num, last_role=role)
@@ -1202,7 +1204,7 @@ class CourtHandlers:
             ]
             for prefix, part in zip(prefixes, parts + [""] * 4):
                 if part:
-                    await self.bot.send_message(chat_id, f"{prefix}\n\n{part}", parse_mode='HTML')
+                    await self.bot.send_message(chat_id, f"{prefix}\n\n{escape(part)}", parse_mode='HTML')
                     await asyncio.sleep(2)
         except Exception as e:
             logger.error(f"_deliver_verdict: ошибка для game {game_id}: {e}")

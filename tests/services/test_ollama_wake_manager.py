@@ -75,6 +75,9 @@ class TestHeartbeat:
         mgr._notify_admin = AsyncMock(side_effect=lambda msg: notify_calls.append(msg))
 
         with patch('src.services.ollama_wake_manager.httpx.get', side_effect=Exception("timeout")):
+            for _ in range(mgr.HEARTBEAT_FAILURE_LIMIT - 1):
+                await mgr._heartbeat_tick()
+                assert mgr.state == WakeState.ONLINE
             await mgr._heartbeat_tick()
 
         assert mgr.state == WakeState.OFFLINE
@@ -140,16 +143,16 @@ class TestWakeFlow:
         assert results == ["hello"]
 
     @pytest.mark.asyncio
-    async def test_poll_until_online_timeout_uses_claude_fallback(self):
+    async def test_poll_until_online_timeout_uses_together_fallback(self):
         mgr = self._make_mgr()
         results = []
         await mgr._enqueue("hi", 1, 1, lambda r: results.append(r))
 
         with patch('src.services.ollama_wake_manager.httpx.get', side_effect=Exception("timeout")):
-            with patch.object(mgr, '_call_claude_fallback', return_value="claude reply"):
+            with patch.object(mgr, '_call_together_fallback', return_value="fallback reply"):
                 await mgr._poll_until_online(timeout=0.1, interval=0.05)
 
-        assert results == ["claude reply"]
+        assert results == ["fallback reply"]
 
 
 class TestCallMethod:

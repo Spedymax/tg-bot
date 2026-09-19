@@ -1,6 +1,8 @@
 import json
+import asyncio
 import logging
 import re
+from html import escape
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -37,6 +39,7 @@ class WeeklyHighlightHandlers:
     def __init__(self, bot, db_manager):
         self.bot = bot
         self.db = db_manager
+        self._close_locks = {}
         if Settings.GEMINI_API_KEY:
             genai.configure(api_key=Settings.GEMINI_API_KEY)
             self._gemini = genai.GenerativeModel('gemini-3-flash-preview')
@@ -173,7 +176,7 @@ class WeeklyHighlightHandlers:
         lines = ["🏆 <b>Высер недели</b> — голосуем за самый эпичный высер этой недели:\n"]
         for i, c in enumerate(candidates):
             quote = self._oneline(c["text"], 150)
-            lines.append(f"{i + 1}. <b>{c['name']}</b>: «{quote}»  —  {counts[i]} 🗳")
+            lines.append(f"{i + 1}. <b>{escape(c['name'])}</b>: «{escape(quote)}»  —  {counts[i]} 🗳")
         return "\n".join(lines)
 
     def _build_vote_markup(self, row_id: int, candidates: list[dict]) -> InlineKeyboardMarkup:
@@ -224,9 +227,14 @@ class WeeklyHighlightHandlers:
         """Persist one vote. Returns {'ok': bool, 'closed': bool, 'candidates', 'votes',
         'reason'} — 'closed' is True once VOTERS_NEEDED_TO_CLOSE_EARLY distinct people
         have voted, at which point the caller should announce right away."""
-        rows = await self.db.execute_query(
-            "SELECT candidates, votes FROM weekly_highlights WHERE id = %s AND status = 'voting'",
-            (row_id,),
+        if type(idx) is not int or idx < 0:
+            return {"ok": False, "reason": "stale_button"}
+        rows = await self.db.execute_query_strict(
+            "UPDATE weekly_highlights SET votes = "
+            "jsonb_set(COALESCE(votes, '{}'::jsonb), ARRAY[%s], %s::jsonb, true) "
+            "WHERE id = %s AND status = 'voting' AND jsonb_array_length(candidates) > %s "
+            "RETURNING candidates, votes",
+            (str(user_id), json.dumps(idx), row_id, idx),
         )
         if not rows:
             return {"ok": False, "reason": "closed"}
@@ -234,18 +242,18 @@ class WeeklyHighlightHandlers:
         if not (0 <= idx < len(candidates)):
             return {"ok": False, "reason": "stale_button"}
 
-        votes[str(user_id)] = idx
-        await self.db.execute_query(
-            "UPDATE weekly_highlights SET votes = %s WHERE id = %s", (json.dumps(votes), row_id),
-        )
         closed = len(votes) >= VOTERS_NEEDED_TO_CLOSE_EARLY
         return {"ok": True, "closed": closed, "candidates": candidates, "votes": votes}
 
     def _register(self):
         @self.router.callback_query(F.data.startswith("turd_vote:"))
         async def handle_vote(call: CallbackQuery):
-            _, row_id_str, idx_str = call.data.split(":")
-            row_id, idx = int(row_id_str), int(idx_str)
+            try:
+                _, row_id_str, idx_str = call.data.split(":")
+                row_id, idx = int(row_id_str), int(idx_str)
+            except (ValueError, TypeError):
+                await call.answer("Устаревшая кнопка.", show_alert=True)
+                return
 
             result = await self.record_vote(row_id, call.from_user.id, idx)
             if not result["ok"]:
@@ -270,6 +278,11 @@ class WeeklyHighlightHandlers:
     # ── Closing ─────────────────────────────────────────────────────────────
 
     async def close_weekly_highlight(self, chat_id: int):
+        lock = self._close_locks.setdefault(chat_id, asyncio.Lock())
+        async with lock:
+            await self._close_weekly_highlight(chat_id)
+
+    async def _close_weekly_highlight(self, chat_id: int):
         await self._ensure_table()
         try:
             row = await self._get_voting_row(chat_id)
@@ -299,7 +312,7 @@ class WeeklyHighlightHandlers:
                 if not ceremony:
                     ceremony = "Победител" + ("и определены" if is_tie else "ь определён") + f":\n{winners_desc}"
                 await self.bot.send_message(
-                    chat_id, f"🏆 <b>Высер недели</b>\n\n{ceremony}", parse_mode='HTML', disable_notification=True,
+                    chat_id, f"🏆 <b>Высер недели</b>\n\n{escape(ceremony)}", parse_mode='HTML', disable_notification=True,
                 )
 
             await self.db.execute_query(

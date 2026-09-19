@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from html import escape
 
 from config.settings import Settings
 
@@ -61,13 +62,16 @@ class HealthMonitor:
 
         # Check DB pool
         pool_status = self.db.get_pool_status()
-        if pool_status.get('connection_errors', 0) > 10:
-            issues.append(f"High DB connection errors: {pool_status['connection_errors']}")
+        total_errors = pool_status.get('connection_errors', 0)
+        new_errors = total_errors - getattr(self, '_previous_connection_errors', total_errors)
+        self._previous_connection_errors = total_errors
+        if new_errors > 10:
+            issues.append(f"High DB connection errors since last check: {new_errors}")
 
         # Alert if issues found
         if issues and (time.time() - self._last_alert_time > self._alert_cooldown):
             self._last_alert_time = time.time()
-            alert_text = "<b>Health Check Alert</b>\n\n" + "\n".join(issues)
+            alert_text = "<b>Health Check Alert</b>\n\n" + "\n".join(escape(issue) for issue in issues)
             try:
                 await self.bot.send_message(Settings.ADMIN_IDS[0], alert_text)
                 logger.warning(f"Health alert sent: {issues}")

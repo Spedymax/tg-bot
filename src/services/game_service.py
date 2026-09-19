@@ -8,6 +8,12 @@ from config.game_config import GameConfig
 class GameService:
     def __init__(self, player_service):
         self.player_service = player_service
+
+    async def _save_player(self, player: Player) -> bool:
+        if await self.player_service.save_player(player) is not False:
+            return True
+        await self.player_service.remove_from_cache(player.player_id)
+        return False
         
     def calculate_pisunchik_cooldown(self, player: Player) -> int:
         """Calculate cooldown based on Titan characteristic"""
@@ -95,7 +101,8 @@ class GameService:
         player.ballzzz_number = random.randint(GameConfig.PISUNCHIK_MIN_CHANGE, GameConfig.PISUNCHIK_MAX_CHANGE)
         
         # Save player
-        await self.player_service.save_player(player)
+        if not await self._save_player(player):
+            return {'success': False, 'message': 'Не удалось сохранить результат. Попробуйте позже.'}
 
         return {
             'success': True,
@@ -119,6 +126,9 @@ class GameService:
     def can_use_casino(self, player: Player) -> Tuple[bool, Optional[str]]:
         """Check if player can use casino"""
         current_time = datetime.now(timezone.utc)
+        ulta_used = getattr(player, 'pet_ulta_used_date', None)
+        if ulta_used is None or current_time - ulta_used >= timedelta(hours=24):
+            player.pet_casino_extra_spins = 0
         
         if player.casino_last_used:
             time_elapsed = current_time - player.casino_last_used
@@ -130,7 +140,6 @@ class GameService:
                 return False, f"Вы достигли лимита использования команды на сегодня.\nВремени осталось: {time_left}"
             elif time_elapsed >= timedelta(hours=24):
                 player.casino_usage_count = 0
-                player.pet_casino_extra_spins = 0  # reset daily extra spins on new day
         
         return True, None
     
@@ -145,7 +154,8 @@ class GameService:
         
         # Mark that we need to send 6 casino dice
         # The actual dice sending will be handled in the handler
-        await self.player_service.save_player(player)
+        if not await self._save_player(player):
+            return {'success': False, 'message': 'Не удалось сохранить попытку казино. Попробуйте позже.'}
         
         return {
             'success': True,
@@ -181,6 +191,8 @@ class GameService:
     
     async def execute_roll_command(self, player: Player, rolls: int) -> Dict:
         """Execute roll command"""
+        if type(rolls) is not int or rolls <= 0 or rolls > max(GameConfig.ROLL_COSTS):
+            return {'success': False, 'message': 'Количество бросков должно быть от 1 до 100.'}
         if getattr(player, 'pet_ulta_free_roll_pending', False):
             cost = 0
             player.pet_ulta_free_roll_pending = False
@@ -211,7 +223,8 @@ class GameService:
                 jackpots += 1
                 player.add_coins(400)
         
-        await self.player_service.save_player(player)
+        if not await self._save_player(player):
+            return {'success': False, 'message': 'Не удалось сохранить броски. Попробуйте позже.'}
 
         return {
             'success': True,
@@ -238,6 +251,8 @@ class GameService:
     
     async def execute_theft(self, thief: Player, victim: Player) -> Dict:
         """Execute theft between players"""
+        if thief.player_id == victim.player_id:
+            return {'success': False, 'message': 'Нельзя красть у себя.'}
         can_steal, error_message = self.can_steal(thief)
         if not can_steal:
             return {'success': False, 'message': error_message}
@@ -279,6 +294,10 @@ class GameService:
     
     async def upgrade_characteristic(self, player: Player, characteristic_name: str, levels: int) -> Dict:
         """Upgrade a player's characteristic"""
+        if type(levels) is not int or levels <= 0:
+            return {'success': False, 'message': 'Количество уровней должно быть положительным целым числом.'}
+        if characteristic_name not in GameConfig.CHARACTERISTIC_EFFECTS or not player.has_characteristic(characteristic_name):
+            return {'success': False, 'message': 'У вас нет этой характеристики.'}
         current_level = player.get_characteristic_level(characteristic_name)
         new_level = current_level + levels
         
@@ -291,7 +310,8 @@ class GameService:
             return {'success': False, 'message': 'Недостаточно денег для улучшения.'}
         
         player.update_characteristic_level(characteristic_name, new_level)
-        await self.player_service.save_player(player)
+        if not await self._save_player(player):
+            return {'success': False, 'message': 'Не удалось сохранить улучшение. Попробуйте позже.'}
         
         return {
             'success': True,
@@ -319,7 +339,8 @@ class GameService:
         player.add_coins(coins_awarded)
         player.remove_item('masturbator')
 
-        await self.player_service.save_player(player)
+        if not await self._save_player(player):
+            return {'success': False, 'message': 'Не удалось сохранить результат. Попробуйте позже.'}
         
         return {
             'success': True,

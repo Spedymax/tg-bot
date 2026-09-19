@@ -36,11 +36,13 @@ class StockService:
         """Process buying or selling of stocks for a participant."""
 
         participant_stocks = set(participant_stocks)
+        if type(quantity) is not int or quantity <= 0:
+            raise ValueError('Stock quantity must be a positive integer')
         
         # Increase or decrease stock quantity
         operation, factor = ('+', 1) if increase else ('-', -1)
 
-        stock_record = next((stock for stock in participant_stocks if stock.startswith(company)), None)
+        stock_record = next((stock for stock in participant_stocks if stock.startswith(f'{company}:')), None)
         original_quantity, updated_stocks = (0, participant_stocks)
 
         if stock_record:
@@ -52,6 +54,9 @@ class StockService:
                     original_quantity = 0
             participant_stocks.remove(stock_record)
 
+        if not increase and quantity > original_quantity:
+            raise ValueError('Not enough shares to sell')
+
         new_quantity = max(0, original_quantity + (quantity * factor))
 
         if new_quantity > 0:
@@ -62,6 +67,7 @@ class StockService:
     
     def calculate_price_change(self, old_price: float, new_price: float) -> Tuple[float, str]:
         """Calculate price change and determine arrow direction."""
+        old_price, new_price = float(old_price), float(new_price)
         if old_price == 0:
             # Avoid division by zero
             change = 100.0 if new_price > 0 else 0.0
@@ -69,4 +75,3 @@ class StockService:
             change = ((new_price - old_price) / old_price) * 100
         arrow = '⬆️' if change > 0 else '⬇️'
         return change, arrow
-

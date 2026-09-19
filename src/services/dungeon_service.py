@@ -34,14 +34,14 @@ class DungeonService:
     async def ensure_tables(self):
         if self._tables_ready:
             return
-        await self.db.execute_query(
+        await self.db.execute_query_strict(
             "CREATE TABLE IF NOT EXISTS dungeon_daily ("
             "date DATE PRIMARY KEY, "
             "layout JSONB NOT NULL, "
             "rage BOOLEAN NOT NULL DEFAULT FALSE, "
             "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())", ()
         )
-        await self.db.execute_query(
+        await self.db.execute_query_strict(
             "CREATE TABLE IF NOT EXISTS dungeon_runs ("
             "date DATE NOT NULL, "
             "player_id BIGINT NOT NULL, "
@@ -112,7 +112,7 @@ class DungeonService:
     # ── daily layout ──────────────────────────────────────────────────────────
     async def get_or_create_daily(self, day: date) -> list:
         await self.ensure_tables()
-        rows = await self.db.execute_query("SELECT layout FROM dungeon_daily WHERE date = %s", (day,))
+        rows = await self.db.execute_query_strict("SELECT layout FROM dungeon_daily WHERE date = %s", (day,))
         if rows:
             layout = rows[0][0]
             return json.loads(layout) if isinstance(layout, str) else layout
@@ -126,18 +126,20 @@ class DungeonService:
             pass
         lore = await self.build_lore()
         layout = logic.generate_layout(f"dungeon:{day.isoformat()}", self.content, lore, rage)
-        await self.db.execute_query(
+        await self.db.execute_query_strict(
             "INSERT INTO dungeon_daily (date, layout, rage) VALUES (%s, %s, %s) ON CONFLICT (date) DO NOTHING",
             (day, json.dumps(layout, ensure_ascii=False), rage),
         )
-        rows = await self.db.execute_query("SELECT layout FROM dungeon_daily WHERE date = %s", (day,))
-        layout = rows[0][0] if rows else layout
+        rows = await self.db.execute_query_strict("SELECT layout FROM dungeon_daily WHERE date = %s", (day,))
+        if not rows:
+            raise RuntimeError('Dungeon daily layout was not persisted')
+        layout = rows[0][0]
         return json.loads(layout) if isinstance(layout, str) else layout
 
     # ── runs ──────────────────────────────────────────────────────────────────
     async def get_run(self, day: date, player_id: int) -> Optional[dict]:
         await self.ensure_tables()
-        rows = await self.db.execute_query(
+        rows = await self.db.execute_query_strict(
             "SELECT state FROM dungeon_runs WHERE date = %s AND player_id = %s", (day, player_id)
         )
         if not rows:
@@ -152,17 +154,25 @@ class DungeonService:
         layout = await self.get_or_create_daily(day)
         state = logic.new_run(f"dungeon:{day.isoformat()}:{player_id}", layout,
                               modifier=logic.daily_modifier(f"dungeon:{day.isoformat()}"))
-        await self.save_run(day, player_id, player_name, state)
-        return state
+        # Opening a second tab must never overwrite a run created by another request.
+        await self.save_run(day, player_id, player_name, state, create_only=True)
+        persisted = await self.get_run(day, player_id)
+        if persisted is None:
+            raise RuntimeError('Dungeon run was not persisted')
+        return persisted
 
-    async def save_run(self, day: date, player_id: int, player_name: str, state: dict):
+    async def save_run(self, day: date, player_id: int, player_name: str, state: dict,
+                       *, create_only: bool = False, connection=None):
         finished = logic.is_finished(state)
-        await self.db.execute_query(
-            "INSERT INTO dungeon_runs (date, player_id, player_name, state, finished, won, rooms_cleared, finished_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
+        conflict = "ON CONFLICT (date, player_id) DO NOTHING" if create_only else (
             "ON CONFLICT (date, player_id) DO UPDATE SET state = EXCLUDED.state, player_name = EXCLUDED.player_name, "
             "finished = EXCLUDED.finished, won = EXCLUDED.won, rooms_cleared = EXCLUDED.rooms_cleared, "
-            "finished_at = COALESCE(dungeon_runs.finished_at, EXCLUDED.finished_at)",
+            "finished_at = COALESCE(dungeon_runs.finished_at, EXCLUDED.finished_at)"
+        )
+        execute = connection.execute if connection is not None else self.db.execute_query_strict
+        await execute(
+            "INSERT INTO dungeon_runs (date, player_id, player_name, state, finished, won, rooms_cleared, finished_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) " + conflict,
             (day, player_id, player_name, json.dumps(state, ensure_ascii=False), finished,
              state['phase'] == 'won', state['rooms_cleared'], datetime.now(KYIV) if finished else None),
         )
@@ -171,13 +181,24 @@ class DungeonService:
         """Apply one action to today's run. Returns (state, events) where events tells the
         caller what just happened so it can deal boss damage / notify the chat."""
         day = self.today()
-        state = await self.get_or_create_run(day, player_id, player_name)
-        before_cleared = state['rooms_cleared']
-        before_finished = logic.is_finished(state)
-        before_boss = state['boss_killed']
-        if not before_finished:
-            logic.apply_action(state, action, self.content)
-            await self.save_run(day, player_id, player_name, state)
+        await self.get_or_create_run(day, player_id, player_name)
+        # Lock in PostgreSQL, so requests from different processes share the same guard.
+        async with self.db.connection() as conn:
+            async with conn.transaction():
+                cursor = await conn.execute(
+                    "SELECT state FROM dungeon_runs WHERE date = %s AND player_id = %s FOR UPDATE",
+                    (day, player_id),
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    raise RuntimeError('Dungeon run disappeared before action')
+                state = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                before_cleared = state['rooms_cleared']
+                before_finished = logic.is_finished(state)
+                before_boss = state['boss_killed']
+                if not before_finished:
+                    logic.apply_action(state, action, self.content)
+                    await self.save_run(day, player_id, player_name, state, connection=conn)
         events = {
             'rooms_delta': state['rooms_cleared'] - before_cleared,
             'boss_killed_now': state['boss_killed'] and not before_boss,

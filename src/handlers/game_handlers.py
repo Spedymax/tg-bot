@@ -12,7 +12,7 @@ from config.game_config import GameConfig
 from config.settings import Settings
 from states.registration import RegistrationStates
 from states.game import GameStates
-from utils.helpers import safe_split_callback, safe_int, escape_html, safe_username
+from utils.helpers import safe_split_callback, safe_int, escape_html, safe_username, registration_callback_data
 
 class GameHandlers:
     def __init__(self, bot, player_service, game_service):
@@ -74,7 +74,7 @@ class GameHandlers:
 
             markup = InlineKeyboardMarkup(inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="Одобрить", callback_data=f"reg_approve_{player_id}_{name}"),
+                    InlineKeyboardButton(text="Одобрить", callback_data=registration_callback_data(player_id, name)),
                     InlineKeyboardButton(text="Отклонить", callback_data=f"reg_reject_{player_id}"),
                 ]
             ])
@@ -83,6 +83,7 @@ class GameHandlers:
                     admin_id,
                     f"Новый игрок:\nИмя: {name}\nКак нашёл: {how_found}",
                     reply_markup=markup,
+                    parse_mode=None,
                 )
             await message.reply("Ваш запрос отправлен на рассмотрение. Пожалуйста, подождите одобрения.")
 
@@ -94,9 +95,17 @@ class GameHandlers:
             parts = call.data.split("_", 3)  # reg_approve_<id>_<name>
             player_id = int(parts[2])
             name = parts[3] if len(parts) > 3 else "Unknown"
+            existing = await self.player_service.get_player(player_id)
+            if existing:
+                await call.answer("Игрок уже зарегистрирован. Прогресс сохранён.")
+                return
             await self.player_service.create_player(player_id, name)
-            await self.bot.send_message(player_id, f"Приятной игры, {name}! Вы зарегистрированы!")
-            await call.message.edit_text(f"Регистрация {name} одобрена.")
+            await call.answer("Игрок зарегистрирован!")
+            await call.message.edit_text(f"Регистрация {name} одобрена.", parse_mode=None)
+            try:
+                await self.bot.send_message(player_id, f"Приятной игры, {name}! Вы зарегистрированы!", parse_mode=None)
+            except Exception as error:
+                logger.warning("Could not notify registered player %s: %s", player_id, error)
 
         @self.router.callback_query(F.data.startswith("reg_reject_"))
         async def registration_reject(call: CallbackQuery):
@@ -119,7 +128,7 @@ class GameHandlers:
                 except Exception:
                     name = player.player_name
                 text += f"{i + 1}. {name}: {player.pisunchik_size} sm🌭 и {int(player.coins)} BTC💰\n"
-            await message.reply(text)
+            await message.reply(text, parse_mode=None)
 
         @self.router.message(Command('pisunchik'))
         async def pisunchik_command(message: Message):

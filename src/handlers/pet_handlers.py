@@ -1,10 +1,12 @@
 import logging
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from typing import Optional
 from services.pet_service import PetService
 from utils.helpers import escape_html
+from states.pet import PetStates
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +31,16 @@ class PetHandlers:
             await self.show_pet_menu(message.chat.id, message.from_user.id)
 
         @self.router.callback_query(F.data.startswith('pet_'))
-        async def pet_callback(call: CallbackQuery):
-            await self.handle_pet_callback(call)
+        async def pet_callback(call: CallbackQuery, state: FSMContext):
+            await self.handle_pet_callback(call, state)
+
+        @self.router.message(PetStates.waiting_name, F.text, ~F.text.startswith('/'))
+        async def pet_name_input(message: Message, state: FSMContext):
+            await self.process_name_input(message, state)
+
+        @self.router.message(PetStates.waiting_image, ~F.text | ~F.text.startswith('/'))
+        async def pet_image_input(message: Message, state: FSMContext):
+            await self.process_image_input(message, state)
 
     # ──────────────────────────────────────────────
     # Core display
@@ -145,7 +155,7 @@ class PetHandlers:
     # Callback routing
     # ──────────────────────────────────────────────
 
-    async def handle_pet_callback(self, call: CallbackQuery):
+    async def handle_pet_callback(self, call: CallbackQuery, state: FSMContext = None):
         """Route pet callbacks to appropriate handlers."""
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -163,8 +173,8 @@ class PetHandlers:
 
         handlers = {
             'create':         lambda: self.create_pet(call),
-            'name':           lambda: self.request_name(call),
-            'image':          lambda: self.request_image(call),
+            'name':           lambda: self.request_name(call, state),
+            'image':          lambda: self.request_image(call, state),
             'confirm':        lambda: self.confirm_pet(call),
             'revive':         lambda: self.revive_pet(call),
             'kill_confirm':   lambda: self.show_kill_confirm(call),
@@ -285,6 +295,10 @@ class PetHandlers:
             await call.answer("Игрок не найден")
             return
 
+        if player.pet:
+            await call.answer("У тебя уже есть питомец. Старая кнопка не создаёт нового.")
+            return
+
         player.pet = self.pet_service.create_pet("Новый питомец")
         await self.player_service.save_player(player)
         await call.answer("Питомец создан!")
@@ -295,31 +309,43 @@ class PetHandlers:
     # Name / image customization
     # ──────────────────────────────────────────────
 
-    async def request_name(self, call: CallbackQuery):
+    async def request_name(self, call: CallbackQuery, state: FSMContext):
+        player = await self.player_service.get_player(call.from_user.id)
+        if not player or not player.pet:
+            await call.answer("Питомец не найден")
+            return
         await call.answer()
-        await self.bot.send_message(call.message.chat.id, "Напиши новое имя для питомца:")
-        # Note: register_next_step_handler is telebot-specific.
-        # In aiogram v3 the next message from the user is handled via state machine (FSM).
-        # For now we store pending state in a simple dict keyed by user_id.
-        self._pending_name[call.from_user.id] = call.message.chat.id
+        await state.set_state(PetStates.waiting_name)
+        await self.bot.send_message(call.message.chat.id, "Напиши новое имя для питомца (до 50 символов). /cancel — отменить.")
 
-    async def process_name_input(self, message: Message):
+    async def process_name_input(self, message: Message, state: FSMContext):
         user_id = message.from_user.id
-        new_name = message.text.strip()[:50]
+        new_name = message.text.strip()
+        if not new_name or len(new_name) > 50:
+            await message.reply("Имя должно содержать от 1 до 50 символов. Попробуй ещё раз.")
+            return
 
         player = await self.player_service.get_player(user_id)
         if player and player.pet:
             player.pet['name'] = escape_html(new_name)
-            await self.player_service.save_player(player)
-            await self.bot.send_message(message.chat.id, f"Имя изменено на: {new_name}")
+            if await self.player_service.save_player(player) is False:
+                await message.reply("Не удалось сохранить имя. Попробуй ещё раз.")
+                return
+            await self.bot.send_message(message.chat.id, f"Имя изменено на: {escape_html(new_name)}")
 
+        await state.clear()
         await self.show_pet_menu(message.chat.id, user_id)
 
-    async def request_image(self, call: CallbackQuery):
+    async def request_image(self, call: CallbackQuery, state: FSMContext):
+        player = await self.player_service.get_player(call.from_user.id)
+        if not player or not player.pet:
+            await call.answer("Питомец не найден")
+            return
         await call.answer()
-        await self.bot.send_message(call.message.chat.id, "Пришли новое фото для питомца:")
+        await state.set_state(PetStates.waiting_image)
+        await self.bot.send_message(call.message.chat.id, "Пришли новое фото для питомца. /cancel — отменить.")
 
-    async def process_image_input(self, message: Message):
+    async def process_image_input(self, message: Message, state: FSMContext):
         user_id = message.from_user.id
 
         if not message.photo:
@@ -330,9 +356,12 @@ class PetHandlers:
         player = await self.player_service.get_player(user_id)
         if player and player.pet:
             player.pet['image_file_id'] = file_id
-            await self.player_service.save_player(player)
+            if await self.player_service.save_player(player) is False:
+                await message.reply("Не удалось сохранить фото. Попробуй ещё раз.")
+                return
             await self.bot.send_message(message.chat.id, "Фото обновлено!")
 
+        await state.clear()
         await self.show_pet_menu(message.chat.id, user_id)
 
     # ──────────────────────────────────────────────
@@ -361,6 +390,10 @@ class PetHandlers:
 
         if not player or not player.pet:
             await call.answer("Питомец не найден")
+            return
+
+        if player.pet.get('is_alive'):
+            await call.answer("Питомец уже жив. Возрождение не потрачено.")
             return
 
         revives_used = getattr(player, 'pet_revives_used', 0)
@@ -550,6 +583,10 @@ class PetHandlers:
 
     async def _ulta_oracle(self, call: CallbackQuery, player):
         """Adult ulta: preview pisunchik result before rolling."""
+        can_use, time_left = self.game_service.can_use_pisunchik(player)
+        if not can_use:
+            await call.answer(f"/pisunchik ещё на кулдауне: {time_left}", show_alert=True)
+            return
         preview = self.game_service.preview_pisunchik_result(player)
         player.pet_ulta_oracle_pending = True
         player.pet_ulta_oracle_preview = preview
@@ -597,6 +634,10 @@ class PetHandlers:
             return
 
         preview = player.pet_ulta_oracle_preview
+        can_use, time_left = self.game_service.can_use_pisunchik(player)
+        if not can_use:
+            await call.answer(f"/pisunchik уже использован. Осталось: {time_left}", show_alert=True)
+            return
         player.pet_ulta_oracle_pending = False
         player.pet_ulta_oracle_preview = None
         player.pisunchik_size += preview['size_change']

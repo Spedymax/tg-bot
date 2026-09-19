@@ -40,18 +40,21 @@ class QuizScheduler:
             self._scheduler.add_job(
                 self._send_scheduled_quiz,
                 CronTrigger(hour=hour, minute=minute, timezone=tz),
+                id=f'quiz:{time_str}', replace_existing=True,
             )
 
         # Schedule daily answers broadcast
-        answers_time_utc = self._calculate_answers_broadcast_time_utc()
-        answers_hour, answers_minute = map(int, answers_time_utc.split(':'))
+        answers_hour, answers_minute = map(int, Settings.ANSWERS_BROADCAST_TIME_LOCAL.split(':'))
         self._scheduler.add_job(
             self._send_daily_answers_async,
-            CronTrigger(hour=answers_hour, minute=answers_minute, timezone=pytz.UTC),
+            CronTrigger(hour=answers_hour, minute=answers_minute,
+                        timezone=pytz.timezone(Settings.ANSWERS_BROADCAST_TIMEZONE)),
+            id='daily_answers', replace_existing=True,
         )
-        logger.info(f"Daily answers broadcast scheduled at {answers_time_utc} UTC ({Settings.ANSWERS_BROADCAST_TIME_LOCAL} {Settings.ANSWERS_BROADCAST_TIMEZONE})")
+        logger.info(f"Daily answers broadcast scheduled at {Settings.ANSWERS_BROADCAST_TIME_LOCAL} {Settings.ANSWERS_BROADCAST_TIMEZONE}")
 
-        self._scheduler.start()
+        if not self._scheduler.running:
+            self._scheduler.start()
         logger.info(f"Quiz scheduler started, times: {self.quiz_times}")
 
     def stop(self):
@@ -100,14 +103,18 @@ class QuizScheduler:
                     return
 
             # Send quiz
-            await self._send_quiz_message(chat_id, question_data)
+            sent = await self._send_quiz_message(chat_id, question_data)
+            if sent is None:
+                return False
 
             # Record history
             if question_id is not None:
                 await self.trivia_service.record_question_sent_to_chat(question_id, chat_id)
+            return True
 
         except Exception as e:
             logger.error(f"Error sending quiz to chat {chat_id}: {e}")
+            return False
 
     async def _get_question_id_by_text(self, question_text: str):
         """Look up DB id for a just-inserted question by its text."""
@@ -154,6 +161,7 @@ class QuizScheduler:
             await self._save_question_state(question_msg.message_id, question_data, answer_options)
 
             logger.info(f"Quiz sent to chat {chat_id}, message_id: {question_msg.message_id}")
+            return question_msg
 
         except Exception as e:
             logger.error(f"Error sending quiz message: {e}")
@@ -180,7 +188,7 @@ class QuizScheduler:
         skipped = 0
         try:
             existing_questions = await self.trivia_service.get_recent_question_texts(200)
-            questions = self.trivia_service.generate_questions_batch_with_ai(count, existing_questions)
+            questions = await asyncio.to_thread(self.trivia_service.generate_questions_batch_with_ai, count, existing_questions)
             if not questions:
                 logger.error("Batch generation returned no questions")
                 return {"added": 0, "skipped": count}
@@ -209,7 +217,8 @@ class QuizScheduler:
         """Ручная отправка квиза."""
         try:
             target_chat = chat_id if chat_id else self.target_chat_id
-            await self.send_quiz_to_chat(target_chat)
+            if not await self.send_quiz_to_chat(target_chat):
+                return {'success': False, 'message': 'Не удалось отправить квиз. Проверьте журнал ошибок.'}
 
             return {
                 "success": True,
@@ -252,16 +261,20 @@ class QuizScheduler:
     def update_schedule(self, new_times: list):
         """Обновление расписания."""
         try:
-            self._scheduler.remove_all_jobs()
-            self.quiz_times = new_times
-
             tz = pytz.timezone('Europe/Kiev')
+            triggers = []
             for time_str in new_times:
                 hour, minute = map(int, time_str.split(':'))
+                triggers.append((time_str, CronTrigger(hour=hour, minute=minute, timezone=tz)))
+            for job in self._scheduler.get_jobs():
+                if job.id.startswith('quiz:'):
+                    self._scheduler.remove_job(job.id)
+            for time_str, trigger in triggers:
                 self._scheduler.add_job(
                     self._send_scheduled_quiz,
-                    CronTrigger(hour=hour, minute=minute, timezone=tz),
+                    trigger, id=f'quiz:{time_str}', replace_existing=True,
                 )
+            self.quiz_times = list(new_times)
 
             logger.info(f"Quiz schedule updated to: {new_times}")
             return True

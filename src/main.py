@@ -132,6 +132,8 @@ async def _main():
     from handlers.prompt_handlers import prompt_router
     dp.include_router(prompt_router)
     dp.include_router(boss_h.router)
+    # Pet setup messages must reach their FSM before generic replies/admin logging.
+    dp.include_router(pet_h.router)
     dp.include_router(moltbot_h.router)
     # wordle_h BEFORE game_h/admin_h: its CommandStart(deep_link=True) handler must see
     # "/start wordle" before their unconditional Command('start') handlers swallow it.
@@ -143,7 +145,6 @@ async def _main():
     dp.include_router(trivia_h.router)
     dp.include_router(miniapp_h.router)
     dp.include_router(health_h.router)
-    dp.include_router(pet_h.router)
     dp.include_router(weekly_highlight_h.router)
     dp.include_router(daily_prophecy_h.router)
 
@@ -209,7 +210,10 @@ async def _main():
     ])
     logger.info("Bot commands registered")
 
-    await bot.send_message(Settings.ADMIN_IDS[0], 'Bot restarted (aiogram v3)!')
+    try:
+        await bot.send_message(Settings.ADMIN_IDS[0], 'Bot restarted (aiogram v3)!')
+    except Exception as error:
+        logger.warning("Could not send startup notification: %s", error)
     logger.info("Starting polling...")
 
     try:

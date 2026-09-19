@@ -1033,11 +1033,8 @@ class MoltbotHandlers:
         History format: '14:30 Макс: текст' or '14:30 Лолита: текст'."""
         messages = []
         for line in (history or []):
-            # Strip timestamp prefix: "14:30 Name: text" → "Name: text"
-            parts = line.split(" ", 1)
-            if len(parts) < 2:
-                continue
-            rest = parts[1] if ":" in parts[1] else line
+            # DB history uses "[14:30 18.09] Name: text"; legacy entries omit the date.
+            rest = re.sub(r'^(?:\[\d{2}:\d{2}(?:\s+\d{2}\.\d{2})?\]|\d{2}:\d{2})\s*', '', line)
             colon_idx = rest.find(":")
             if colon_idx == -1:
                 continue

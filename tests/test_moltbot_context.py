@@ -89,28 +89,20 @@ class TestGetRecentGroupMessages:
 
 class TestAskMoltbotContext:
     @pytest.mark.asyncio
-    async def test_history_block_includes_time_header_and_instruction(self):
+    async def test_persona_messages_keep_history_memory_and_current_user_separate(self):
         with patch.object(MoltbotHandlers, '__init__', lambda self, *a, **kw: None):
             handler = MoltbotHandlers.__new__(MoltbotHandlers)
-            handler._user_key_suffix = {}
-
-            captured = {}
-            async def capture_openclaw(content, user_key, model="openclaw:main"):
-                captured['content'] = content
-                return "test reply"
-            handler._call_openclaw = capture_openclaw
-
-            with patch.object(_moltbot_mod, '_load_chat_summary', return_value=''):
-                await handler._ask_moltbot(
-                    "Юра", "привет", "групповой чат", "key",
+            with patch.object(_moltbot_mod, '_load_chat_summary', return_value='Память компании'), \
+                    patch.object(_moltbot_mod, '_load_chat_lore', return_value=''):
+                messages = await handler._build_persona_messages(
+                    "Юра", "привет", "групповой чат",
                     history=["[16:00 14.03] Богдан: тест"]
                 )
-
-            content = captured['content']
-            assert "[Сейчас:" in content
-            assert "Copenhagen]" in content
-            assert "фоновый контекст" in content
-            assert "Не поднимай старые темы" in content
+            assert messages[-1] == {'role': 'user', 'content': 'Юра: привет'}
+            assert {'role': 'user', 'content': 'Богдан: тест'} in messages
+            assert 'групповой чат' in messages[0]['content']
+            assert 'Память компании' in messages[0]['content']
+            assert messages[-2] == {'role': 'system', 'content': handler._POST_PROMPT}
 
 
 def _make_message(text=None, caption=None, from_user_id=855951767,
@@ -264,3 +256,16 @@ class TestEmptyTagGreeting:
     def test_whitespace_only_tag_returns_greeting(self):
         result = MoltbotHandlers._should_greet(user_text="  ", reply_to=None)
         assert result == "Чё надо?"
+
+
+@pytest.mark.parametrize('prefix', ['[16:00 14.03] ', '[16:00] ', '16:00 ', ''])
+def test_history_parser_preserves_bot_role_and_multiword_names(prefix):
+    handler = MoltbotHandlers.__new__(MoltbotHandlers)
+    bot_name = next(iter(handler._BOT_NAMES))
+    messages = handler._history_to_messages(
+        [f'{prefix}Сказочный Богдан: тест', f'{prefix}{bot_name}: ответ'], 'Юра', 'привет')
+    assert messages == [
+        {'role': 'user', 'content': 'Сказочный Богдан: тест'},
+        {'role': 'assistant', 'content': 'ответ'},
+        {'role': 'user', 'content': 'Юра: привет'},
+    ]
