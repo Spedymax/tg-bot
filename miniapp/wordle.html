@@ -110,6 +110,7 @@ const KB_LAYOUT = [
 let board = [];      // finished rows: [{guess, marks}]
 let current = '';     // letters typed in the active row
 let finished = false;
+let submitting = false;
 let rowEls = [];
 let keyEls = {};
 
@@ -191,7 +192,7 @@ function renderCurrentRow(){
 }
 
 function handleKey(key){
-  if (finished) return;
+  if (finished || submitting) return;
   if (key === 'Enter'){
     submitGuess();
   } else if (key === 'Backspace'){
@@ -210,16 +211,19 @@ document.addEventListener('keydown', (e) => {
 });
 
 async function submitGuess(){
+  if (submitting || finished) return;
   if (current.length !== WORD_LENGTH){
     shakeCurrentRow();
     showToast('Слишком короткое слово');
     return;
   }
+  submitting = true;
+  const guess = current;
   try {
     const resp = await fetch('/miniapp/api/wordle/guess', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({init_data: initData, guess: current}),
+      body: JSON.stringify({init_data: initData, guess, expected_attempts: board.length}),
     });
     const json = await resp.json();
     if (!json.success){
@@ -231,12 +235,12 @@ async function submitGuess(){
       return;
     }
     const data = json.data;
-    if (data.already_finished){
+    if (data.guesses){
       loadRestoredBoard(data);
       return;
     }
-    renderFinishedRow(board.length, current, data.marks);
-    board.push({guess: current, marks: data.marks});
+    renderFinishedRow(board.length, guess, data.marks);
+    board.push({guess, marks: data.marks});
     current = '';
     if (data.finished){
       finished = true;
@@ -244,6 +248,8 @@ async function submitGuess(){
     }
   } catch (e){
     showToast('Сеть недоступна, попробуй ещё раз');
+  } finally {
+    submitting = false;
   }
 }
 
@@ -278,6 +284,8 @@ function loadRestoredBoard(data){
   buildBoard();
   buildKeyboard();
   board = [];
+  current = '';
+  resultEl.style.display = 'none';
   (data.guesses || []).forEach((g, i) => {
     renderFinishedRow(i, g.guess, g.marks);
     board.push(g);
@@ -285,6 +293,8 @@ function loadRestoredBoard(data){
   finished = !!data.finished;
   if (finished){
     showResult(data.won, data.target, data.coins, data.wordle_streak);
+  } else {
+    renderCurrentRow();
   }
 }
 

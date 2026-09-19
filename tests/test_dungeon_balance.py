@@ -24,6 +24,7 @@ def test_generated_layouts_have_early_recovery_and_no_three_fights_without_it():
         assert rooms == logic.generate_layout(f'day:{i}', CONTENT, lore, rage=bool(i % 2))
         kinds = [r['type'] for r in rooms]
         assert len(rooms) == 10 and kinds[-1] == 'boss'
+        assert kinds.count('fight') == 4
         assert 3 <= kinds.index('rest') <= 5
         assert 4 <= kinds.index('merchant') <= 7
         fights = 0
@@ -162,6 +163,23 @@ def test_history_survives_restart_and_does_not_truncate_with_chronicle():
     snapshot = copy.deepcopy(state)
     logic.apply_action(state, 'invalid', CONTENT)
     assert state == snapshot
+
+
+def test_entering_next_room_clears_visible_messages_but_keeps_chronicle():
+    rooms = [
+        {'type': 'fight', 'index': 0, 'balance_version': 2,
+         'enemy': {'name': 'Первый', 'emoji': '👺', 'hp': 1, 'max_hp': 1, 'atk': 0}},
+        {'type': 'fight', 'index': 1, 'balance_version': 2,
+         'enemy': {'name': 'Второй', 'emoji': '🐀', 'hp': 10, 'max_hp': 10, 'atk': 0}},
+    ]
+    state = logic.new_run('rooms', rooms)
+    logic.apply_action(state, 'attack', CONTENT)
+    assert state['phase'] == 'cleared'
+    logic.apply_action(state, 'next', CONTENT)
+    view = logic.public_view(state, CONTENT)
+    assert all('Первый' not in line for line in view['log'])
+    assert any('Второй' in line for line in view['log'])
+    assert any('Первый' in line for line in view['chronicle'])
 
 
 def test_special_hint_does_not_consume_inventory_or_allow_second_use():

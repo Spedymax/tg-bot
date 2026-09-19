@@ -101,10 +101,10 @@ def generate_layout(seed: str, content: dict, lore: Optional[dict] = None, rage:
     messages = [m for m in (lore.get('messages') or []) if m.get('name') in players] if len(players) >= 2 else []
     highlights = list(lore.get('highlights') or [])
 
-    kinds = ['fight', 'fight', 'fight', 'riddle', 'puzzle', 'rest', 'merchant']
+    kinds = ['fight', 'fight', 'fight', 'fight', 'riddle', 'puzzle', 'rest', 'merchant']
     extras = ['treasure', 'trap'] + (['npc'] if messages else [])
     r.shuffle(extras)
-    kinds += extras[:2]
+    kinds += extras[:1]
     def recoverable(order):
         if not 3 <= order.index('rest') <= 5 or not 4 <= order.index('merchant') <= 7:
             return False
@@ -125,7 +125,7 @@ def generate_layout(seed: str, content: dict, lore: Optional[dict] = None, rage:
     else:
         # Guaranteed valid fallback, still using the day's selected extra rooms.
         kinds = ['riddle', 'fight', 'fight', 'rest', 'puzzle', 'merchant',
-                 'fight', *extras[:2]]
+                 'fight', 'fight', *extras[:1]]
 
     enemies = list(content.get('enemies') or [])
     r.shuffle(enemies)
@@ -203,7 +203,7 @@ def new_run(seed: str, rooms: list, modifier: str = 'none') -> dict:
         'balance_version': rooms[0].get('balance_version', 1), 'history': [],
         'seed': seed, 'step': 0, 'room_index': 0, 'rooms': rooms, 'modifier': modifier,
         'player': dict(BASE_PLAYER), 'phase': 'room', 'room_state': {},
-        'log': [], 'rooms_cleared': 0, 'boss_killed': False,
+        'log': [], 'chronicle': [], 'rooms_cleared': 0, 'boss_killed': False,
     }
     if modifier == 'prime':
         state['player']['atk'] += 1
@@ -216,12 +216,17 @@ def _room(state: dict) -> dict:
 
 
 def _log(state: dict, text: str):
+    state.setdefault('chronicle', list(state['log'])).append(text)
+    state['chronicle'] = state['chronicle'][-100:]
     state['log'].append(text)
     state['log'] = state['log'][-40:]
 
 
 def _enter_room(state: dict):
     room = _room(state)
+    if state['room_index']:
+        state.setdefault('chronicle', list(state['log']))
+        state['log'] = []
     state['phase'] = 'room'
     state['room_state'] = {}
     if _mod(state) == 'torsion' and state['room_index'] % 2 == 1:
@@ -571,6 +576,7 @@ def public_view(state: dict, content: dict) -> dict:
                        + (" · 🛡 щит поглотит следующий удар" if state['player']['shield'] else "")),
         'actions': available_actions(state, content),
         'log': state['log'][-25:],
+        'chronicle': state.get('chronicle', state['log'])[-100:],
         'boss_killed': state['boss_killed'],
         'map': [{'type': rm['type'], 'done': i < state['rooms_cleared'], 'current': i == state['room_index']}
                 for i, rm in enumerate(state['rooms'])],

@@ -31,6 +31,7 @@ try:
     )
     from services.boss_service import get_boss_service, DAMAGE as BOSS_DAMAGE
     from services.dungeon_service import get_dungeon_service
+    from services.wordle_service import record_guess
 except ImportError as e:
     Settings = DatabaseManager = PlayerService = None
     get_boss_service = get_dungeon_service = None
@@ -456,19 +457,26 @@ def _validate_init_data(init_data: str, max_age_seconds: int = 86400):
 
 
 def _get_or_create_game(today, player_id, player_name):
-    row = run_async(db_manager.execute_query(
+    row = run_async(db_manager.execute_query_strict(
         "SELECT attempts, guesses, won, finished FROM wordle_games WHERE date=%s AND player_id=%s",
         (today, player_id),
     ))
     if row:
         attempts, guesses, won, finished = row[0]
         return {'attempts': attempts, 'guesses': guesses or [], 'won': won, 'finished': finished}
-    run_async(db_manager.execute_query(
+    run_async(db_manager.execute_query_strict(
         "INSERT INTO wordle_games (date, player_id, player_name, attempts, guesses, won, finished) "
         "VALUES (%s, %s, %s, 0, %s, FALSE, FALSE) ON CONFLICT (date, player_id) DO NOTHING",
         (today, player_id, player_name, json.dumps([])),
     ))
-    return {'attempts': 0, 'guesses': [], 'won': False, 'finished': False}
+    row = run_async(db_manager.execute_query_strict(
+        "SELECT attempts, guesses, won, finished FROM wordle_games WHERE date=%s AND player_id=%s",
+        (today, player_id),
+    ))
+    if not row:
+        raise RuntimeError('Wordle game was not persisted')
+    attempts, guesses, won, finished = row[0]
+    return {'attempts': attempts, 'guesses': guesses or [], 'won': won, 'finished': finished}
 
 
 def _telegram_edit_message(chat_id, message_id, text):
@@ -540,7 +548,8 @@ def _apply_wordle_reward(player_id, player_name, today, won, attempts):
         try:
             _boss = get_boss_service() if get_boss_service else None
             if _boss:
-                run_async(_boss.deal_damage(player_id, player_name, 'wordle', 20 + 5 * (MAX_ATTEMPTS - attempts)))
+                run_async(_boss.deal_damage(player_id, player_name, 'wordle',
+                                            BOSS_DAMAGE['wordle'] + 2 * (MAX_ATTEMPTS - attempts)))
         except Exception as _e:
             logger.warning(f"Boss hook (wordle) failed: {_e}")
     else:
@@ -603,31 +612,31 @@ def wordle_guess():
     guess = (data.get('guess') or '').strip().lower()
     if len(guess) != WORD_LENGTH or not re.fullmatch(r'[a-z]+', guess):
         return jsonify({'success': False, 'error': 'invalid_format'}), 400
+    expected_attempts = data.get('expected_attempts')
+    if expected_attempts is not None and (type(expected_attempts) is not int or not 0 <= expected_attempts < MAX_ATTEMPTS):
+        return jsonify({'success': False, 'error': 'invalid_format'}), 400
 
     today, target = _current_puzzle()
 
-    game = _get_or_create_game(today, player_id, player_name)
-    if game['finished']:
+    _get_or_create_game(today, player_id, player_name)
+    try:
+        game, already_finished = run_async(record_guess(
+            db_manager, today, player_id, player_name, guess, target, expected_attempts))
+    except ValueError:
+        return jsonify({'success': False, 'error': 'not_a_word'}), 400
+    if already_finished:
         return jsonify({'success': True, 'data': {
             'finished': True, 'won': game['won'], 'attempts': game['attempts'],
-            'guesses': game['guesses'], 'already_finished': True,
+            'guesses': game['guesses'], 'already_finished': True, 'target': target,
+        }})
+    if game.get('duplicate'):
+        return jsonify({'success': True, 'data': {
+            'finished': False, 'won': False, 'attempts': game['attempts'],
+            'guesses': game['guesses'], 'duplicate': True,
         }})
 
-    if not is_valid_guess(guess, target):
-        return jsonify({'success': False, 'error': 'not_a_word'}), 400
-
-    marks = score_guess(guess, target)
-    guesses = game['guesses'] + [{'guess': guess, 'marks': marks}]
-    attempts = len(guesses)
-    won = guess == target
-    finished = won or attempts >= MAX_ATTEMPTS
-
-    run_async(db_manager.execute_query(
-        "UPDATE wordle_games SET attempts=%s, guesses=%s, won=%s, finished=%s, "
-        "finished_at=%s, player_name=%s WHERE date=%s AND player_id=%s",
-        (attempts, json.dumps(guesses), won, finished,
-         datetime.now(timezone.utc) if finished else None, player_name, today, player_id),
-    ))
+    guesses, attempts, won, finished = game['guesses'], game['attempts'], game['won'], game['finished']
+    marks = guesses[-1]['marks']
 
     share_text = None
     coins = None
@@ -639,6 +648,7 @@ def wordle_guess():
 
     return jsonify({'success': True, 'data': {
         'marks': marks, 'finished': finished, 'won': won, 'attempts': attempts,
+        'guesses': guesses, 'duplicate': bool(game.get('duplicate')),
         'max_attempts': MAX_ATTEMPTS, 'target': target if finished else None,
         'share_text': share_text, 'coins': coins, 'wordle_streak': wordle_streak,
     }})
@@ -716,7 +726,7 @@ def dungeon_act():
         if boss:
             if events['rooms_delta'] > 0:
                 boss_res = run_async(boss.deal_damage(player_id, player_name, 'dungeon_room',
-                                                      BOSS_DAMAGE.get('dungeon_room', 5) * events['rooms_delta']))
+                                                      BOSS_DAMAGE['dungeon_room'] * events['rooms_delta']))
             if events['boss_killed_now']:
                 boss_res = run_async(boss.deal_damage(player_id, player_name, 'dungeon_boss')) or boss_res
     except Exception as e:

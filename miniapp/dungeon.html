@@ -217,8 +217,8 @@
   function render(payload){
     const v = payload.view, p = v.player, r = v.room;
     const roomKey = r.number + ':' + r.type;
-    if (roomKey !== lastRoom) { lastRoom = roomKey; lastEnemyHp = null; }
-    const log = v.log || []; fullLog = log;
+    if (roomKey !== lastRoom) { lastRoom = roomKey; lastEnemyHp = null; lastLogLen = 0; }
+    const log = v.log || []; fullLog = v.chronicle || log;
     const fresh = Math.max(0, log.length - lastLogLen);
 
     $('roomno').textContent = `КОМНАТА ${r.number}/${v.rooms_total}`;

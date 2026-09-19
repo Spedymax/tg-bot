@@ -23,13 +23,13 @@ logger = logging.getLogger(__name__)
 
 KYIV = ZoneInfo("Europe/Kyiv")
 
-# Base damage per source (before multipliers). Tuned for 3 players, ~2500 HP, ~10-12 days.
+# Base damage per source (before multipliers). Keep the event alive across several days.
 DAMAGE = {
-    'trivia': 15,        # correct trivia answer
-    'wordle': 20,        # wordle win (+5 per unused attempt added by caller)
-    'pisunchik': 10,     # /pisunchik use
-    'dungeon_room': 5,   # each cleared dungeon room
-    'dungeon_boss': 40,  # mini-Pudge kill
+    'trivia': 5,         # correct trivia answer
+    'wordle': 8,         # wordle win (+2 per unused attempt added by caller)
+    'pisunchik': 3,      # /pisunchik use
+    'dungeon_room': 2,   # each cleared dungeon room
+    'dungeon_boss': 12,  # mini-Pudge kill
 }
 
 HIJACK_HP_RATIO = 0.66   # ≤ 66% → Pudginio hijacks Jarvis for a day
