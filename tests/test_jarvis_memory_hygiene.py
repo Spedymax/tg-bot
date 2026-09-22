@@ -223,3 +223,82 @@ async def test_persist_writes_row_without_raising():
     assert params[0] == trace.trace_id and params[5] == "grok" and params[9] == 10
     db.execute_query = AsyncMock(side_effect=Exception("db down"))
     await llm_trace.persist(trace, db)  # must not raise
+
+
+# ── reactions instead of filler replies ──────────────────────────────────────
+
+def _react_handler():
+    h = _handler()
+    h._last_reaction_time = {}
+    h._last_used_emoji = {}
+    h._reaction_day_counts = {}
+    return h
+
+
+def test_reaction_gate_blocks_short_cooldown_cap_and_kill_switch(monkeypatch):
+    h = _react_handler()
+    now = datetime(2026, 9, 22, 18, 0, tzinfo=timezone.utc)
+    assert h._reaction_gate(CHAT, "ок", now) == "short"
+    assert h._reaction_gate(CHAT, "я наконец апнул титана", now) is None
+    h._last_reaction_time[CHAT] = now - _mod.timedelta(minutes=3)
+    assert h._reaction_gate(CHAT, "я наконец апнул титана", now) == "cooldown"
+    h._last_reaction_time.clear()
+    h._reaction_day_counts[CHAT] = (datetime(2026, 9, 22).date(), h._REACTION_DAILY_CAP)
+    assert h._reaction_gate(CHAT, "я наконец апнул титана", now) == "daily_cap"
+    h._reaction_day_counts.clear()
+    monkeypatch.setenv("JARVIS_REACTIONS", "false")
+    assert h._reaction_gate(CHAT, "я наконец апнул титана", now) == "disabled"
+
+
+def test_parse_reaction_decision_accepts_only_valid_fresh_emoji():
+    h = _react_handler()
+    assert h._parse_reaction_decision('{"action": "react", "emoji": "🏆", "why": "x"}', []) == "🏆"
+    assert h._parse_reaction_decision('```json\n{"action": "react", "emoji": "❤️"}\n```', []) == "❤"
+    assert h._parse_reaction_decision('{"action": "ignore"}', []) is None
+    assert h._parse_reaction_decision('{"action": "react", "emoji": "🚀"}', []) is None   # not a Telegram reaction
+    assert h._parse_reaction_decision('{"action": "react", "emoji": "🏆"}', ["🏆"]) is None  # repeated
+    assert h._parse_reaction_decision("garbage", []) is None
+
+
+@pytest.mark.asyncio
+async def test_maybe_react_sets_reaction_and_traces(monkeypatch):
+    from unittest.mock import MagicMock
+    monkeypatch.setattr(_mod.Settings, "OPENROUTER_API_KEY", "x", raising=False)
+    monkeypatch.delenv("JARVIS_REACTIONS", raising=False)
+    h = _react_handler()
+    h.bot = MagicMock()
+    h.bot.set_message_reaction = AsyncMock()
+    h._get_recent_group_messages = AsyncMock(return_value=["[20:00 22.09] Богдан.: гг"])
+    h._openrouter_post = AsyncMock(return_value={"choices": [{"message": {
+        "content": '{"action": "react", "emoji": "🏆", "why": "эпично"}'}}], "usage": {"cost": 0.00005}})
+    persisted = []
+    monkeypatch.setattr(llm_trace, "persist_in_background", lambda trace, db: persisted.append(trace))
+    message = MagicMock()
+    message.chat.id, message.message_id, message.text = CHAT, 42, "я наконец апнул титана, 6 лет шёл"
+    message.from_user.id, message.from_user.first_name = 742272644, "Юра"
+
+    await h._maybe_react(message)
+
+    kwargs = h.bot.set_message_reaction.await_args.kwargs
+    assert kwargs["message_id"] == 42 and kwargs["reaction"][0].emoji == "🏆"
+    assert h._last_used_emoji[CHAT] == ["🏆"]
+    (trace,) = persisted
+    assert trace.kind == "reaction" and trace.outcome == "react:🏆"
+    assert trace.attempts[0].cost_usd == pytest.approx(0.00005)
+
+
+@pytest.mark.asyncio
+async def test_maybe_react_ignore_does_not_touch_telegram(monkeypatch):
+    from unittest.mock import MagicMock
+    monkeypatch.setattr(_mod.Settings, "OPENROUTER_API_KEY", "x", raising=False)
+    h = _react_handler()
+    h.bot = MagicMock()
+    h.bot.set_message_reaction = AsyncMock()
+    h._get_recent_group_messages = AsyncMock(return_value=[])
+    h._openrouter_post = AsyncMock(return_value={"choices": [{"message": {"content": '{"action": "ignore"}'}}]})
+    monkeypatch.setattr(llm_trace, "persist_in_background", lambda trace, db: None)
+    message = MagicMock()
+    message.chat.id, message.message_id, message.text = CHAT, 43, "во сколько завтра встречаемся?"
+    await h._maybe_react(message)
+    h.bot.set_message_reaction.assert_not_awaited()
+    assert CHAT not in h._last_reaction_time

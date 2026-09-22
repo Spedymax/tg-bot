@@ -101,4 +101,11 @@ def parse_json_reply(text: str) -> dict[str, Any]:
     match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if not match:
         raise ValueError(f"no JSON object in reply: {text[:200]!r}")
-    return json.loads(match.group(0))
+    body = match.group(0)
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        # Judges sometimes echo the schema's // comments or leave trailing commas.
+        body = re.sub(r"//[^\n\"]*(?=\n)", "", body)
+        body = re.sub(r",\s*([}\]])", r"\1", body)
+        return json.loads(body)

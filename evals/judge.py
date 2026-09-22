@@ -26,7 +26,8 @@ from evals.replay import RUNS_DIR  # noqa: E402
 from evals.scenes import DATA_DIR, SEED_PATH, Scene, load_jsonl, load_scenes, save_jsonl  # noqa: E402
 
 DEFAULT_JUDGE = "anthropic/claude-sonnet-5"
-JUDGE_COST_PER_REPLY = 0.012
+JUDGE_COST_PER_REPLY = 0.015
+JUDGE_HISTORY_LINES = 60   # 20 was too short: callbacks to earlier scene lines got flagged as invented
 REPORTS_DIR = os.path.join(DATA_DIR, "reports")
 AXES = ("natural", "funny", "useful", "grounded", "not_annoying")
 FLAGS = ("unprompted_callback", "wrong_attribution", "unsupported_claim",
@@ -107,6 +108,19 @@ def _memory_block(scene: Scene) -> str:
     return "\n".join(parts) + ("\n" if parts else "")
 
 
+async def _judge_json(client: OpenRouter, judge: str, prompt: str, max_tokens: int) -> dict:
+    """One judge call with a single retry on unparseable output."""
+    last = ""
+    for _ in range(2):
+        try:
+            data = await client.chat({"model": judge, "max_tokens": max_tokens, "temperature": 0,
+                                      "messages": [{"role": "user", "content": prompt}]})
+            return parse_json_reply(data["choices"][0]["message"].get("content") or "")
+        except Exception as e:
+            last = str(e)[:300]
+    return {"error": last}
+
+
 def deterministic_checks(scene: Scene, row: dict) -> dict:
     searched = bool(row.get("searches"))
     return {
@@ -129,19 +143,14 @@ async def score_run(run_id: str, scenes: dict[str, Scene], judge: str, client: O
             return {**row, "checks": checks, "judge": {"error": row.get("error") or "empty reply"}}
         prompt = SCORE_PROMPT.format(
             note=CONTEXT_NOTE,
-            history="\n".join(scene.history[-20:]) or "(пусто)",
+            history="\n".join(scene.history[-JUDGE_HISTORY_LINES:]) or "(пусто)",
             sender=scene.trigger_sender, text=scene.trigger_text,
             memory=_memory_block(scene), reply=row["reply"],
             criteria="\n".join(f"{i+1}. {c}" for i, c in enumerate(scene.expect.criteria)),
             must_not="\n".join(f"{i+1}. {c}" for i, c in enumerate(scene.expect.must_not)) or "(нет)",
             callback_policy=scene.expect.callback_policy,
         )
-        try:
-            data = await client.chat({"model": judge, "max_tokens": 900, "temperature": 0,
-                                      "messages": [{"role": "user", "content": prompt}]})
-            verdict = parse_json_reply(data["choices"][0]["message"]["content"])
-        except Exception as e:
-            verdict = {"error": str(e)[:300]}
+        verdict = await _judge_json(client, judge, prompt, 1500)
         return {**row, "checks": checks, "judge": verdict}
 
     return await asyncio.gather(*(one(r) for r in rows))
@@ -255,17 +264,14 @@ async def cmd_pair(run_a: str, run_b: str, scene_paths: list[str], judge: str, r
         flipped = rng.random() < 0.5
         first, second = (b, a) if flipped else (a, b)
         prompt = PAIR_PROMPT.format(
-            note=CONTEXT_NOTE, history="\n".join(scene.history[-20:]) or "(пусто)",
+            note=CONTEXT_NOTE, history="\n".join(scene.history[-JUDGE_HISTORY_LINES:]) or "(пусто)",
             sender=scene.trigger_sender, text=scene.trigger_text,
             criteria="\n".join(f"- {c}" for c in scene.expect.criteria),
             a=first or "(пустой ответ)", b=second or "(пустой ответ)",
         )
-        try:
-            data = await client.chat({"model": judge, "max_tokens": 400, "temperature": 0,
-                                      "messages": [{"role": "user", "content": prompt}]})
-            verdict = parse_json_reply(data["choices"][0]["message"]["content"])
-        except Exception as e:
-            return {"scene_id": key[0], "seed": key[1], "error": str(e)[:200]}
+        verdict = await _judge_json(client, judge, prompt, 800)
+        if "error" in verdict:
+            return {"scene_id": key[0], "seed": key[1], "error": verdict["error"]}
         return {"scene_id": key[0], "seed": key[1], "flipped": flipped,
                 **unflip_pair_verdict(verdict, flipped), "reason": verdict.get("reason")}
 

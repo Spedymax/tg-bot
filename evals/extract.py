@@ -240,6 +240,26 @@ def select(rows: list[dict], n: int) -> list[dict]:
     return sorted(picked[:n], key=lambda r: r["at"])
 
 
+GENERIC_CRITERIA = [
+    "Отвечает по сути на последнее сообщение, а не на что-то своё",
+    "Звучит как живой участник этого чата, а не как ассистент",
+    "Не выдумывает факты о людях и не тащит внутряки без повода",
+]
+
+
+def quick_scenes(rows: list[dict], n: int, summary: str, lore: str) -> list[Scene]:
+    """Unlabeled scenes for cheap A/B checks: newest scenes people reacted to, generic criteria."""
+    reacted = sorted((r for r in rows if r["reference"]["direct_replies"]), key=lambda r: r["at"], reverse=True)
+    return [
+        Scene(id=r["id"], category="other", at=r["at"], trigger_sender=r["trigger_sender"],
+              trigger_text=r["trigger_text"], history=r["history"], chat_context=CHAT_CONTEXT,
+              summary=summary, lore=lore, prompt_version=r.get("prompt_version"),
+              expect=Expect(criteria=list(GENERIC_CRITERIA)), reference=r["reference"], source="prod",
+              notes="quick unlabeled scene")
+        for r in reacted[:n]
+    ]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -254,6 +274,7 @@ def main() -> None:
     s.add_argument("--out", default=os.path.join(DATA_DIR, "golden-v1.jsonl"))
     s.add_argument("--summary", default="/home/spedymax/tg-bot/data/chat-summary.md")
     s.add_argument("--lore", default="/home/spedymax/tg-bot/data/chat-lore.md")
+    s.add_argument("--quick", action="store_true", help="skip labels: newest reacted scenes, generic criteria")
     args = ap.parse_args()
 
     if args.cmd == "pull":
@@ -266,8 +287,11 @@ def main() -> None:
         read = lambda p: open(p, encoding="utf-8").read().strip() if os.path.exists(p) else ""  # noqa: E731
         # Frozen memory snapshot: every scene is replayed against the same memory.
         summary, lore = read(args.summary), read(args.lore)
-        chosen = select(load_jsonl(LABELED_PATH), args.n)
-        scenes = [to_scene(r, summary, lore) for r in chosen]
+        if args.quick:
+            scenes = quick_scenes(load_jsonl(CANDIDATES_PATH), args.n, summary, lore)
+        else:
+            chosen = select(load_jsonl(LABELED_PATH), args.n)
+            scenes = [to_scene(r, summary, lore) for r in chosen]
         problems = [p for sc in scenes for p in sc.validate()]
         save_jsonl(args.out, [sc.to_dict() for sc in scenes])
         cats = defaultdict(int)

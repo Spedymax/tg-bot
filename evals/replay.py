@@ -112,7 +112,7 @@ async def run_scene(client: OpenRouter, config: dict, scene: Scene, identity: st
     return {
         "scene_id": scene.id, "config": config["name"], "model": config["model"],
         "reasoning": config.get("reasoning"), "seed": seed,
-        "prompt_version": config.get("prompt_version") or scene.prompt_version,
+        "prompt_version": config.get("identity_path") or config.get("prompt_version") or scene.prompt_version,
         "reply": reply, "error": error, "searches": searches,
         "latency_ms": latency, "usage": usage,
     }
@@ -124,9 +124,13 @@ async def replay(config: dict, scenes: list[Scene], seeds: list[int], concurrenc
     current = identities[max(identities)]
     client = OpenRouter(concurrency=concurrency)
     tasks = []
+    pinned = None
+    if config.get("identity_path"):
+        with open(config["identity_path"], encoding="utf-8") as f:
+            pinned = f.read().strip()
     for scene in scenes:
         vid = config.get("prompt_version") or scene.prompt_version
-        identity = identities.get(vid, current) if vid else current
+        identity = pinned or (identities.get(vid, current) if vid else current)
         for seed in seeds:
             tasks.append(run_scene(client, config, scene, identity, seed))
     rows = await asyncio.gather(*tasks)

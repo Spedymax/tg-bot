@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Router, F, Bot
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message
+from aiogram.types import Message, ReactionTypeEmoji
 from aiogram.utils.chat_action import ChatActionSender
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -169,6 +169,8 @@ SUMMARY_FETCH_HOURS = 48      # fetch messages from last N hours for summary
 SUMMARY_MAX_MESSAGES = 800    # newest human messages considered per rebuild
 SUMMARY_CHAR_BUDGET = 60_000  # keeps the summarizer input bounded in a busy chat
 HISTORY_MESSAGE_LIMIT = 100
+# Cheap classifier for "react with an emoji or stay silent" on ambient messages.
+REACTION_MODEL = os.getenv("JARVIS_REACTION_MODEL", "z-ai/glm-5.3-flash")
 HISTORY_CHAR_BUDGET = 12_000  # conservative ~3K-token cap before prompt/memory
 CPH_TZ = ZoneInfo("Europe/Copenhagen")
 
@@ -1828,90 +1830,119 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: probabilistic reply error: {e}")
             return False
 
-    # Valid Telegram emoji reactions
+    # Telegram's standard reaction set (setMessageReaction rejects anything else).
     _REACTION_EMOJIS = [
-        '👍', '👎', '❤', '🔥', '🥰', '👏', '😁', '🤯', '😱',
-        '😢', '🎉', '🤩', '💩', '🙏', '👌', '🤡', '🥱', '😍', '💯',
-        '🤣', '⚡', '🏆', '💔', '😴', '🤓', '👻', '👀', '😇', '🤗',
-        '🤪', '🗿', '🆒', '😘', '😎', '🫡', '🤝', '🫶', '💅', '🥶',
-        '🤨', '😏', '🥲', '😤', '🤬', '😈', '☠', '🤮', '🫠', '🤌',
-        '💀', '🙈', '🙉', '🙊', '🐳', '🦄', '🍾', '🎸', '🎯', '🎲',
-        '🚀', '🛸', '🌚', '🌝', '🌞', '🍕', '🤑', '💸', '🎃', '👾',
-        '🧠', '💪', '🦾', '🦿', '🎭', '🎪', '🫣', '🤫', '🤭', '🫀',
+        '👍', '👎', '❤', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱', '🤬', '😢', '🎉',
+        '🤩', '🤮', '💩', '🙏', '👌', '🕊', '🤡', '🥱', '🥴', '😍', '🐳', '🌚', '💯',
+        '🤣', '⚡', '🍌', '🏆', '💔', '🤨', '😐', '🍾', '💋', '🖕', '😈', '😴', '😭',
+        '🤓', '👻', '👀', '🎃', '🙈', '😇', '😨', '🤝', '✍', '🤗', '🫡', '💅', '🤪',
+        '🗿', '🆒', '💘', '🙉', '🦄', '😘', '💊', '🙊', '😎', '👾', '🤷', '😡',
     ]
+    _REACTION_MIN_CHARS = 8
+    _REACTION_COOLDOWN_SECS = 600      # one reaction per chat per 10 min at most
+    _REACTION_DAILY_CAP = 12           # per chat per Kyiv day
+    _REACTION_RECENT_EMOJI = 5         # don't repeat the last N emoji
 
-    # Probability of asking Qwen at all (saves calls on boring messages)
-    _REACTION_PROBABILITY = 0.25
-    # Minimum seconds between reactions in the same chat
-    _REACTION_COOLDOWN_SECS = 300
+    _REACTION_PROMPT = (
+        "Ты Джарвис — участник группового чата трёх друзей (грубый дружеский тон — норма). "
+        "Тебе не писали напрямую. Реши, поставить ли РЕАКЦИЮ-эмодзи на последнее сообщение "
+        "вместо того, чтобы молчать.\n\n"
+        "=== ПОСЛЕДНИЕ СООБЩЕНИЯ ===\n{history}\n\n"
+        "=== СООБЩЕНИЕ ===\n{sender}: {text}\n\n"
+        "Реагируй, только если сообщение правда зацепило: очень смешно, эпичный фейл или "
+        "победа, дерзко, трогательно, важная новость человека. Обычный трёп, вопросы "
+        "другим людям, логистика, короткие ответы — ignore. По умолчанию ignore.\n"
+        "Эмодзи — строго один из: {emojis}\n"
+        "Не бери эти (недавно ставил): {recent}\n"
+        'Верни ТОЛЬКО JSON: {{"action": "ignore" | "react", "emoji": "…", "why": "3-6 слов"}}'
+    )
+
+    def _reaction_gate(self, chat_id: int, text: str, now: datetime) -> str | None:
+        """Cheap checks before any model call. Returns the reason to skip, or None."""
+        if os.getenv("JARVIS_REACTIONS", "true").lower() in ("0", "false", "off", "no"):
+            return "disabled"
+        if len(text.strip()) < self._REACTION_MIN_CHARS:
+            return "short"
+        last = self._last_reaction_time.get(chat_id)
+        if last and (now - last).total_seconds() < self._REACTION_COOLDOWN_SECS:
+            return "cooldown"
+        day = now.astimezone(ZoneInfo("Europe/Kyiv")).date()
+        counts = getattr(self, "_reaction_day_counts", {})
+        if chat_id in counts and counts[chat_id][0] == day and counts[chat_id][1] >= self._REACTION_DAILY_CAP:
+            return "daily_cap"
+        return None
+
+    def _parse_reaction_decision(self, raw: str, recent: list[str]) -> str | None:
+        """Model JSON → emoji to set, or None. Anything unexpected means no reaction."""
+        try:
+            match = re.search(r"\{.*\}", re.sub(r"<think>.*?(?:</think>|$)", "", raw or "", flags=re.DOTALL),
+                              flags=re.DOTALL)
+            data = json.loads(match.group(0)) if match else {}
+        except Exception:
+            return None
+        if data.get("action") != "react":
+            return None
+        emoji = str(data.get("emoji") or "").strip().replace("️", "")
+        if emoji not in self._REACTION_EMOJIS or emoji in recent:
+            return None
+        return emoji
 
     async def _maybe_react(self, message) -> None:
-        """Probabilistically ask Qwen to pick a reaction; enforces per-chat cooldown."""
+        """Decide ignore/react for a group message not addressed to Jarvis; set the reaction.
+
+        Replaces a filler text reply: when Jarvis has nothing to add, an emoji keeps him
+        present without cluttering the chat. Decisions are traced (kind="reaction").
+        """
         chat_id = message.chat.id
         text = message.text or ""
-
-        # Skip short/trivial messages early
-        if len(text) < 3:
-            return
-
-        # Cooldown: don't spam reactions in the same chat
-        last = self._last_reaction_time.get(chat_id)
-        if last and (datetime.now(timezone.utc) - last).total_seconds() < self._REACTION_COOLDOWN_SECS:
-            return
-
-        # Random gate — only consider reacting ~45% of the time
-        if random.random() > self._REACTION_PROBABILITY:
-            return
-
-        if not hasattr(self, '_last_used_emoji'):
+        now = datetime.now(timezone.utc)
+        if not hasattr(self, "_last_used_emoji"):
             self._last_used_emoji: dict[int, list[str]] = {}
+        if not hasattr(self, "_reaction_day_counts"):
+            self._reaction_day_counts: dict[int, tuple] = {}
+        skip = self._reaction_gate(chat_id, text, now)
+        if skip or not Settings.OPENROUTER_API_KEY:
+            return
+
         recent = self._last_used_emoji.get(chat_id, [])
-        avoid_hint = f"Не используй эти (недавно ставил): {' '.join(recent)}\n" if recent else ""
-
-        # Shuffle so Qwen doesn't always pick from the same start of list
-        shuffled = self._REACTION_EMOJIS.copy()
-        random.shuffle(shuffled)
-        emoji_list = ' '.join(shuffled)
-
-        prompt = (
-            f"Сообщение: {text}\n\n"
-            "По умолчанию верни пустую строку — не реагируй.\n"
-            "Поставь реакцию ТОЛЬКО если сообщение тебя реально зацепило: "
-            "очень смешно, неожиданно, дерзко, трогательно или эпично.\n"
-            "Обычный разговор, бытовые фразы, вопросы, короткие ответы — пустая строка.\n"
-            "Если решил реагировать — выбери один emoji из списка: "
-            f"{emoji_list}\n"
-            f"{avoid_hint}"
-            "Выбирай точно под настроение сообщения, не дефолтные.\n"
-            "Верни ТОЛЬКО один emoji или пустую строку. Никакого текста."
+        history = await self._get_recent_group_messages(chat_id, limit=6, exclude_message_id=message.message_id)
+        prompt = self._REACTION_PROMPT.format(
+            history="\n".join(history[-5:]) or "(пусто)",
+            sender=self._resolve_sender_name(message.from_user), text=text[:600],
+            emojis=" ".join(self._REACTION_EMOJIS), recent=" ".join(recent) or "—",
         )
-
+        trace, token = llm_trace.begin("reaction", chat_id)
+        emoji = None
         try:
-            result = await asyncio.to_thread(self._call_ollama_direct, prompt)
-            result = result.strip()
-            result = result.split()[0] if result else ""
-            if result not in self._REACTION_EMOJIS:
-                logger.debug(f"MoltBot: no reaction (got {repr(result)}) for msg {message.message_id}")
-                return
-            token = Settings.TELEGRAM_BOT_TOKEN
-            async with httpx.AsyncClient() as client:
-                await client.post(
-                    f"https://api.telegram.org/bot{token}/setMessageReaction",
-                    json={
-                        "chat_id": chat_id,
-                        "message_id": message.message_id,
-                        "reaction": [{"type": "emoji", "emoji": result}],
-                        "is_big": False,
-                    },
-                    timeout=10,
+            data = await self._traced_attempt(REACTION_MODEL, REACTION_MODEL, lambda: self._openrouter_post(
+                # GLM Flash can't disable reasoning; "minimal" keeps it ~1s and the
+                # budget has to cover the hidden reasoning tokens too.
+                {"model": REACTION_MODEL, "max_tokens": 1500, "temperature": 0.3,
+                 "reasoning": {"effort": "minimal"},
+                 "messages": [{"role": "user", "content": prompt}], **self._provider_ids(chat_id)},
+                timeout=20,
+            ))
+            llm_trace.apply_response(trace.attempts[-1] if trace.attempts else None, data)
+            raw = data["choices"][0]["message"].get("content") or ""
+            emoji = self._parse_reaction_decision(raw, recent)
+            if emoji:
+                await self.bot.set_message_reaction(
+                    chat_id=chat_id, message_id=message.message_id,
+                    reaction=[ReactionTypeEmoji(emoji=emoji)],
                 )
-            self._last_reaction_time[chat_id] = datetime.now(timezone.utc)
-            recent_list = self._last_used_emoji.get(chat_id, [])
-            recent_list.append(result)
-            self._last_used_emoji[chat_id] = recent_list[-3:]
-            logger.info(f"MoltBot: reacted {result} to msg {message.message_id} in {chat_id}")
+                self._last_reaction_time[chat_id] = now
+                self._last_used_emoji[chat_id] = (recent + [emoji])[-self._REACTION_RECENT_EMOJI:]
+                day = now.astimezone(ZoneInfo("Europe/Kyiv")).date()
+                prev_day, count = self._reaction_day_counts.get(chat_id, (day, 0))
+                self._reaction_day_counts[chat_id] = (day, (count if prev_day == day else 0) + 1)
+                logger.info(f"MoltBot: reacted {emoji} to msg {message.message_id} in {chat_id}")
+            trace.finish(f"react:{emoji}" if emoji else "ignore", raw)
         except Exception as e:
+            trace.finish(f"error:{type(e).__name__}")
             logger.warning(f"MoltBot: reaction error: {e}")
+        finally:
+            llm_trace.end(token)
+            llm_trace.persist_in_background(trace, getattr(self, "db", None))
 
     # ── Данетка ───────────────────────────────────────────────────────────────
 
@@ -2651,7 +2682,8 @@ class MoltbotHandlers:
         async def handle_probabilistic(message: Message):
             await self._store_user_message(message)
             self._maybe_update_summary(message.chat.id)
-            # asyncio.create_task(self._maybe_reply_probabilistic(message))
+            # Text interjections stay off; a fitting emoji is the low-noise alternative.
+            asyncio.create_task(self._maybe_react(message))
 
         @router.message(StateFilter(None), F.photo, F.func(lambda m: (
             m.caption_entities is not None
