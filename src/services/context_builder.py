@@ -18,6 +18,15 @@ class ContextSnapshot:
         return [dict(message) for message in self.messages]
 
 
+OVERLAY_HEADER = '=== ВРЕМЕННЫЙ ИВЕНТ-ОВЕРЛЕЙ (меняет голос и роль, но не факты) ==='
+OVERLAY_FOOTER = (
+    '=== КОНЕЦ ОВЕРЛЕЯ ===\n'
+    'Оверлей может полностью сменить голос, роль и настроение. Но факты, текущая дата, '
+    'твои прошлые сообщения из истории и суть полезного ответа остаются как в базовых '
+    'правилах: не выдумывай факты о людях и не отрицай то, что сам написал выше.'
+)
+
+
 class ContextBuilder:
     """Build one canonical context shape for OpenAI-style and text-only APIs."""
 
@@ -49,7 +58,8 @@ class ContextBuilder:
 
     def build(self, *, identity: str, hard_rules: str, chat_context: str,
               summary: str, lore: str, history: list[str] | None,
-              sender_name: str, user_text: str, post_prompt: str) -> ContextSnapshot:
+              sender_name: str, user_text: str, post_prompt: str,
+              clock: str = '', overlay: str = '') -> ContextSnapshot:
         system_parts = [part for part in (hard_rules, identity) if part]
         if chat_context:
             system_parts.append(f'[Сообщение отправлено из: {chat_context}]')
@@ -66,6 +76,12 @@ class ContextBuilder:
                 f'{lore}\n'
                 'Используй только при явной тематической релевантности.'
             )
+        if clock:
+            # Dynamic and tiny: goes after the stable prefix so it never busts it.
+            system_parts.append(
+                f'[Текущее время: {clock}. Считай даты и «вчера/завтра» от него, '
+                'а не от устаревших формулировок в памяти.]'
+            )
 
         history_messages = self.history_to_messages(history)
         current = {'role': 'user', 'content': f'{sender_name}: {user_text}'}
@@ -73,8 +89,11 @@ class ContextBuilder:
             {'role': 'system', 'content': '\n\n'.join(system_parts)}
         ]
         messages.extend(history_messages)
-        if post_prompt:
-            messages.append({'role': 'system', 'content': post_prompt})
+        post_parts = [post_prompt] if post_prompt else []
+        if overlay:
+            post_parts.append(f'{OVERLAY_HEADER}\n{overlay}\n{OVERLAY_FOOTER}')
+        if post_parts:
+            messages.append({'role': 'system', 'content': '\n\n'.join(post_parts)})
         messages.append(current)
 
         section_chars = {
@@ -86,6 +105,8 @@ class ContextBuilder:
             'history': sum(len(message['content']) for message in history_messages),
             'current': len(current['content']),
             'post_prompt': len(post_prompt),
+            'clock': len(clock),
+            'overlay': len(overlay),
         }
         return ContextSnapshot(
             messages=tuple(messages),

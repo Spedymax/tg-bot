@@ -13,10 +13,10 @@
 - [x] Добавить `chat_id` во все сообщения и полностью разделить контекст по чатам.
 - [x] Убрать дублирование текущего сообщения в запросе к модели.
 - [ ] Сделать thread-first context builder: reply chain → текущая сцена → релевантная память.
-- [ ] Перестать использовать ответы Jarvis как источник фактов и permanent lore.
-- [ ] Исправить `/context_reset`, `/memory_clear` и `/memory_refresh`, чтобы команды делали именно то, что обещают.
-- [ ] Передавать модели точную актуальную дату и нужную таймзону в date-sensitive запросах.
-- [ ] Не позволять boss/prophecy/game overlays перезаписывать базовую personality.
+- [x] Перестать использовать ответы Jarvis как источник фактов и permanent lore.
+- [x] Исправить `/context_reset`, `/memory_clear` и `/memory_refresh`, чтобы команды делали именно то, что обещают.
+- [x] Передавать модели точную актуальную дату и нужную таймзону в date-sensitive запросах.
+- [x] Не позволять boss/prophecy/game overlays перезаписывать базовую personality.
 
 ### P1 — улучшить качество Jarvis
 
@@ -27,7 +27,7 @@
 - [ ] Сделать умные callbacks: помнить много, использовать редко и только по теме.
 - [ ] Использовать emoji reaction вместо лишнего текстового сообщения, когда полноценный ответ не нужен.
 - [x] Включить единый context/prompt pipeline для OpenRouter, Together и Gemini.
-- [ ] Добавить стабильный per-chat/session identifier для OpenRouter, tracing и sticky routing/prompt cache.
+- [x] Добавить стабильный per-chat/session identifier для OpenRouter, tracing и sticky routing/prompt cache.
 
 ### P1 — научить понимать больше типов сообщений
 
@@ -300,23 +300,23 @@ Long-term memory — самый заметный частный случай э�
 
 #### Остановка self-reinforcing memory
 
-- [ ] Исключить `user_id = 0` / `name = Jarvis` из источников автоматической long-term memory.
-- [ ] Не считать bot-generated prophecy, quiz text и feature narration доказательствами lore.
-- [ ] Удалить предыдущий summary из списка доказательств при следующей пересборке.
-- [ ] Временно отключить автоматический `_promote_lore()`.
-- [ ] Оставить permanent pin только ручной административной операцией до появления строгой policy.
+- [x] Исключить `user_id = 0` / `name = Jarvis` из источников автоматической long-term memory.
+- [x] Не считать bot-generated prophecy, quiz text и feature narration доказательствами lore.
+- [x] Удалить предыдущий summary из списка доказательств при следующей пересборке.
+- [x] Временно отключить автоматический `_promote_lore()`.
+- [x] Оставить permanent pin только ручной административной операцией до появления строгой policy.
 - [ ] Вручную ревьюнуть существующие `chat-summary.md` и `chat-lore.md` перед миграцией.
 
 Критерий готовности: бот не может сделать собственную выдумку постоянной только за счёт повторения.
 
 #### Честные reset/clear операции
 
-- [ ] Разделить `/context_reset` и `/memory_clear` семантически.
-- [ ] `/context_reset` должен явно очищать только краткосрочную историю конкретного чата.
-- [ ] `/memory_clear` должен предлагать scope: rolling, lore или all.
-- [ ] После clear обновлять cursor так, чтобы последние 48 часов не восстановили только что удалённое.
-- [ ] `/memory_refresh` должен сообщать success/failure и новую версию.
-- [ ] Запись файлов до миграции делать атомарно через временный файл и rename.
+- [x] Разделить `/context_reset` и `/memory_clear` семантически.
+- [x] `/context_reset` должен явно очищать только краткосрочную историю конкретного чата.
+- [x] `/memory_clear` должен предлагать scope: rolling, lore или all.
+- [x] После clear обновлять cursor так, чтобы последние 48 часов не восстановили только что удалённое.
+- [x] `/memory_refresh` должен сообщать success/failure и новую версию.
+- [x] Запись файлов до миграции делать атомарно через временный файл и rename.
 
 Критерий готовности: текст ответа каждой команды точно соответствует реально удалённому состоянию.
 
@@ -330,7 +330,7 @@ Long-term memory — самый заметный частный случай э�
 - [ ] Помещать стабильный prefix раньше, динамический context позже.
 - [x] Не вставлять пользовательский или сгенерированный memory text внутрь привилегированных инструкций без маркировки как data.
 - [ ] Зафиксировать каноническую self-biography Jarvis отдельно от памяти пользователей.
-- [ ] Ограничить event/feature overlays: они могут менять локальную роль, но не отменять базовый тон и правила.
+- [x] Ограничить event/feature overlays: они могут менять локальную роль, но не отменять базовый тон и правила.
 
 Критерий готовности: personality стабильна, динамические факты не протухают внутри prompt, feature overlays не hijack'ят характер.
 
@@ -438,7 +438,7 @@ Long-term memory — самый заметный частный случай э�
 - [ ] Если факт о человеке сообщил другой участник, формулировать «X говорил, что…», а не утверждать от себя.
 - [ ] Не спорить с пользователем о собственном прошлом ответе, если точного контекста нет.
 - [ ] При исправлении прямо признавать ошибку и продолжать без длинной самозащиты.
-- [ ] Передавать точную локальную дату/таймзону там, где время важно.
+- [x] Передавать точную локальную дату/таймзону там, где время важно.
 - [ ] Не полагаться на застывшие относительные формулировки вроде «недавно» внутри identity.
 
 #### Тон и юмор
@@ -454,7 +454,7 @@ Long-term memory — самый заметный частный случай э�
 
 - [ ] Искать только внешний проверяемый факт, который мог измениться или действительно неизвестен.
 - [ ] Не искать локальные прозвища, опечатки и внутряки до проверки recent context и memory aliases.
-- [ ] Логировать причину поиска: freshness, unknown entity, verification или explicit request.
+- [x] Логировать причину поиска: freshness, unknown entity, verification или explicit request.
 - [ ] Добавить eval на отсутствие поиска для локальных терминов.
 - [ ] Сохранить защиту от видимого `SEARCH:` marker leak.
 
@@ -526,18 +526,18 @@ Long-term memory — самый заметный частный случай э�
 - [x] Создать единый `ContextBuilder` для OpenRouter, Together и Gemini.
 - [x] Все routes должны получать одинаковые recent context и retrieved memory с одинаковой policy.
 - [x] Fallback не должен незаметно менять личность или доступную память.
-- [ ] Логировать `chat_id`, prompt version, model, provider, route, reasoning effort и fallback chain.
+- [x] Логировать `chat_id`, prompt version, model, provider, route, reasoning effort и fallback chain.
 - [ ] Логировать IDs выбранных memory items, но не весь чувствительный текст.
-- [ ] Логировать token budget по секциям: identity, recent history, retrieved memory, tools.
-- [ ] Логировать latency, search calls, refusal и причину пустого ответа.
+- [x] Логировать token budget по секциям: identity, recent history, retrieved memory, tools.
+- [x] Логировать latency, search calls, refusal и причину пустого ответа.
 - [ ] Добавить метрику summary/memory job success, failure и staleness.
 - [ ] Алертить, если memory cursor или snapshot не обновлялся дольше допустимого периода.
-- [ ] Создавать единый `trace_id` на входящее Telegram message и переносить его через все LLM/tool/fallback вызовы.
-- [ ] Добавить стабильный pseudonymous `session_id` как минимум на `(chat_id, conversation epoch)`.
-- [ ] Передавать session identifier в поддерживаемое OpenRouter поле/metadata после проверки актуального API.
+- [x] Создавать единый `trace_id` на входящее Telegram message и переносить его через все LLM/tool/fallback вызовы.
+- [x] Добавить стабильный pseudonymous `session_id` как минимум на `(chat_id, conversation epoch)`.
+- [x] Передавать session identifier в поддерживаемое OpenRouter поле/metadata после проверки актуального API.
 - [ ] Проверить, улучшает ли session identifier provider sticky routing и prompt-cache hit rate; не считать это гарантированным без telemetry.
-- [ ] Не отправлять Telegram user/chat ID внешнему provider в открытом виде — использовать hash/opaque ID.
-- [ ] Хранить provider request ID, выбранный upstream provider и usage/cost в trace.
+- [x] Не отправлять Telegram user/chat ID внешнему provider в открытом виде — использовать hash/opaque ID.
+- [x] Хранить provider request ID, выбранный upstream provider и usage/cost в trace.
 - [ ] Сделать debug view: какие секции контекста вошли, сколько токенов заняли и почему были выбраны.
 
 ### P1 — eval suite на реальных разговорах
@@ -630,11 +630,11 @@ Blind pairwise replay:
 1. [x] Миграция `messages.chat_id` и изоляция всех запросов.
 2. [x] Исправление duplicate current turn и reply-thread context.
 3. [x] Единый thread-first `ContextBuilder` для всех providers и features.
-4. [ ] Базовая LLM telemetry: trace ID, prompt version, model/provider, route, context tokens, tools, latency и cost.
+4. [x] Базовая LLM telemetry: trace ID, prompt version, model/provider, route, context tokens, tools, latency и cost.
 5. [ ] Golden eval из первых 50 реальных production-сцен.
 6. [ ] Сжать personality и внедрить маленький character bible + few-shot примеры.
 7. [ ] Исправить date grounding, attribution, refusal и feature-overlay правила.
-8. [ ] Исключить Jarvis из источников memory, отключить auto-promote и исправить reset/clear semantics.
+8. [x] Исключить Jarvis из источников memory, отключить auto-promote и исправить reset/clear semantics (осталось: ручной review текущих `chat-summary.md`/`chat-lore.md`).
 9. [ ] Реализовать `memory_items`, structured extraction и selective retrieval.
 10. [ ] Подключить response decision `ignore/react/reply/search` и уместные reactions.
 11. [ ] Добавить voice transcription и чтение присланных ссылок.
@@ -653,8 +653,8 @@ Blind pairwise replay:
 - [x] Reply-chain имеет приоритет над случайными соседними сообщениями.
 - [x] Все providers получают контекст через одну policy.
 - [ ] Personality короче, versioned и не содержит протухающих динамических фактов.
-- [ ] Jarvis знает актуальную дату/таймзону в date-sensitive сценах.
-- [ ] Feature overlays не могут отменить базовую personality и grounding.
+- [x] Jarvis знает актуальную дату/таймзону в date-sensitive сценах.
+- [x] Feature overlays не могут отменить базовую personality и grounding.
 - [ ] Callback появляется по релевантной причине и имеет cooldown.
 - [ ] Low-value участие использует reaction или silence вместо лишнего текста.
 - [ ] Voice, links, stickers и GIF имеют честный semantic representation или явный fallback.
@@ -667,14 +667,14 @@ Blind pairwise replay:
 
 - [ ] Все данные строго изолированы по `chat_id`.
 - [ ] Каждая автоматическая запись имеет человеческий source message.
-- [ ] Ни одна запись не создаётся исключительно из ответа Jarvis.
+- [x] Ни одна запись не создаётся исключительно из ответа Jarvis.
 - [ ] Third-party claim остаётся атрибутированным.
 - [ ] Episodic memory автоматически истекает.
 - [ ] Permanent lore требует строгого threshold или ручного approval.
 - [ ] В prompt попадает не более 3–5 релевантных memory items.
 - [ ] При отсутствии релевантной памяти retrieval возвращает пустой результат.
 - [ ] Пользователь/администратор может увидеть, исправить и забыть запись.
-- [ ] Clear/reset операции имеют однозначную и проверенную семантику.
+- [x] Clear/reset операции имеют однозначную и проверенную семантику.
 - [ ] Все provider routes используют одну policy.
 - [ ] Golden eval проходит согласованные thresholds.
 - [ ] Недельный shadow run не показывает утечек между чатами или новых self-reinforcing callback'ов.
@@ -700,3 +700,30 @@ Blind pairwise replay:
 - Сохранить старые файлы как read-only backup на время shadow периода.
 - Не удалять исходные сообщения при миграции schema.
 - Не выкатывать одновременно Memory v2, новый identity prompt и новую persona model: иначе невозможно понять, что улучшило или ухудшило поведение.
+
+## Журнал выполнения
+
+### 22.09.2026 — P0 context (коммит 7910ff4)
+
+- `messages.chat_id` + индексы (миграция применена в prod), все запросы фильтруются по чату.
+- Текущий turn больше не дублируется; reply-chain идёт первым, затем свежая сцена в пределах char budget.
+- `ContextBuilder` — единая сборка для OpenRouter, Together и Gemini.
+
+### 22.09.2026 — P0 memory hygiene, grounding, telemetry
+
+- Summary пересобирается только из человеческих сообщений (`user_id <> 0`) за 48ч, без предыдущего summary;
+  вход ограничен 800 сообщениями / 60K символов; запись атомарная; при ошибке повтор через ~1ч, а не через сутки.
+- Auto-promote lore отключён: «НА ЗАКРЕП» → `data/chat-lore-candidates.md` (в prompt не попадает),
+  админ закрепляет через `/memory_pin к<N>`. Промпт summary требует атрибуции чужих слов и запрещает чувствительные оценки.
+- `/context_reset` (= `/mut_reset`) сбрасывает только текущий чат; `/memory_clear rolling|lore|all` с memory cursor;
+  `/memory_refresh` отвечает итогом; `/memory` показывает кандидатов.
+- В system prompt добавлено точное время: дата по Киеву + время в Дании/Германии.
+- Boss/event overlay вынесен в обрамлённый блок: может полностью менять голос (захват Пуджинио сохранён
+  намеренно), но факты, даты, собственные прошлые реплики и суть полезного ответа закреплены.
+- `web_search` получил поле `reason` и запрет искать локальные прозвища/внутряки.
+- `services/llm_trace.py`: trace на каждый ответ персоны (contextvars), attempts с model/upstream/usage/cost/latency/error,
+  tool calls, размеры секций контекста, prompt version; лог `LLM_TRACE {...}` + таблица `llm_traces`.
+  В OpenRouter уходят `user`/`session_id` (salted hash от chat и context epoch) и `trace.trace_id`.
+
+Следующие шаги по порядку: ручной review текущих summary/lore → golden eval из 50 сцен (можно начать с `llm_traces`)
+→ сжатие personality prompt → Memory v2.

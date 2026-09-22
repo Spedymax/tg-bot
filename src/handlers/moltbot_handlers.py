@@ -20,11 +20,15 @@ from apscheduler.triggers.cron import CronTrigger
 from config.settings import Settings
 from services.circuit_breaker import ollama_breaker, together_breaker, openrouter_breaker
 from services.context_builder import ContextBuilder, ContextSnapshot
+from services import llm_trace
 
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CHAT_SUMMARY_PATH = os.path.join(_BASE_DIR, 'data', 'chat-summary.md')
 # Pinned lore — permanent in-jokes/legends that survive the rolling summary rewrite.
 CHAT_LORE_PATH = os.path.join(_BASE_DIR, 'data', 'chat-lore.md')
+# Lore the summarizer proposes. Never injected into prompts — an admin promotes
+# entries by hand (/memory_pin к<N>) so the bot can't make its own jokes permanent.
+CHAT_LORE_CANDIDATES_PATH = os.path.join(_BASE_DIR, 'data', 'chat-lore-candidates.md')
 STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "moltbot_state.json")
 
 # Live-switchable reasoning depth for the OpenRouter/Grok persona model.
@@ -101,11 +105,39 @@ def _lore_lines(chat_id: int | None = None) -> list[str]:
     return [ln.strip() for ln in _load_chat_lore(chat_id).splitlines() if ln.strip()]
 
 
-def _save_lore_lines(lines: list[str], chat_id: int | None = None) -> None:
-    path = _chat_memory_path(CHAT_LORE_PATH, chat_id)
+def _atomic_write(path: str, text: str) -> None:
+    """Write via temp file + rename so a crash never leaves a half-written memory file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines).strip() + ("\n" if lines else ""))
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def _save_lore_lines(lines: list[str], chat_id: int | None = None) -> None:
+    _atomic_write(_chat_memory_path(CHAT_LORE_PATH, chat_id),
+                  "\n".join(lines).strip() + ("\n" if lines else ""))
+
+
+def _lore_candidate_lines(chat_id: int | None = None) -> list[str]:
+    try:
+        with open(_chat_memory_path(CHAT_LORE_CANDIDATES_PATH, chat_id), encoding="utf-8") as f:
+            return [ln.strip() for ln in f if ln.strip()]
+    except FileNotFoundError:
+        return []
+
+
+def _save_lore_candidate_lines(lines: list[str], chat_id: int | None = None) -> None:
+    _atomic_write(_chat_memory_path(CHAT_LORE_CANDIDATES_PATH, chat_id),
+                  "\n".join(lines).strip() + ("\n" if lines else ""))
+
+
+def _remove_memory_file(base_path: str, chat_id: int | None) -> bool:
+    path = _chat_memory_path(base_path, chat_id)
+    if not os.path.exists(path):
+        return False
+    os.remove(path)
+    return True
 
 
 logger = logging.getLogger(__name__)
@@ -133,9 +165,12 @@ SPIKE_DELAY_MIN, SPIKE_DELAY_MAX = 5 * 60, 20 * 60  # seconds
 # Smart summary config
 SUMMARY_UPDATE_HOURS = 24     # update chat-summary.md every N hours
 SUMMARY_FETCH_HOURS = 48      # fetch messages from last N hours for summary
+SUMMARY_MAX_MESSAGES = 800    # newest human messages considered per rebuild
+SUMMARY_CHAR_BUDGET = 60_000  # keeps the summarizer input bounded in a busy chat
 HISTORY_MESSAGE_LIMIT = 100
 HISTORY_CHAR_BUDGET = 12_000  # conservative ~3K-token cap before prompt/memory
 CPH_TZ = ZoneInfo("Europe/Copenhagen")
+KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 
 class MoltbotHandlers:
@@ -145,6 +180,8 @@ class MoltbotHandlers:
         self.router = Router()
         self._bot_username = None  # lazily cached
         self._history_reset_time: dict[int, datetime] = {}  # chat_id → reset timestamp
+        # chat_id → memory is rebuilt only from messages after this point (/memory_clear)
+        self._memory_cursor: dict[int, datetime] = {}
         self._gemini_model = None
         self._last_proactive_sent: dict[int, datetime] = {}
         self._proactive_queued: set[int] = set()
@@ -162,6 +199,7 @@ class MoltbotHandlers:
         self._load_state()
         self._init_gemini()
         asyncio.ensure_future(self._ensure_danetki_table())
+        asyncio.ensure_future(llm_trace.ensure_table(self.db))
         asyncio.ensure_future(self._reminder_loop())
         self._register()
 
@@ -174,6 +212,8 @@ class MoltbotHandlers:
                 data = json.load(f)
             for chat_id_str, ts in data.get("history_reset_time", {}).items():
                 self._history_reset_time[int(chat_id_str)] = datetime.fromisoformat(ts)
+            for chat_id_str, ts in data.get("memory_cursor", {}).items():
+                self._memory_cursor[int(chat_id_str)] = datetime.fromisoformat(ts)
             if data.get("reasoning_effort") in REASONING_LEVELS:
                 self._reasoning_effort = data["reasoning_effort"]
             if data.get("reasoning_last_activity"):
@@ -190,6 +230,9 @@ class MoltbotHandlers:
             data = {
                 "history_reset_time": {
                     str(k): v.isoformat() for k, v in self._history_reset_time.items()
+                },
+                "memory_cursor": {
+                    str(k): v.isoformat() for k, v in getattr(self, "_memory_cursor", {}).items()
                 },
                 "reasoning_effort": self._reasoning_effort,
                 "reasoning_last_activity": (
@@ -778,8 +821,12 @@ class MoltbotHandlers:
             sender_name, user_text, chat_context, history, chat_id
         )
         prompt = self._get_context_builder().flatten(snapshot)
-        response = await asyncio.to_thread(self._gemini_model.generate_content, prompt)
-        return response.text
+
+        async def generate():
+            response = await asyncio.to_thread(self._gemini_model.generate_content, prompt)
+            return response.text
+
+        return await self._traced_attempt("gemini", "gemini-2.5-flash-lite", generate)
 
     async def _count_recent_messages(self, chat_id: int, minutes: int) -> int:
         """Count messages in DB written in the last `minutes` minutes."""
@@ -857,113 +904,142 @@ class MoltbotHandlers:
 
     # ── Smart summary ─────────────────────────────────────────────────────────
 
-    async def _update_summary(self, chat_id: int):
-        """Fetch recent messages and ask Together.ai to rewrite chat-summary.md."""
+    async def _update_summary(self, chat_id: int) -> tuple[bool, str]:
+        """Rebuild chat-summary.md from recent HUMAN messages only.
+
+        Deliberately not fed with the previous summary or Jarvis' own replies:
+        both let the bot's jokes and stale items survive as "facts" (see the
+        2026-09-22 audit — Лисёнок: 2 human vs 39 bot mentions). Lore proposals
+        go to a review file instead of being pinned automatically.
+        Returns (ok, human-readable detail) for /memory_refresh.
+        """
         try:
-            rows = await self.db.execute_query(
-                "SELECT name, message_text, timestamp FROM messages "
-                "WHERE chat_id = %s AND timestamp >= NOW() - INTERVAL '%s hours' "
-                "ORDER BY timestamp ASC",
-                (chat_id, SUMMARY_FETCH_HOURS),
+            ok, detail = await self._rebuild_summary(chat_id)
+        except Exception as e:
+            ok, detail = False, f"ошибка: {e}"
+            logger.error(f"MoltBot: summary update failed: {e}")
+        if not ok:
+            # Retry in ~1h instead of waiting another full day.
+            self._last_summary_update[chat_id] = (
+                datetime.now(timezone.utc) - timedelta(hours=SUMMARY_UPDATE_HOURS - 1)
             )
-            if not rows:
-                return
-            messages = [
-                f"{self._format_ts(r[2])} {r[0] or 'Аноним'}: {r[1]}"
-                for r in rows
-            ]
-            history_text = "\n".join(messages)
+        return ok, detail
 
-            current_summary = _load_chat_summary(chat_id)
-            current_lore = _load_chat_lore(chat_id)
-            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    async def _rebuild_summary(self, chat_id: int) -> tuple[bool, str]:
+        cursor = getattr(self, "_memory_cursor", {}).get(chat_id)
+        rows = await self.db.execute_query(
+            "SELECT name, message_text, timestamp FROM messages "
+            "WHERE chat_id = %s AND user_id <> 0 "
+            "AND timestamp >= NOW() - INTERVAL '%s hours' "
+            "AND (%s::timestamptz IS NULL OR timestamp >= %s::timestamptz) "
+            "ORDER BY timestamp DESC LIMIT %s",
+            (chat_id, SUMMARY_FETCH_HOURS, cursor, cursor, SUMMARY_MAX_MESSAGES),
+        )
+        if not rows:
+            return False, "нет новых человеческих сообщений"
+        messages: list[str] = []
+        used = 0
+        for r in rows:  # newest first → keep the freshest within the budget
+            line = f"{self._format_ts(r[2])} {r[0] or 'Аноним'}: {r[1]}"
+            if used + len(line) > SUMMARY_CHAR_BUDGET:
+                break
+            messages.append(line)
+            used += len(line)
+        history_text = "\n".join(reversed(messages))
 
-            prompt = f"""[СЛУЖЕБНЫЙ ЗАПРОС — пересборка короткой памяти чата]
+        current_lore = _load_chat_lore(chat_id)
 
-Ты ведёшь короткую память о групповом чате друзей. Полностью пересобери её заново (не дописывай к старой, а пересобери). Память состоит из двух секций (+ опциональная третья — НА ЗАКРЕП).
+        prompt = f"""[СЛУЖЕБНЫЙ ЗАПРОС — пересборка короткой памяти чата]
+
+Ты ведёшь короткую память о групповом чате друзей. Собери её с нуля ТОЛЬКО по сообщениям ниже — всё, чего в них нет, считается неактуальным. Память состоит из двух секций (+ опциональная третья — НА ЗАКРЕП).
 
 == УЧАСТНИКИ (для атрибуции, все мужчины — правильный род) ==
 - Макс (Max, Spedymax) — программист, создатель бота, живёт в Дании
 - Юра (Юрочка, Spatifilum) — геймер
 - Богдан (Бодя, @lofiSnitch) — учится в Эрлангене
 - Шева — друг, иногда в доте, не в чате
-- Кеша/Джарвис — это сам бот
-
-== ТЕКУЩАЯ ПАМЯТЬ ==
-{current_summary or '(пусто)'}
+- Кеша/Джарвис — это сам бот; его реплик здесь нет специально
 
 == УЖЕ ЗАКРЕПЛЕНО НАВСЕГДА (НЕ дублируй это в секции НА ЗАКРЕП) ==
 {current_lore or '(пусто)'}
 
-== СООБЩЕНИЯ ЗА ПОСЛЕДНИЕ {SUMMARY_FETCH_HOURS} ЧАСОВ ==
+== СООБЩЕНИЯ ЛЮДЕЙ ЗА ПОСЛЕДНИЕ {SUMMARY_FETCH_HOURS} ЧАСОВ ==
 {history_text}
 
 == ФОРМАТ ПАМЯТИ (именно такие заголовки) ==
 
 == ЧТО ПРОИСХОДИТ СЕЙЧАС ==
-Чем сейчас живут ребята: дела, планы, события, повторяющиеся темы. Коротко, по факту. Что уже неактуально — убирай.
+Чем сейчас живут ребята: дела, планы, события, повторяющиеся темы. Коротко, по факту, с датой, если она важна («в субботу 26.09 играют»), а не «недавно»/«скоро».
 
 == ЖИВЫЕ ВНУТРЯКИ ==
-Фраза/прикол попадает сюда ТОЛЬКО если он реально повторялся — к нему возвращались, цитировали или переспрашивали минимум 2 раза (в идеале разные люди). Одноразовая смешная фраза, случайный мат, эмоциональный вскрик ("ЕБАТЬ", "НАЛИВАЙ") — это НЕ внутряк, не записывай. Сомневаешься — не пиши.
-Максимум 8 штук, самые актуальные. Перестал появляться — выкидывай. Для каждого: сам внутряк + одной короткой фразой что значит.
+Фраза/прикол попадает сюда ТОЛЬКО если он реально повторялся в этих сообщениях — к нему возвращались, цитировали или переспрашивали минимум 2 раза (в идеале разные люди). Одноразовая смешная фраза, случайный мат, эмоциональный вскрик ("ЕБАТЬ", "НАЛИВАЙ") — это НЕ внутряк, не записывай. Сомневаешься — не пиши.
+Максимум 8 штук. Для каждого: сам внутряк + одной короткой фразой что значит.
 
 == НА ЗАКРЕП ==
-Сюда — ТОЛЬКО устоявшаяся легенда чата: внутряк/персонаж/мем, который всплывает СНОВА И СНОВА через разные дни (не просто пару раз за сегодня), настолько свой и живучий, что забыть его было бы потерей. Если такого нет — оставь секцию ПУСТОЙ (это норма). Максимум 1-2 за раз. НЕ дублируй то, что уже в «УЖЕ ЗАКРЕПЛЕНО». НИКОГДА не закрепляй ничего про несовершеннолетних или реальное насилие. Каждый — одной строкой: суть + что значит.
+Кандидаты в легенду чата: внутряк/персонаж/мем, который люди поднимают снова и снова. Если такого нет — оставь секцию ПУСТОЙ (это норма). Максимум 1-2. НЕ дублируй «УЖЕ ЗАКРЕПЛЕНО». НИКОГДА не предлагай ничего про несовершеннолетних или реальное насилие. Каждый — одной строкой: суть + что значит.
 
 == ПРАВИЛА ==
 - Только факты из сообщений. НЕ интерпретируй и не додумывай ("ирония", "возможно отсылка", "неясно что").
+- Слова одного человека о другом записывай как «Юра говорит, что Богдан…», а не как факт.
+- Не записывай оскорбления, сексуальные характеристики, диагнозы и прочие чувствительные оценки людей.
 - Память (первые две секции) — не длиннее ~1500 символов. Лучше пустая секция, чем мусор.
 - Верни ТОЛЬКО текст (две секции памяти + при необходимости НА ЗАКРЕП), без markdown-решёток, обёрток и пояснений."""
 
-            if not Settings.TOGETHER_API_KEY:
-                logger.warning("MoltBot: TOGETHER_API_KEY not set, falling back to Ollama for summary")
+        if not Settings.TOGETHER_API_KEY:
+            logger.warning("MoltBot: TOGETHER_API_KEY not set, falling back to Ollama for summary")
+            new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
+        else:
+            try:
+                data = await self._together_post(
+                    {
+                        "model": Settings.TOGETHER_MODEL,
+                        "messages": [
+                            {"role": "system", "content": "Ты ведёшь короткую память о групповом чате. Только факты, строгая планка для внутряков, без воды."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "max_tokens": 900,
+                        "temperature": 0.4,
+                    },
+                    timeout=180,
+                )
+                new_summary = data["choices"][0]["message"]["content"]
+                new_summary = re.sub(r'<think>.*?(?:</think>|$)', '', new_summary, flags=re.DOTALL).strip()
+            except Exception as e:
+                logger.warning(f"MoltBot: Together.ai summary failed, falling back to Ollama: {e}")
                 new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
-            else:
-                try:
-                    data = await self._together_post(
-                        {
-                            "model": Settings.TOGETHER_MODEL,
-                            "messages": [
-                                {"role": "system", "content": "Ты ведёшь короткую память о групповом чате. Только факты, строгая планка для внутряков, без воды."},
-                                {"role": "user", "content": prompt},
-                            ],
-                            "max_tokens": 900,
-                            "temperature": 0.4,
-                        },
-                        timeout=180,
-                    )
-                    new_summary = data["choices"][0]["message"]["content"]
-                    new_summary = re.sub(r'<think>.*?(?:</think>|$)', '', new_summary, flags=re.DOTALL).strip()
-                except Exception as e:
-                    logger.warning(f"MoltBot: Together.ai summary failed, falling back to Ollama: {e}")
-                    new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
 
-            if not new_summary or len(new_summary) < 50:
-                logger.warning("MoltBot: LLM returned suspiciously short summary, skipping save")
-                return
-            # Separate the optional auto-pin section from the rolling summary so it
-            # never pollutes chat-summary.md and survives in chat-lore.md instead.
-            summary_text, pin_block = new_summary, ""
-            parts = re.split(r'==\s*НА\s+ЗАКРЕП\s*==', new_summary, maxsplit=1)
-            if len(parts) == 2:
-                summary_text, pin_block = parts[0].strip(), parts[1].strip()
-            # Hard backstop against runaway growth (prompt asks for ~1500)
-            summary_text = summary_text[:2500].strip()
+        if not new_summary or len(new_summary) < 50:
+            logger.warning("MoltBot: LLM returned suspiciously short summary, skipping save")
+            return False, "модель вернула пустой/слишком короткий ответ, старая память оставлена"
+        # Separate the optional pin section from the rolling summary so it never
+        # pollutes chat-summary.md; it becomes a candidate for manual review.
+        summary_text, pin_block = new_summary, ""
+        parts = re.split(r'==\s*НА\s+ЗАКРЕП\s*==', new_summary, maxsplit=1)
+        if len(parts) == 2:
+            summary_text, pin_block = parts[0].strip(), parts[1].strip()
+        # Hard backstop against runaway growth (prompt asks for ~1500)
+        summary_text = summary_text[:2500].strip()
 
-            summary_path = _chat_memory_path(CHAT_SUMMARY_PATH, chat_id)
-            os.makedirs(os.path.dirname(summary_path), exist_ok=True)
-            with open(summary_path, "w", encoding="utf-8") as f:
-                f.write(summary_text)
-            logger.info(f"MoltBot: summary updated for chat {chat_id} ({len(summary_text)} chars)")
-            if pin_block:
-                self._promote_lore(pin_block, chat_id)
-        except Exception as e:
-            logger.error(f"MoltBot: summary update failed: {e}")
+        _atomic_write(_chat_memory_path(CHAT_SUMMARY_PATH, chat_id), summary_text)
+        logger.info(f"MoltBot: summary updated for chat {chat_id} ({len(summary_text)} chars, "
+                    f"{len(messages)} human msgs)")
+        proposed = self._propose_lore(pin_block, chat_id) if pin_block else []
+        detail = f"{len(summary_text)} симв. из {len(messages)} сообщений"
+        if proposed:
+            detail += f"; кандидатов в закреп: {len(proposed)}"
+        return True, detail
 
     _LORE_CAP = 20
+    _MEMORY_CLEAR_SCOPES = {
+        "rolling": "rolling", "summary": "rolling", "текущую": "rolling", "текущая": "rolling",
+        "lore": "lore", "лор": "lore", "закреп": "lore",
+        "all": "all", "всё": "all", "все": "all",
+    }
+    _LORE_CANDIDATES_CAP = 10
 
-    def _promote_lore(self, pin_block: str, chat_id: int):
-        """Append LLM-proposed permanent in-jokes to chat-lore.md (dedup + cap)."""
+    def _propose_lore(self, pin_block: str, chat_id: int) -> list[str]:
+        """Queue LLM-proposed in-jokes for admin review (dedup against lore + queue).
+        Never auto-pins: the bot must not be able to make its own jokes permanent."""
         def _sig_words(s: str) -> set:
             # proper nouns (Capitalized+lowercase tail) — the real key of an in-joke
             # ("Коваленко", "Фреско"); topical lowercase words are ignored to avoid
@@ -971,7 +1047,9 @@ class MoltbotHandlers:
             return {w.lower() for w in re.findall(r'[A-ZА-ЯЁ][a-zа-яё]{3,}', s)}
 
         try:
-            kept = _lore_lines(chat_id)
+            lore = _lore_lines(chat_id)
+            queued = _lore_candidate_lines(chat_id)
+            kept = lore + queued
             kept_lc = [l.lower() for l in kept]
             kept_sig = [_sig_words(l) for l in kept]
             added = []
@@ -988,13 +1066,14 @@ class MoltbotHandlers:
                 kept_lc.append(cl)
                 kept_sig.append(csig)
                 added.append(cand)
-                if len(kept) >= self._LORE_CAP:
-                    break
             if added:
-                _save_lore_lines(kept, chat_id)
-                logger.info(f"MoltBot: auto-pinned {len(added)} lore item(s): {added}")
+                queued = (queued + added)[-self._LORE_CANDIDATES_CAP:]
+                _save_lore_candidate_lines(queued, chat_id)
+                logger.info(f"MoltBot: queued {len(added)} lore candidate(s) for review: {added}")
+            return added
         except Exception as e:
-            logger.error(f"MoltBot: lore promotion failed: {e}")
+            logger.error(f"MoltBot: lore proposal failed: {e}")
+            return []
 
     def _maybe_update_summary(self, chat_id: int):
         """Trigger summary update if enough time has passed (every SUMMARY_UPDATE_HOURS)."""
@@ -1097,17 +1176,38 @@ class MoltbotHandlers:
         "Просят помочь — помоги, подкол только сверху ответа, а не вместо него.)"
     )
 
-    @property
-    def _POST_PROMPT(self) -> str:
-        """Post-prompt plus whatever the boss event wants to inject (Pudginio hijack,
-        MVP respect). The injection is a sync cache refreshed by BossHandlers' tick."""
+    @staticmethod
+    def _persona_overlay() -> str:
+        """Whatever the boss event wants to inject (Pudginio hijack, MVP respect).
+        A sync cache refreshed by BossHandlers' tick; ContextBuilder frames it so it
+        may change the voice but not facts, dates or grounding."""
         try:
             from services.boss_service import get_boss_service
             _boss = get_boss_service()
-            inj = _boss.persona_injection if _boss else ""
+            return (_boss.persona_injection if _boss else "") or ""
         except Exception:
-            inj = ""
+            return ""
+
+    @property
+    def _POST_PROMPT(self) -> str:
+        """Post-prompt as the model sees it, overlay framing aside (kept for scripts)."""
+        inj = self._persona_overlay()
         return f"{self._POST_PROMPT_BASE}\n\n{inj}" if inj else self._POST_PROMPT_BASE
+
+    _RU_WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
+    _RU_MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля",
+                  "августа", "сентября", "октября", "ноября", "декабря")
+
+    @classmethod
+    def _clock_text(cls, now: datetime | None = None) -> str:
+        """Exact current date/time for date grounding: Kyiv (chat events) + CET (Макс, Богдан)."""
+        now = now or datetime.now(timezone.utc)
+        kyiv = now.astimezone(KYIV_TZ)
+        cph = now.astimezone(CPH_TZ)
+        return (
+            f"{cls._RU_WEEKDAYS[kyiv.weekday()]}, {kyiv.day} {cls._RU_MONTHS[kyiv.month - 1]} "
+            f"{kyiv.year}, {kyiv:%H:%M} по Киеву; в Дании/Германии {cph:%H:%M}"
+        )
 
     # Bot names used to identify assistant messages in history
     _BOT_NAMES = {
@@ -1134,12 +1234,15 @@ class MoltbotHandlers:
                                       chat_context: str, history: list[str] | None,
                                       chat_id: int | None = None) -> ContextSnapshot:
         """Load dynamic inputs once and build the provider-neutral context snapshot."""
+        prompt_version = None
         try:
             from services.prompt_service import get_prompt_service
-            identity = await get_prompt_service().get_current_identity()
+            prompt_service = get_prompt_service()
+            identity = await prompt_service.get_current_identity()
+            prompt_version = getattr(prompt_service, "_cache_version_id", None)
         except Exception:
             identity = ""
-        return self._get_context_builder().build(
+        snapshot = self._get_context_builder().build(
             identity=identity,
             hard_rules=self._HARD_RULES,
             chat_context=chat_context,
@@ -1148,8 +1251,15 @@ class MoltbotHandlers:
             history=history,
             sender_name=sender_name,
             user_text=user_text,
-            post_prompt=self._POST_PROMPT,
+            post_prompt=self._POST_PROMPT_BASE,
+            clock=self._clock_text(),
+            overlay=self._persona_overlay(),
         )
+        trace = llm_trace.current()
+        if trace:
+            trace.sections = dict(snapshot.section_chars)
+            trace.prompt_version = prompt_version
+        return snapshot
 
     async def _build_persona_messages(self, sender_name: str, user_text: str,
                                       chat_context: str, history: list[str] | None,
@@ -1167,6 +1277,41 @@ class MoltbotHandlers:
         text = re.sub(r'\n\s*\n\s*\n', '\n\n', text).strip()
         return text
 
+    def _provider_ids(self, chat_id: int | None) -> dict:
+        """Opaque OpenRouter identifiers: session = (chat, context epoch) for sticky
+        routing / prompt cache; trace_id links provider logs to llm_traces."""
+        if chat_id is None:
+            return {}
+        epoch = getattr(self, "_history_reset_time", {}).get(chat_id)
+        ids = {
+            "user": llm_trace.opaque_id("chat", chat_id),
+            "session_id": llm_trace.opaque_id("session", chat_id, epoch.isoformat() if epoch else "0"),
+        }
+        trace = llm_trace.current()
+        if trace:
+            ids["trace"] = {"trace_id": trace.trace_id, "generation_name": trace.kind}
+        return ids
+
+    async def _traced_attempt(self, provider: str, model: str, call):
+        """Run one provider call, recording it as an attempt on the current trace."""
+        trace = llm_trace.current()
+        attempt = trace.start_attempt(provider, model) if trace else None
+        started = time.monotonic()
+        try:
+            result = await call()
+            if attempt:
+                attempt.ok = bool(result and str(result).strip())
+                if not attempt.ok:
+                    attempt.error = "empty"
+            return result
+        except Exception as e:
+            if attempt:
+                attempt.error = f"{type(e).__name__}: {str(e)[:200]}"
+            raise
+        finally:
+            if attempt:
+                attempt.latency_ms = int((time.monotonic() - started) * 1000)
+
     async def _call_together(self, sender_name: str, user_text: str,
                              chat_context: str, history: list[str] | None = None,
                              chat_id: int | None = None) -> str:
@@ -1176,7 +1321,7 @@ class MoltbotHandlers:
         messages = await self._build_persona_messages(
             sender_name, user_text, chat_context, history, chat_id
         )
-        text = await self._complete_with_tools(
+        text = await self._traced_attempt("together", Settings.TOGETHER_MODEL, lambda: self._complete_with_tools(
             self._together_post,
             {
                 "model": Settings.TOGETHER_MODEL,
@@ -1185,7 +1330,7 @@ class MoltbotHandlers:
                 "temperature": 0.8,
             },
             timeout=120,
-        )
+        ))
         return self._clean_persona_reply(text)
 
     async def _openrouter_post(self, payload: dict, timeout: float) -> dict:
@@ -1236,18 +1381,23 @@ class MoltbotHandlers:
         messages = await self._build_persona_messages(
             sender_name, user_text, chat_context, history, chat_id
         )
+        effort = self._current_reasoning_effort()
+        trace = llm_trace.current()
+        if trace:
+            trace.reasoning = effort
         try:
-            text = await self._complete_with_tools(
+            text = await self._traced_attempt("openrouter", Settings.OPENROUTER_MODEL, lambda: self._complete_with_tools(
                 self._openrouter_post,
                 {
                     "model": Settings.OPENROUTER_MODEL,
                     "messages": messages,
                     "max_tokens": 3000,
                     "temperature": 0.8,
-                    "reasoning": {"effort": self._current_reasoning_effort()},
+                    "reasoning": {"effort": effort},
+                    **self._provider_ids(chat_id),
                 },
                 timeout=120,
-            )
+            ))
             openrouter_breaker.record_success()
             return self._clean_persona_reply(text)
         except Exception as e:
@@ -1394,7 +1544,8 @@ class MoltbotHandlers:
                 "Поиск в интернете. Вызывай, когда нужен свежий или точный факт, которого ты "
                 "не знаешь: новости, курсы, результаты матчей, кто такой X, что за X, что случилось. "
                 "Любой вопрос про незнакомого человека/вещь/событие — повод искать, а не отвечать «хз». "
-                "На болтовню, мнения и советы поиск не нужен."
+                "На болтовню, мнения и советы поиск не нужен. Прозвища, внутряки, опечатки и "
+                "слова из этого чата не ищи — сначала смотри историю и память чата."
             ),
             "parameters": {
                 "type": "object",
@@ -1402,7 +1553,13 @@ class MoltbotHandlers:
                     "query": {
                         "type": "string",
                         "description": "Короткий поисковый запрос на русском (или на языке темы).",
-                    }
+                    },
+                    "reason": {
+                        "type": "string",
+                        "enum": ["freshness", "unknown_entity", "verification", "explicit_request"],
+                        "description": "Почему нужен поиск: свежие данные, незнакомая сущность, "
+                                       "проверка факта или тебя прямо попросили поискать.",
+                    },
                 },
                 "required": ["query"],
             },
@@ -1441,8 +1598,14 @@ class MoltbotHandlers:
                 f"Поиск по запросу '{query}' пропущен: лимит времени на поиск исчерпан. "
                 "Отвечай тем, что уже нашёл, и не выдумывай."
             )
-        logger.info(f"MoltBot: web_search tool → '{query}'")
+        reason = str(args.get("reason") or "unspecified")
+        logger.info(f"MoltBot: web_search tool → '{query}' (reason: {reason})")
+        started = time.monotonic()
         results = await self._brave_search(query)
+        trace = llm_trace.current()
+        if trace:
+            trace.record_tool("web_search", reason, bool(results),
+                              int((time.monotonic() - started) * 1000))
         if not results:
             return f"По запросу '{query}' ничего не нашлось. Скажи честно, что не нашёл, не выдумывай."
         return (
@@ -1480,6 +1643,9 @@ class MoltbotHandlers:
                     data = await post({**base, "messages": messages}, timeout)
                 else:
                     raise
+            trace = llm_trace.current()
+            if trace and trace.attempts:
+                llm_trace.apply_response(trace.attempts[-1], data)
             msg = data["choices"][0]["message"]
             content = msg.get("content") or ""
             tool_calls = msg.get("tool_calls") or []
@@ -1559,6 +1725,33 @@ class MoltbotHandlers:
                                   chat_context: str,
                                   history: list[str] | None = None,
                                   chat_id: int | None = None) -> str:
+        """Traced persona reply: one llm_traces row per call, whatever route answers."""
+        if llm_trace.current() is not None:  # nested call (e.g. re-ask after search)
+            return await self._ask_moltbot_routed_untraced(
+                sender_name, user_text, chat_context, history, chat_id
+            )
+        trace, token = llm_trace.begin("persona", chat_id)
+        reply = None
+        try:
+            reply = await self._ask_moltbot_routed_untraced(
+                sender_name, user_text, chat_context, history, chat_id
+            )
+            trace.finish("ok" if reply and reply.strip() else "empty", reply)
+            return reply
+        except _AIRefusalError:
+            trace.finish("refusal")
+            raise
+        except Exception as e:
+            trace.finish(f"error:{type(e).__name__}")
+            raise
+        finally:
+            llm_trace.end(token)
+            llm_trace.persist_in_background(trace, getattr(self, "db", None))
+
+    async def _ask_moltbot_routed_untraced(self, sender_name: str, user_text: str,
+                                           chat_context: str,
+                                           history: list[str] | None = None,
+                                           chat_id: int | None = None) -> str:
         """Route: OpenRouter/Grok → Together.ai fallback. Web search is a native tool call
         (web_search → Brave); legacy SEARCH:/INTERNET text markers are intercepted as a fallback."""
         if not Settings.OPENROUTER_API_KEY and not Settings.TOGETHER_API_KEY:
@@ -2267,17 +2460,17 @@ class MoltbotHandlers:
             await message.reply("📊 Собираю статистику...")
             asyncio.create_task(self._send_weekly_analytics(message.chat.id))
 
-        @router.message(Command(commands=['мут_сброс', 'mut_reset']))
+        @router.message(Command(commands=['мут_сброс', 'mut_reset', 'context_reset']))
         async def handle_reset(message: Message):
-            """Reset chat history context in ALL chats. Bot won't see messages before this point."""
-            now = datetime.now(timezone.utc)
-            # Reset all known chats + current chat
-            all_chat_ids = set(CHAT_KEYS.keys()) | {message.chat.id}
-            for chat_id in all_chat_ids:
-                self._history_reset_time[chat_id] = now
+            """Reset short-term history of THIS chat only. Long-term memory is untouched."""
+            chat_id = message.chat.id
+            self._history_reset_time[chat_id] = datetime.now(timezone.utc)
             self._save_state()
-            logger.info(f"MoltBot: history reset for ALL chats ({len(all_chat_ids)}) by {message.from_user.id}")
-            await message.reply(f"⚙️ Контекст сброшен во всех чатах ({len(all_chat_ids)}). Чистый лист.")
+            logger.info(f"MoltBot: history reset for chat {chat_id} by {message.from_user.id}")
+            await message.reply(
+                "⚙️ Краткосрочный контекст этого чата сброшен: сообщения до этого момента "
+                "я больше не вижу. Долгая память и закреп не тронуты — это /memory_clear."
+            )
 
         @router.message(Command(commands=['reasoning', 'ризонинг', 'думай']))
         async def handle_reasoning(message: Message):
@@ -2317,10 +2510,13 @@ class MoltbotHandlers:
                 return
             mem = _load_chat_summary(message.chat.id)
             lines = _lore_lines(message.chat.id)
+            candidates = _lore_candidate_lines(message.chat.id)
             pinned = ("\n\n📌 Закреплённые внутряки:\n" +
                       "\n".join(f"{i+1}. {ln}" for i, ln in enumerate(lines))) if lines else "\n\n📌 Закреплённых внутряков нет."
-            body = (f"🧠 Память чата ({len(mem)} симв.):\n\n{mem}" if mem else "🧠 Память пуста.") + pinned
-            await message.reply(body)
+            queued = ("\n\n🕓 Кандидаты в закреп (бот их не использует, пока не закрепишь: /memory_pin к<номер>):\n" +
+                      "\n".join(f"к{i+1}. {ln}" for i, ln in enumerate(candidates))) if candidates else ""
+            body = (f"🧠 Память чата ({len(mem)} симв.):\n\n{mem}" if mem else "🧠 Память пуста.") + pinned + queued
+            await self._send_long_reply(message, body)
 
         @router.message(Command(commands=['memory_refresh']))
         async def handle_memory_refresh(message: Message):
@@ -2330,18 +2526,49 @@ class MoltbotHandlers:
             await message.reply("🧠 Пересобираю память (займёт несколько секунд)...")
             chat_id = message.chat.id
             self._last_summary_update[chat_id] = datetime.now(timezone.utc)
-            asyncio.create_task(self._update_summary(chat_id))
+
+            async def refresh_and_report():
+                ok, detail = await self._update_summary(chat_id)
+                prefix = "✅ Память пересобрана" if ok else "⚠️ Память не обновлена"
+                try:
+                    await message.reply(f"{prefix}: {detail}.")
+                except Exception as e:
+                    logger.warning(f"MoltBot: could not report memory refresh: {e}")
+
+            asyncio.create_task(refresh_and_report())
 
         @router.message(Command(commands=['memory_clear']))
         async def handle_memory_wipe(message: Message):
             if message.from_user.id not in Settings.ADMIN_IDS:
                 await message.reply("У вас нет доступа.")
                 return
+            parts = (message.text or "").split(maxsplit=1)
+            scope = self._MEMORY_CLEAR_SCOPES.get(parts[1].strip().lower() if len(parts) > 1 else "")
+            if scope is None:
+                await message.reply(
+                    "Что стереть?\n"
+                    "/memory_clear rolling — текущую память (что происходит + внутряки)\n"
+                    "/memory_clear lore — закреплённые внутряки и кандидатов\n"
+                    "/memory_clear all — всё сразу\n"
+                    "Краткосрочный контекст сбрасывается отдельно: /context_reset"
+                )
+                return
+            chat_id = message.chat.id
             try:
-                summary_path = _chat_memory_path(CHAT_SUMMARY_PATH, message.chat.id)
-                if os.path.exists(summary_path):
-                    os.remove(summary_path)
-                await message.reply("🧠 Память обнулена.")
+                removed = []
+                if scope in ("rolling", "all"):
+                    _remove_memory_file(CHAT_SUMMARY_PATH, chat_id)
+                    # Rebuilds only look at messages after this point, otherwise the
+                    # last 48h would quietly restore what was just wiped.
+                    self._memory_cursor[chat_id] = datetime.now(timezone.utc)
+                    self._save_state()
+                    removed.append("текущая память (пересоберётся только из новых сообщений)")
+                if scope in ("lore", "all"):
+                    _remove_memory_file(CHAT_LORE_PATH, chat_id)
+                    _remove_memory_file(CHAT_LORE_CANDIDATES_PATH, chat_id)
+                    removed.append("закреплённые внутряки и кандидаты")
+                logger.info(f"MoltBot: memory_clear {scope} for chat {chat_id} by {message.from_user.id}")
+                await message.reply("🧠 Стёрто: " + "; ".join(removed) + ".")
             except Exception as e:
                 await message.reply(f"Ошибка: {e}")
 
@@ -2354,10 +2581,23 @@ class MoltbotHandlers:
             if len(text) < 2 or not text[1].strip():
                 await message.reply("Что закрепить? `/память_закрепи <внутряк одной строкой>`")
                 return
-            lines = _lore_lines(message.chat.id)
-            lines.append(text[1].strip().replace("\n", " "))
-            _save_lore_lines(lines, message.chat.id)
-            await message.reply(f"📌 Закреплено ({len(lines)} всего). Бот теперь помнит это всегда.")
+            chat_id = message.chat.id
+            arg = text[1].strip()
+            candidate_ref = re.fullmatch(r'[кk](\d+)', arg.lower())
+            if candidate_ref:
+                candidates = _lore_candidate_lines(chat_id)
+                idx = int(candidate_ref.group(1)) - 1
+                if idx < 0 or idx >= len(candidates):
+                    await message.reply(f"Нет такого кандидата (всего {len(candidates)}). Список: /memory")
+                    return
+                entry = candidates.pop(idx)
+                _save_lore_candidate_lines(candidates, chat_id)
+            else:
+                entry = arg.replace("\n", " ")
+            lines = _lore_lines(chat_id)
+            lines.append(entry)
+            _save_lore_lines(lines, chat_id)
+            await message.reply(f"📌 Закреплено ({len(lines)} всего): {entry}")
 
         @router.message(Command(commands=['memory_unpin', 'память_открепи', 'открепи']))
         async def handle_memory_unpin(message: Message):
