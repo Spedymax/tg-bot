@@ -950,7 +950,8 @@ class MoltbotHandlers:
         rows = await self.db.execute_query(
             "SELECT name, message_text, timestamp FROM messages "
             "WHERE chat_id = %s AND user_id <> 0 "
-            "AND timestamp >= NOW() - INTERVAL '%s hours' "
+            # Placeholder must stay outside the interval literal: inside quotes psycopg bound it wrongly (63 of 209 rows).
+            "AND timestamp >= NOW() - %s * INTERVAL '1 hour' "
             "AND (%s::timestamptz IS NULL OR timestamp >= %s::timestamptz) "
             "ORDER BY timestamp DESC LIMIT %s",
             (chat_id, SUMMARY_FETCH_HOURS, cursor, cursor, SUMMARY_MAX_MESSAGES),

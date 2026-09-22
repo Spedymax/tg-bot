@@ -408,3 +408,9 @@ async def test_ai_health_alerts_have_their_own_cooldown(monkeypatch):
     first = await hm._ai_issues()
     assert sorted(first) == ["Memory v2 stale", "OpenRouter: $0.80"]
     assert await hm._ai_issues() == []          # same issues within 6h stay quiet
+
+
+def test_no_placeholders_inside_sql_interval_literals():
+    import re as _re
+    src = open(os.path.join(_src, "handlers", "moltbot_handlers.py"), encoding="utf-8").read()
+    assert not _re.search(r"INTERVAL '%s", src)
