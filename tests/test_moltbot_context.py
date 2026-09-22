@@ -230,6 +230,7 @@ def _make_message(text=None, caption=None, from_user_id=855951767,
     msg.photo = photo
     msg.sticker = None
     msg.voice = None
+    msg.audio = None
     msg.video_note = None
     msg.animation = None
     msg.document = None
@@ -281,10 +282,13 @@ class TestBuildReplyContext:
     async def test_reply_to_sticker(self):
         with patch.object(MoltbotHandlers, '__init__', lambda self, *a, **kw: None):
             handler = MoltbotHandlers.__new__(MoltbotHandlers)
+            handler._media = MagicMock()
+            handler._media.fragment = AsyncMock(return_value="[Стикер 😂: кот ржёт до слёз]")
             reply_msg = _make_message(text=None, sticker_emoji="😂")
             msg = _make_message(text="@bot лол", reply_to=reply_msg)
             result = await handler._build_reply_context(msg)
-            assert "Стикер: 😂" in result
+            assert "[Стикер 😂: кот ржёт до слёз]" in result
+            handler._media.fragment.assert_awaited_once_with(reply_msg)
 
     @pytest.mark.asyncio
     async def test_reply_from_none_user(self):
@@ -310,11 +314,13 @@ class TestBuildReplyContext:
     async def test_reply_to_voice(self):
         with patch.object(MoltbotHandlers, '__init__', lambda self, *a, **kw: None):
             handler = MoltbotHandlers.__new__(MoltbotHandlers)
+            handler._media = MagicMock()
+            handler._media.fragment = AsyncMock(return_value="[Голосовое (7 с), расшифровка: «го в доту»]")
             reply_msg = _make_message(text=None)
             reply_msg.voice = MagicMock()
             msg = _make_message(text="@bot что он сказал?", reply_to=reply_msg)
             result = await handler._build_reply_context(msg)
-            assert "Голосовое сообщение" in result
+            assert "расшифровка: «го в доту»" in result
 
     @pytest.mark.asyncio
     async def test_reply_to_photo_calls_gemini(self):

@@ -22,6 +22,8 @@ from services.circuit_breaker import ollama_breaker, together_breaker, openroute
 from services.context_builder import ContextBuilder, ContextSnapshot, PERSONA_POST_PROMPT, compose_thread_first, format_clock
 from services import llm_trace
 from services.persona_tools import WEB_SEARCH_TOOL
+from services.media_understanding import MediaUnderstanding
+from services.link_reader import links_block, extract_urls
 
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CHAT_SUMMARY_PATH = os.path.join(_BASE_DIR, 'data', 'chat-summary.md')
@@ -202,6 +204,7 @@ class MoltbotHandlers:
         self._init_gemini()
         asyncio.ensure_future(self._ensure_danetki_table())
         asyncio.ensure_future(llm_trace.ensure_table(self.db))
+        asyncio.ensure_future(self._get_media().ensure_table())
         asyncio.ensure_future(self._reminder_loop())
         self._register()
 
@@ -367,18 +370,16 @@ class MoltbotHandlers:
         if text:
             parts.append(f'"{text}"')
 
-        # Fallback content types (no text, no photo)
+        # Voice / video note / sticker / GIF: transcribe or describe (cached per file)
+        if not reply.photo and (reply.voice or reply.audio or reply.video_note
+                                or reply.sticker or reply.animation):
+            media = await self._get_media().fragment(reply)
+            if media:
+                parts.insert(0, media)
+
+        # Fallback content types (no text, no photo, no understood media)
         if not parts:
-            if reply.sticker:
-                emoji = reply.sticker.emoji or ""
-                parts.append(f"[Стикер: {emoji}]")
-            elif reply.voice:
-                parts.append("[Голосовое сообщение]")
-            elif reply.video_note:
-                parts.append("[Видеосообщение]")
-            elif reply.animation:
-                parts.append("[GIF]")
-            elif reply.document:
+            if reply.document:
                 fname = reply.document.file_name or "файл"
                 parts.append(f"[Документ: {fname}]")
             elif reply.video:
@@ -448,9 +449,37 @@ class MoltbotHandlers:
         try:
             genai.configure(api_key=Settings.GEMINI_API_KEY)
             self._gemini_model = genai.GenerativeModel('gemini-3-flash-preview')
-            logger.info("MoltBot: Gemini vision initialized (gemini-2.5-flash-lite)")
+            logger.info("MoltBot: Gemini vision initialized (gemini-3-flash-preview)")
         except Exception as e:
             logger.warning(f"MoltBot: Gemini init failed: {e}")
+
+    def _get_media(self) -> MediaUnderstanding:
+        media = getattr(self, "_media", None)
+        if media is None:
+            media = MediaUnderstanding(self.bot, self.db, lambda: getattr(self, "_gemini_model", None))
+            self._media = media
+        return media
+
+    async def _augment_with_links(self, message, user_text: str) -> str:
+        """Append what shared links actually contain (current message + the one replied to)."""
+        sources = [(message.text or message.caption, message.entities or message.caption_entities)]
+        reply = message.reply_to_message
+        if reply is not None:
+            sources.append((reply.text or reply.caption, reply.entities or reply.caption_entities))
+        urls: list[str] = []
+        for text, entities in sources:
+            for url in extract_urls(text, entities):
+                if url not in urls:
+                    urls.append(url)
+        if not urls:
+            return user_text
+        try:
+            block = await links_block("\n".join(urls))
+        except Exception as e:
+            logger.warning(f"MoltBot: link reading failed: {e}")
+            return user_text
+        logger.info(f"MoltBot: read {len(urls)} link(s) for msg {message.message_id}")
+        return f"{user_text}\n\n{block}" if user_text else block
 
     def _analyze_image_with_gemini(self, image_bytes: bytes, user_question: str) -> str:
         """Send image to Gemini and get a description / answer to the question."""
@@ -490,18 +519,20 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: Gemini animation analysis failed: {e}")
             return "[Не удалось проанализировать гифку]"
 
-    async def _store_user_message(self, message):
-        """Store a user message in the messages table (for analytics)."""
+    async def _store_user_message(self, message, text_override: str | None = None):
+        """Store a user message in the messages table. `text_override` stores a
+        transcript/description for media messages that have no text of their own."""
         self._touch_reasoning_activity()
         try:
-            if message.text and message.from_user and not message.from_user.is_bot:
+            text = text_override or message.text
+            if text and message.from_user and not message.from_user.is_bot:
                 name = message.from_user.first_name or message.from_user.username or 'Аноним'
                 reply_to = message.reply_to_message.message_id if message.reply_to_message else None
                 await self.db.execute_query(
                     "INSERT INTO messages (chat_id, user_id, message_text, timestamp, name, message_id, reply_to_message_id) "
                     "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s) "
                     "ON CONFLICT (chat_id, message_id) WHERE message_id IS NOT NULL DO NOTHING",
-                    (message.chat.id, message.from_user.id, message.text, name, message.message_id, reply_to),
+                    (message.chat.id, message.from_user.id, text, name, message.message_id, reply_to),
                 )
         except Exception as e:
             logger.warning(f"MoltBot: failed to store user message: {e}")
@@ -2287,6 +2318,7 @@ class MoltbotHandlers:
             reply_ctx = await self._build_reply_context(message)
             if reply_ctx:
                 user_text = f"{reply_ctx}\n{user_text}" if user_text else reply_ctx
+            user_text = await self._augment_with_links(message, user_text)
             chat_context = self._get_chat_context(message)
 
             # Fetch group history only for group chats
@@ -2632,6 +2664,14 @@ class MoltbotHandlers:
                 except Exception as e:
                     logger.warning(f"MoltBot: reply animation analysis failed: {e}")
 
+            # Voice / video note / sticker sent as a reply to Jarvis
+            elif message.voice or message.audio or message.video_note or message.sticker:
+                media = await self._get_media().fragment(message)
+                if media:
+                    user_text = f"{media}\n{user_text}" if user_text else media
+                    # Keep the transcript in history so later turns can refer to it.
+                    await self._store_user_message(message, text_override=media)
+
             # If replying to a bot message that was about a photo, add context note (no re-analysis)
             replied_msg_id = message.reply_to_message.message_id
             photo_file_id = self._photo_context.get(replied_msg_id)
@@ -2641,6 +2681,7 @@ class MoltbotHandlers:
             reply_ctx = await self._build_reply_context(message)
             if reply_ctx:
                 user_text = f"{reply_ctx}\n{user_text}" if user_text else reply_ctx
+            user_text = await self._augment_with_links(message, user_text)
             chat_context = self._get_chat_context(message)
 
             history = None
