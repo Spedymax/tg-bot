@@ -105,6 +105,47 @@ def _load_chat_lore(chat_id: int | None = None) -> str:
         return ""
 
 
+_LORE_STOP = {"мем-персонаж", "персонаж", "чата", "который", "которые", "регулярно", "всплывает", "пародия",
+              "прошлая", "личность", "угрожая", "попросить", "вернуть", "джарвиса", "джарвис", "бота"}
+
+
+def _lore_keys(line: str) -> set[str]:
+    """Distinctive 5-letter stems of a lore line («Коваленко» → «ковал», «лисёнок» → «лисён»)."""
+    words = re.findall(r"[a-zа-яё]{4,}", line.lower().replace("ё", "е"))
+    return {w[:5] for w in words if w not in _LORE_STOP}
+
+
+def _select_lore(lore: str, user_text: str, history: list[str] | None, recent_lines: int = 6) -> str:
+    """Only the lore lines the current scene actually touches.
+
+    Injecting every legend into every prompt made Jarvis bring them up himself
+    (Лисёнок: 13 human vs 50 bot mentions). Now a legend is visible only when
+    someone mentions it in the current message, the replied-to message or the last
+    few lines — so Jarvis still gets the reference, but doesn't start it.
+    """
+    lines = [ln.strip() for ln in (lore or "").splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    scene = " ".join([user_text or ""] + list((history or [])[-recent_lines:])).lower().replace("ё", "е")
+    scene_stems = {w[:5] for w in re.findall(r"[a-zа-яё]{4,}", scene)}
+    picked = []
+    for line in lines:
+        keys = _lore_keys(line)
+        # a legend needs at least one of its own distinctive words in the scene
+        if keys and len(keys & scene_stems) >= 1 and _lore_hit_is_specific(keys & scene_stems):
+            picked.append(line)
+    return "\n".join(picked)
+
+
+def _lore_hit_is_specific(hits: set[str]) -> bool:
+    """Generic stems («генер», «работ») alone shouldn't pull a legend in; names and rare words should."""
+    generic = {"генер", "работ", "время", "людей", "делат", "котор", "очень", "всегд", "хочет", "тема",
+               "этот", "этого", "этом", "когда", "чтобы",
+               # member names are in half the messages — they must never trigger a legend on their own
+               "богда", "бодя", "макс", "макса", "максу", "максо", "юрочк", "спати", "spati", "lofis"}
+    return bool(hits - generic)
+
+
 def _lore_lines(chat_id: int | None = None) -> list[str]:
     """Pinned lore as a list of non-empty lines."""
     return [ln.strip() for ln in _load_chat_lore(chat_id).splitlines() if ln.strip()]
@@ -1441,7 +1482,7 @@ class MoltbotHandlers:
             hard_rules=self._HARD_RULES,
             chat_context=chat_context,
             summary=_load_chat_summary(chat_id),
-            lore=_load_chat_lore(chat_id),
+            lore=_select_lore(_load_chat_lore(chat_id), user_text, history),
             history=history,
             sender_name=sender_name,
             user_text=user_text,

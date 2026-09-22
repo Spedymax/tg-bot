@@ -414,3 +414,21 @@ def test_no_placeholders_inside_sql_interval_literals():
     import re as _re
     src = open(os.path.join(_src, "handlers", "moltbot_handlers.py"), encoding="utf-8").read()
     assert not _re.search(r"INTERVAL '%s", src)
+
+
+LORE = ("- Эдик Коваленко — мем-персонаж чата («латентный коллаборант из Геническа»); его «торсионные генераторы» — "
+        "пародия на лженауку/РЕН-ТВ, тема регулярно всплывает.\n"
+        "Лисёнок — прошлая фембой-личность бота; Богдан шантажирует Джарвиса, угрожая попросить Макса вернуть этот код.")
+
+
+@pytest.mark.parametrize("text,history,expected", [
+    ("джарвис а помнишь кто торсионные генераторы продавал?", [], ["Эдик"]),
+    ("Помнишь свою личность лисёнка?", [], ["Лисёнок"]),
+    ("джарвис что скажешь", ["[20:00] Юра: эдик опять в новостях"], ["Эдик"]),
+    ("джарвис как в питоне отсортировать список", [], []),
+    ("Богдан, а ты этот курсач сдал? спроси у Макса", [], []),     # names alone never pull a legend
+    ("купил новый генератор для дачи", [], []),                     # generic stem alone doesn't either
+])
+def test_lore_is_visible_only_when_the_scene_touches_it(text, history, expected):
+    picked = _mod._select_lore(LORE, text, history)
+    assert [name for name in ("Эдик", "Лисёнок") if name in picked] == expected
