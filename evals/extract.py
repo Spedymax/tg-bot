@@ -168,7 +168,10 @@ async def label(model: str, limit: int | None) -> None:
     rows = load_jsonl(CANDIDATES_PATH)
     done = {r["id"]: r for r in load_jsonl(LABELED_PATH)} if os.path.exists(LABELED_PATH) else {}
     done = {k: v for k, v in done.items() if "error" not in v.get("label", {})}  # retry failures
-    todo = [r for r in rows if r["id"] not in done][: limit or None]
+    # Scenes people actually reacted to carry the most signal; then newest first.
+    todo = sorted((r for r in rows if r["id"] not in done),
+                  key=lambda r: (bool(r["reference"]["direct_replies"]), r["at"]), reverse=True)
+    todo = todo[: limit or None]
     if not todo:
         print("nothing to label")
         return

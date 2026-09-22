@@ -47,7 +47,7 @@
 
 ### P2 — модели и routing после появления evals
 
-- [ ] Сравнить Grok 4.6, Grok 4.7, GLM Flash и GPT-5.5 на одном и том же датасете.
+- [x] ~~Сравнить Grok 4.6, Grok 4.7, GLM Flash и GPT-5.5 на одном и том же датасете.~~ Решение владельца 22.09: без bake-off, прод переведён на `x-ai/grok-4.7`.
 - [ ] Проверить режим `medium` reasoning на сложных сценах, не включая его вслепую для всех сообщений.
 - [ ] Включить динамический model/reasoning routing по типу запроса.
 - [ ] Выбирать отдельно persona model, memory extractor, vision/transcription model и дешёвый classifier.
@@ -640,7 +640,7 @@ Blind pairwise replay:
 11. [ ] Добавить voice transcription и чтение присланных ссылок.
 12. [ ] Объединить photo/GIF/sticker/video note в один multimodal pipeline.
 13. [ ] Запустить blind pairwise replay на 50–100 сценах.
-14. [ ] Провести bake-off Grok 4.6 / Grok 4.7 / GLM Flash / GPT-5.5.
+14. [x] ~~Провести bake-off~~ — отменён владельцем; прод на Grok 4.7 с 22.09.
 15. [ ] Настроить минимальный dynamic model/reasoning routing на основании evals.
 16. [ ] Провести недельный shadow run нового context/memory/routing.
 17. [ ] Разобрать false writes, missed context, unnecessary callbacks/search/replies и route regressions.
@@ -751,3 +751,11 @@ judge (критерии + оси + флаги + детерминированны
 `WEB_SEARCH_TOOL` → `services/persona_tools.py`.
 
 Блокер: на OpenRouter осталось ~$0.15 из $5 — это и основной маршрут прода. Разметка, прогон и судья стоят ~$10–15.
+
+### 22.09.2026 — Grok 4.7
+
+- По решению владельца bake-off моделей отменён: `OPENROUTER_MODEL=x-ai/grok-4.7` в серверном `.env`
+  (дефолт в `settings.py` тоже 4.7). Проверено: tool call + reasoning low работают, провайдер xAI,
+  ~$0.0015 за короткий ответ (4.7 дешевле 4.6: $1.6/$4.8 против $2/$6 за 1M).
+- Лисёнок остаётся в lore без изменений.
+- OpenRouter пополнен до ~$10.

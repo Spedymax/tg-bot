@@ -31,7 +31,7 @@ BOT_NAMES = {"Кеша", "Иннокентий", "Лолита", "Ло", "Лол
 RUNS_DIR = os.path.join(DATA_DIR, "runs")
 
 PRESETS = {
-    "prod": {"name": "prod", "model": "x-ai/grok-4.6", "reasoning": "low"},
+    "prod": {"name": "prod", "model": "x-ai/grok-4.7", "reasoning": "low"},
     "grok47": {"name": "grok47", "model": "x-ai/grok-4.7", "reasoning": "low"},
     "glm-flash": {"name": "glm-flash", "model": "z-ai/glm-5.3-flash", "reasoning": None},
     "gpt55": {"name": "gpt55", "model": "openai/gpt-5.5", "reasoning": "low"},

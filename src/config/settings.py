@@ -87,7 +87,7 @@ class Settings:
     # OpenRouter (primary persona-chat model — Grok, less prone to deflecting on
     # edgy topics than Qwen/Together; Together.ai above is the fallback on failure)
     OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
-    OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'x-ai/grok-4.6')
+    OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'x-ai/grok-4.7')
 
     # Brave Search API
     BRAVE_API_KEY = os.getenv('BRAVE_API_KEY')
