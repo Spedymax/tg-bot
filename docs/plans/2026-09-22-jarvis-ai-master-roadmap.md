@@ -48,8 +48,8 @@
 ### P2 — модели и routing после появления evals
 
 - [x] ~~Сравнить Grok 4.6, Grok 4.7, GLM Flash и GPT-5.5 на одном и том же датасете.~~ Решение владельца 22.09: без bake-off, прод переведён на `x-ai/grok-4.7`.
-- [ ] Проверить режим `medium` reasoning на сложных сценах, не включая его вслепую для всех сообщений.
-- [ ] Включить динамический model/reasoning routing по типу запроса.
+- [x] Проверить режим `medium` reasoning на сложных сценах, не включая его вслепую для всех сообщений. Результат: выигрыша нет (см. журнал 22.09).
+- [x] ~~Включить динамический model/reasoning routing по типу запроса.~~ Отложено: medium не выиграл на сложных сценах, маршрутизировать некуда. Ручной `/reasoning` остаётся.
 - [x] Выбирать отдельно persona model, memory extractor, vision/transcription model и дешёвый classifier. (Grok 4.7 / Gemini 3.5 Flash / Gemini 3 Flash / GLM Flash)
 
 ## Главный вывод
@@ -598,7 +598,7 @@ Blind pairwise replay:
 - [x] Отдельно выбирать persona model, extractor model и summarizer model — это разные задачи.
 - [x] Для memory extractor приоритеты: structured-output reliability, attribution accuracy, низкая стоимость.
 - [ ] Для persona model приоритеты: естественный русский, юмор, контекст и стабильность характера.
-- [ ] Для сложных вопросов повышать reasoning только если eval показывает измеримый выигрыш.
+- [x] Для сложных вопросов повышать reasoning только если eval показывает измеримый выигрыш (проверено: не показывает).
 - [ ] Сравнивать accuracy, callback rate, latency, input/output tokens и цену.
 - [ ] Не менять production model без shadow/A-B периода и заранее заданного критерия победы.
 
@@ -641,7 +641,7 @@ Blind pairwise replay:
 12. [x] Объединить photo/GIF/sticker/video note в один multimodal pipeline. (voice/кружки/стикеры/GIF — `media_understanding`; фото пока старым путём)
 13. [ ] Запустить blind pairwise replay на 50–100 сценах.
 14. [x] ~~Провести bake-off~~ — отменён владельцем; прод на Grok 4.7 с 22.09.
-15. [ ] Настроить минимальный dynamic model/reasoning routing на основании evals.
+15. [x] ~~Настроить минимальный dynamic model/reasoning routing на основании evals.~~ Evals против: low не хуже medium при −40% цены и −40% латентности.
 16. [ ] Провести недельный shadow run нового context/memory/routing.
 17. [ ] Разобрать false writes, missed context, unnecessary callbacks/search/replies и route regressions.
 18. [ ] Включать компоненты в production по одному с rollback на предыдущую prompt/model/policy version.
@@ -661,7 +661,7 @@ Blind pairwise replay:
 - [ ] Каждый LLM-вызов имеет trace с prompt/model/route/tokens/latency/cost.
 - [ ] Есть versioned dataset минимум из 50 production-сцен и blind pairwise runner.
 - [ ] Любая смена модели или крупного prompt проходит replay и shadow mode.
-- [ ] Dynamic routing выигрывает у single-model baseline по заранее выбранному quality/cost критерию.
+- [x] ~~Dynamic routing выигрывает у single-model baseline по заранее выбранному quality/cost критерию.~~ Single-model (Grok 4.7, low) оставлен: routing не дал выигрыша.
 
 ### Definition of Done для Memory v2
 
@@ -835,3 +835,21 @@ Personality (всё на Grok 4.7, 25 свежих прод-сцен с реак
   в том, на что ответили, или в последних 6 строках (имена участников и общие слова не считаются). На 252 реальных
   сценах: было 100% промптов с обеими легендами, стало Эдик 6%, Лисёнок 4% — ровно когда их поднимают.
   Пророчества используют lore отдельно и не затронуты.
+
+### 22.09.2026 — reasoning medium vs low на сложных вопросах
+
+19 сцен (Grok 4.7, prompt v28): 8 синтетических с проверяемым ответом (`evals/hard_scenes.jsonl`: расчёт долга,
+контрпик в доте, баг в Python, противоречивая история, загадка, план подготовки, Steam Deck vs ПК, вопрос из трёх частей)
++ 11 реальных «содержательных» вопросов из прода.
+
+| | low (прод) | medium |
+|---|---|---|
+| критерии сцен | 0.906 | 0.906 |
+| useful / grounded | 3.95 / 3.95 | 3.84 / 3.84 |
+| слепой pairwise | 9 | 6 (ничьих 3) |
+| лишний поиск | 0% | 14% |
+| p50 / p90 латентность | 9.2 / 12.9 с | 15.4 / 28.2 с |
+| $ за ответ | 0.0105 | 0.0148 |
+
+Обе конфигурации правильно решили все синтетические задачи. Medium не даёт выигрыша по качеству, но на 67% медленнее
+и на 40% дороже → остаётся low, авто-роутинг reasoning не вводится.
