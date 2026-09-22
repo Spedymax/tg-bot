@@ -62,13 +62,65 @@ PROPHET_STYLES = [
 # Rotated independently of PROPHET_STYLES (mix-and-match = way more combinations
 # than either list alone) so the same voice doesn't always read the same way.
 FORMAT_FLAVORS = [
-    "Обычным текстом, как мини-рассказ.",
-    "В стиле лога квеста/RPG: вставляй что-то вроде «Событие: ...», «Получен дебафф: ...», "
-    "«Опыт получен: ...» — геймифицируй происходящее, но не теряй сюжет и конкретику.",
-    "В стиле капризной рубрики гороскопа из жёлтой газеты — придумай новые нелепые названия "
-    "«домов» и «знаков» для каждого человека (не бери реальные знаки зодиака).",
-    "В стиле рейтинга/чарта — как будто ты сравниваешь, у кого сегодня день пройдёт хуже, "
-    "с явными подколками по поводу того, чьё пророчество абсурднее или обиднее остальных.",
+    {"key": "plain", "instruction": "Обычным текстом, как очень короткий мини-рассказ."},
+    {
+        "key": "rpg",
+        "instruction": (
+            "В стиле короткого лога квеста/RPG: можно использовать «Событие», «Дебафф» или "
+            "«Опыт», но максимум ОДНУ такую метку на человека."
+        ),
+    },
+    {
+        "key": "horoscope",
+        "instruction": (
+            "В стиле язвительной рубрики гороскопа: по одному новому нелепому знаку на человека, "
+            "без реальных знаков зодиака."
+        ),
+    },
+    {
+        "key": "rating",
+        "instruction": (
+            "В стиле короткого рейтинга с разными номинациями, но без одинаковых мест и без "
+            "обязательного победителя."
+        ),
+    },
+    {"key": "news", "instruction": "Как три лаконичные срочные новости с сухим издевательским заголовком."},
+    {
+        "key": "fortune_cookie",
+        "instruction": "Как испорченные печенья с предсказаниями: афористично, конкретно и едко.",
+    },
+    {
+        "key": "police_report",
+        "instruction": "Как сухая полицейская сводка о нелепом происшествии, с одной убийственной деталью.",
+    },
+    {
+        "key": "weather",
+        "instruction": "Как персональный прогноз погоды, где осадки и давление — метафоры конкретного фиаско.",
+    },
+    {
+        "key": "sports",
+        "instruction": "Как энергичный спортивный комментарий одного бытового эпизода с итоговым счётом.",
+    },
+    {
+        "key": "tech_support",
+        "instruction": "Как лаконичный ответ техподдержки: симптом, причина и бесполезная рекомендация.",
+    },
+    {
+        "key": "classifieds",
+        "instruction": "Как абсурдное объявление с рубрикой «отдам», «ищу» или «обменяю», привязанное к событию дня.",
+    },
+    {
+        "key": "court_verdict",
+        "instruction": "Как короткий судебный приговор судьбы: обвинение, улика и смешное наказание.",
+    },
+    {
+        "key": "product_review",
+        "instruction": "Как едкий отзыв с оценкой от одной до пяти звёзд о предстоящем эпизоде дня.",
+    },
+    {
+        "key": "museum_label",
+        "instruction": "Как музейная табличка к будущему позору: название экспоната, материал и краткая история.",
+    },
 ]
 
 # Сфера сюжета НАЗНАЧАЕТСЯ каждому человеку заранее, а не выбирается моделью. Раньше
@@ -105,14 +157,109 @@ LIFE_DOMAINS = [
     "попытка починить что-то своими руками",
 ]
 
-LINKED_MODE_PROBABILITY = 0.4
-LINKED_MODE_INSTRUCTION = (
-    "Сегодня особый режим: все три пророчества должны быть ЧАСТЯМИ ОДНОЙ цепочки событий — "
-    "то, что происходит с одним человеком, вызывает последствие у другого (эффект домино, "
-    "как в идеальной комедии положений). Но результат всё равно выведи как отдельную строку "
-    "на каждого человека в требуемом формате Имя: текст — просто упомяни связь с другими "
-    "прямо в тексте каждой строки, в порядке цепочки.\n\n"
-)
+STORY_MODES = [
+    {
+        "key": "independent",
+        "shared_domain": False,
+        "instruction": (
+            "Три истории СТРОГО НЕЗАВИСИМЫ: не упоминай других участников в чужой строке, "
+            "не связывай события причинно и не делай общего победителя."
+        ),
+    },
+    {
+        "key": "domino",
+        "shared_domain": True,
+        "instruction": (
+            "Три строки образуют короткую цепочку-домино. Порядок участников указан ниже и "
+            "уже перемешан; не превращай последнего в постоянного победителя."
+        ),
+    },
+    {
+        "key": "day_parts",
+        "shared_domain": False,
+        "instruction": (
+            "Это три независимых снимка одного дня: первому достаётся утро, второму день, "
+            "третьему вечер. Не упоминай участников друг у друга."
+        ),
+    },
+    {
+        "key": "shared_place",
+        "shared_domain": True,
+        "instruction": (
+            "Все оказываются в одном месте, но переживают три РАЗНЫХ, не связанных причинно "
+            "эпизода. Никто не получает выгоду из чужой неудачи."
+        ),
+    },
+    {
+        "key": "expectation_reality",
+        "shared_domain": False,
+        "instruction": (
+            "Каждая строка строится как «ожидание против реальности»: человек планирует одно, "
+            "а получает короткий противоположный результат. Истории независимы."
+        ),
+    },
+    {
+        "key": "three_times",
+        "shared_domain": False,
+        "instruction": (
+            "Назначь участникам три разные точные отметки времени и покажи по одному независимому "
+            "событию в этот момент. Не связывай их между собой."
+        ),
+    },
+    {
+        "key": "same_problem",
+        "shared_domain": True,
+        "instruction": (
+            "Все сталкиваются с одной бытовой проблемой, но решают её тремя совершенно разными "
+            "способами и получают разные исходы. Между строками нет причинной цепочки."
+        ),
+    },
+    {
+        "key": "rumor",
+        "shared_domain": True,
+        "instruction": (
+            "Один безобидный слух проходит через троих и в каждой строке нелепо меняется. "
+            "Перемешанный порядок ниже — порядок передачи слуха; финал не обязан быть победой."
+        ),
+    },
+    {
+        "key": "object_relay",
+        "shared_domain": True,
+        "instruction": (
+            "Один обычный предмет случайно переходит от первого участника ко второму и третьему, "
+            "каждому создавая новый короткий эпизод. Не делай последнего счастливчиком по умолчанию."
+        ),
+    },
+    {
+        "key": "parallel_choices",
+        "shared_domain": True,
+        "instruction": (
+            "В одной исходной ситуации каждый выбирает свой вариант действий; покажи три параллельных "
+            "альтернативы без встреч и влияния участников друг на друга."
+        ),
+    },
+    {
+        "key": "callback",
+        "shared_domain": False,
+        "instruction": (
+            "Каждому возвращается мелкая вещь или поступок из собственного вчерашнего дня, но с "
+            "ироничным последствием. Не переносись в далёкое прошлое и не связывай участников."
+        ),
+    },
+    {
+        "key": "false_alarm",
+        "shared_domain": False,
+        "instruction": (
+            "Каждый пугается якобы большой проблемы, которая оказывается пустяком; настоящий короткий "
+            "подвох приходит сразу после облегчения. Все три истории независимы."
+        ),
+    },
+]
+
+OUTCOME_PATTERNS = ["one_lucky", "everyone_bites", "two_lucky", "ambiguous"]
+
+MAX_PROPHECY_WORDS = 40
+MAX_SCENE_WORDS = 25
 
 EXAMPLE_PROPHECIES = (
     "Сегодня ты не сдашь тест и умрёшь в нищете.\n"
@@ -145,8 +292,8 @@ COMMON_VOICE_RULES = (
     "фантастики, только то, что реально могло бы произойти с обычным человеком за день. "
     "Каждое пророчество ОБЯЗАНО иметь острый комедийный поворот, подкол или чёрный юмор — "
     "избегай мягких «и тут случится что-то милое» историй без шипов, это скучно и не смешно. "
-    "Максимум ОДНО пророчество из всех может быть чистой доброй новостью без подвоха, для "
-    "контраста (см. пример 6) — остальные обязаны кусать. НЕ общие "
+    "Баланс удачи и неудачи назначается отдельно ниже — соблюдай его буквально и не сваливайся "
+    "по привычке в схему «двое страдают, последний выигрывает». НЕ общие "
     "фразы про судьбу и перемены типа «тебя ждут перемены» — это скучно и запрещено. "
     "НЕ придумывай про человека конкретные факты жизни, которых ты не знаешь и не видишь "
     "в его сообщениях (машина, ипотека, конкретная работа/должность, дети, семейное "
@@ -270,6 +417,14 @@ class DailyProphecyHandlers:
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
                 (),
             )
+            await self.db.execute_query(
+                "ALTER TABLE daily_prophecies "
+                "ADD COLUMN IF NOT EXISTS format_key TEXT, "
+                "ADD COLUMN IF NOT EXISTS story_mode TEXT, "
+                "ADD COLUMN IF NOT EXISTS outcome_key TEXT, "
+                "ADD COLUMN IF NOT EXISTS lucky_user_id BIGINT",
+                (),
+            )
         except Exception as e:
             logger.error(f"DailyProphecy: failed to create table: {e}")
 
@@ -316,6 +471,26 @@ class DailyProphecyHandlers:
         )
         return rows[0][0] if rows else ""
 
+    async def _get_recent_generation_meta(self, chat_id: int, limit: int = 5) -> list[dict]:
+        rows = await self.db.execute_query(
+            "SELECT format_key, story_mode, outcome_key, lucky_user_id, prophecies "
+            "FROM daily_prophecies WHERE chat_id = %s ORDER BY created_at DESC LIMIT %s",
+            (chat_id, limit),
+        )
+        result = []
+        for format_key, story_mode, outcome_key, lucky_user_id, prophecies in (rows or []):
+            # Old rows predate metadata. Their recurring pattern made the last roster
+            # member the winner, so use that as a one-time bootstrap hint.
+            if lucky_user_id is None and prophecies:
+                lucky_user_id = prophecies[-1].get("user_id")
+            result.append({
+                "format_key": format_key,
+                "story_mode": story_mode,
+                "outcome_key": outcome_key,
+                "lucky_user_id": lucky_user_id,
+            })
+        return result
+
     async def _get_recent_prophecy_texts(self, chat_id: int, days: int = 14, limit: int = 45) -> list[str]:
         """Flat list of individual past prophecy lines (not full rows) from the last
         N days, newest first, capped — fed back to the LLM so it stops repeating itself.
@@ -345,24 +520,55 @@ class DailyProphecyHandlers:
             parts.append(f"\n🔮 <b>{p['name']}</b> — {p['text']}")
         return "\n".join(parts)
 
+    @staticmethod
+    def _choose_fresh(items: list, recent_keys: list[str], key=lambda item: item):
+        """Prefer values absent from the recent window, then at least avoid yesterday's."""
+        fresh = [item for item in items if key(item) not in recent_keys]
+        if not fresh and recent_keys:
+            fresh = [item for item in items if key(item) != recent_keys[0]]
+        return random.choice(fresh or items)
+
+    @staticmethod
+    def _shorten_text(text: str, max_words: int) -> str:
+        words = text.split()
+        if len(words) <= max_words:
+            return text.strip()
+        return " ".join(words[:max_words]).rstrip(" ,;:-") + "…"
+
+    @classmethod
+    def _shorten_prophecy(cls, text: str) -> str:
+        return cls._shorten_text(text, MAX_PROPHECY_WORDS)
+
     # ── Generation ────────────────────────────────────────────────────────────
 
     async def _generate_prophecies(
         self, per_person: list[tuple[int, str, str]], lore: str, recent_texts: list[str] | None = None,
-        exclude_style: str = "",
-    ) -> tuple[dict, str, list[dict]]:
+        exclude_style: str = "", generation_history: list[dict] | None = None,
+    ) -> tuple[dict, str, list[dict], dict]:
         """Pure LLM-generation step, separated from the DB fetch so tests can feed
         synthetic (user_id, name, yesterday_text) rows without touching real chat history.
-        Returns (style, scene_text, prophecies)."""
+        Returns (style, scene_text, prophecies, generation metadata)."""
         pool = [s for s in PROPHET_STYLES if s["key"] != exclude_style] or PROPHET_STYLES
         style = random.choice(pool)
-        names = [name for _, name, _ in per_person]
-        # In linked mode all three prophecies are one chain of events, so per-person
-        # domains would fight the chain — hand out a single shared domain instead.
-        linked = random.random() < LINKED_MODE_PROBABILITY
-        if linked:
+        history = generation_history or []
+        format_flavor = self._choose_fresh(
+            FORMAT_FLAVORS, [m.get("format_key") for m in history[:5]], key=lambda item: item["key"]
+        )
+        story_mode = self._choose_fresh(
+            STORY_MODES, [m.get("story_mode") for m in history[:4]], key=lambda item: item["key"]
+        )
+        outcome_key = self._choose_fresh(
+            OUTCOME_PATTERNS, [m.get("outcome_key") for m in history[:2]]
+        )
+
+        # Shuffle the causal and display order so one roster position does not become
+        # the permanent victim, middleman, or winner.
+        ordered_people = list(per_person)
+        random.shuffle(ordered_people)
+        names = [name for _, name, _ in ordered_people]
+        if story_mode["shared_domain"]:
             domain_block = (
-                f"Сфера жизни, в которой сегодня разворачивается вся цепочка событий: "
+                f"Сфера жизни — общая для сегодняшних событий: "
                 f"{random.choice(LIFE_DOMAINS)}\n\n"
             )
         else:
@@ -375,7 +581,7 @@ class DailyProphecyHandlers:
 
         block = "\n".join(
             f"{name}: {text or '(гробовое молчание, вчера не написал ни слова)'}"
-            for _, name, text in per_person
+            for _, name, text in ordered_people
         )
         history_block = ""
         if recent_texts:
@@ -386,8 +592,38 @@ class DailyProphecyHandlers:
                 "встречу, не делай ещё один такой же под другим соусом, возьми принципиально "
                 "другую область жизни:\n" + "\n".join(f"- {t}" for t in recent_texts) + "\n\n"
             )
-        format_flavor = random.choice(FORMAT_FLAVORS)
-        linked_instruction = LINKED_MODE_INSTRUCTION if linked else ""
+        recent_lucky_ids = [m.get("lucky_user_id") for m in history if m.get("lucky_user_id")]
+        lucky_candidates = [p for p in ordered_people if p[0] not in recent_lucky_ids[:2]] or ordered_people
+        lucky_people = []
+        if outcome_key == "one_lucky":
+            lucky_people = random.sample(lucky_candidates, 1)
+            outcome_instruction = (
+                f"Распределение исходов: только {lucky_people[0][1]} получает удачный, но смешной исход; "
+                "остальные получают разные мелкие неприятности."
+            )
+        elif outcome_key == "two_lucky":
+            first = random.choice(lucky_candidates)
+            rest = [p for p in ordered_people if p[0] != first[0]]
+            lucky_people = [first, random.choice(rest)]
+            outcome_instruction = (
+                f"Распределение исходов: у {lucky_people[0][1]} и {lucky_people[1][1]} всё неожиданно "
+                "складывается неплохо, но с комедийной ценой; третий получает лёгкую неприятность."
+            )
+        elif outcome_key == "everyone_bites":
+            outcome_instruction = "Распределение исходов: сегодня не везёт всем троим, но каждому совершенно по-разному."
+        else:
+            outcome_instruction = (
+                "Распределение исходов: у всех неоднозначный обмен — что-то приобрёл, что-то потерял; "
+                "явного победителя и проигравшего нет."
+            )
+
+        lucky_user_id = lucky_people[0][0] if lucky_people else None
+        generation_meta = {
+            "format_key": format_flavor["key"],
+            "story_mode": story_mode["key"],
+            "outcome_key": outcome_key,
+            "lucky_user_id": lucky_user_id,
+        }
 
         user_prompt = (
             (f"Инсайды и внутренние шутки этого чата (необязательно использовать):\n{lore}\n\n" if lore else "")
@@ -395,15 +631,18 @@ class DailyProphecyHandlers:
             + f"не обязан быть буквально связан с пророчеством):\n{block}\n\n"
             + history_block
             + domain_block
-            + linked_instruction
-            + "Сначала опиши в 1-2 предложениях загадочную сцену — как вы (трое друзей, "
+            + f"Структура выпуска: {story_mode['instruction']}\n"
+            + f"{outcome_instruction}\n\n"
+            + f"Сначала опиши ОДНИМ предложением до {MAX_SCENE_WORDS} слов загадочную сцену — как вы (трое друзей, "
             + "от второго лица «вы») наткнулись именно сегодня на этого пророка, в обстановке, "
             + "подходящей твоему образу (старый дом в лесу, склеп, кухня, серверная — что угодно "
             + "атмосферное и странное). Вот пример нужного уровня жути и конкретики (не копируй "
             + f"буквально, придумывай новую сцену):\n{SCENE_EXAMPLE}\n\n"
             + f"Потом, после сцены, дай ровно по одному пророчеству на сегодня для каждого из "
             + f"{len(per_person)} человек — конкретный абсурдный сюжет с поворотом, как в примерах "
-            + f"выше. Стиль подачи текста пророчеств сегодня: {format_flavor}\n\n"
+            + f"выше. Стиль подачи текста пророчеств сегодня: {format_flavor['instruction']}\n\n"
+            + f"КРИТИЧЕСКИ ВАЖНО: каждое пророчество — максимум {MAX_PROPHECY_WORDS} слов и максимум "
+            + "два коротких предложения. Никаких длинных пояснений, второго поворота или эпилога.\n\n"
             + "Формат ответа СТРОГО такой — сначала сцена (1-2 предложения), потом пустая строка, "
             + "потом построчно пророчества, без другого текста:\n\n<сцена>\n\nИмя: пророчество"
         )
@@ -412,15 +651,16 @@ class DailyProphecyHandlers:
         for attempt in range(2):
             raw = await self._call_llm(style["voice"] + COMMON_VOICE_RULES, user_prompt)
             scene, parsed = self._parse_scene_and_lines(raw, names)
+            scene = self._shorten_text(scene, MAX_SCENE_WORDS)
             if len(parsed) == len(names):
                 break
             logger.warning(f"DailyProphecy: attempt {attempt + 1} parsed {len(parsed)}/{len(names)}, raw={raw[:200]!r}")
 
         prophecies = [
-            {"user_id": uid, "name": name, "text": parsed.get(name, "")}
-            for uid, name, _ in per_person if name in parsed
+            {"user_id": uid, "name": name, "text": self._shorten_prophecy(parsed.get(name, ""))}
+            for uid, name, _ in ordered_people if name in parsed
         ]
-        return style_dict, scene, prophecies
+        return style_dict, scene, prophecies, generation_meta
 
     async def post_daily_prophecy(self, chat_id: int):
         await self._ensure_table()
@@ -451,9 +691,11 @@ class DailyProphecyHandlers:
             if random.random() < 0.2 and not await self._lore_used_recently(chat_id):
                 lore = self._load_lore()
             recent_texts = await self._get_recent_prophecy_texts(chat_id)
+            generation_history = await self._get_recent_generation_meta(chat_id)
             last_style = await self._get_last_style(chat_id)
-            style, scene, prophecies = await self._generate_prophecies(
-                per_person, lore, recent_texts, exclude_style=last_style
+            style, scene, prophecies, generation_meta = await self._generate_prophecies(
+                per_person, lore, recent_texts, exclude_style=last_style,
+                generation_history=generation_history,
             )
 
             if not prophecies:
@@ -465,8 +707,14 @@ class DailyProphecyHandlers:
             )
 
             await self.db.execute_query(
-                "INSERT INTO daily_prophecies (chat_id, style, prophecies) VALUES (%s, %s, %s)",
-                (chat_id, style["key"], json.dumps(prophecies)),
+                "INSERT INTO daily_prophecies "
+                "(chat_id, style, prophecies, format_key, story_mode, outcome_key, lucky_user_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (
+                    chat_id, style["key"], json.dumps(prophecies), generation_meta["format_key"],
+                    generation_meta["story_mode"], generation_meta["outcome_key"],
+                    generation_meta["lucky_user_id"],
+                ),
             )
             logger.info(f"DailyProphecy: posted chat={chat_id} style={style['key']} count={len(prophecies)}")
         except Exception as e:

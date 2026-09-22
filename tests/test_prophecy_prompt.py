@@ -33,6 +33,10 @@ _spec.loader.exec_module(_mod)
 DailyProphecyHandlers = _mod.DailyProphecyHandlers
 LIFE_DOMAINS = _mod.LIFE_DOMAINS
 PROPHET_STYLES = _mod.PROPHET_STYLES
+FORMAT_FLAVORS = _mod.FORMAT_FLAVORS
+STORY_MODES = _mod.STORY_MODES
+MAX_PROPHECY_WORDS = _mod.MAX_PROPHECY_WORDS
+MAX_SCENE_WORDS = _mod.MAX_SCENE_WORDS
 
 
 class _Probe(DailyProphecyHandlers):
@@ -52,7 +56,7 @@ PEOPLE = [(1, "Макс", "вчерашний текст"), (2, "Юра", ""), (
 
 def test_each_person_gets_a_domain():
     probe = _Probe()
-    style, scene, prophecies = asyncio.run(probe._generate_prophecies(PEOPLE, lore=""))
+    style, scene, prophecies, meta = asyncio.run(probe._generate_prophecies(PEOPLE, lore=""))
     prompt = probe.prompts[0][1]
     assert len(prophecies) == 3, prophecies
     assert "Сфера жизни" in prompt
@@ -64,7 +68,7 @@ def test_each_person_gets_a_domain():
 def test_yesterdays_voice_is_skipped():
     probe = _Probe()
     for _ in range(20):
-        style, _, _ = asyncio.run(
+        style, _, _, _ = asyncio.run(
             probe._generate_prophecies(PEOPLE, lore="", exclude_style="doom_prophet")
         )
         assert style["key"] != "doom_prophet"
@@ -76,6 +80,36 @@ def test_worn_out_subjects_are_banned():
     system = probe.prompts[0][0]
     for banned in ("телефон как главный объект", "маршрутка", "касса"):
         assert banned in system, banned
+
+
+def test_recent_generation_choices_are_rotated():
+    probe = _Probe()
+    history = [
+        {"format_key": "rpg", "story_mode": "domino", "outcome_key": "one_lucky", "lucky_user_id": 3},
+        {"format_key": "plain", "story_mode": "independent", "outcome_key": "ambiguous", "lucky_user_id": 2},
+    ]
+    _, _, _, meta = asyncio.run(
+        probe._generate_prophecies(PEOPLE, lore="", generation_history=history)
+    )
+    assert meta["format_key"] not in {"rpg", "plain"}
+    assert meta["story_mode"] not in {"domino", "independent"}
+    assert meta["outcome_key"] not in {"one_lucky", "ambiguous"}
+
+
+def test_prophecies_are_hard_limited_even_if_model_rambles():
+    shortened = DailyProphecyHandlers._shorten_prophecy("слово " * 100)
+    assert len(shortened.split()) <= MAX_PROPHECY_WORDS
+    scene = DailyProphecyHandlers._shorten_text("сцена " * 100, MAX_SCENE_WORDS)
+    assert len(scene.split()) <= MAX_SCENE_WORDS
+
+
+def test_variety_pools_are_large_and_have_unique_keys():
+    format_keys = [item["key"] for item in FORMAT_FLAVORS]
+    story_keys = [item["key"] for item in STORY_MODES]
+    assert len(format_keys) >= 12
+    assert len(story_keys) >= 10
+    assert len(format_keys) == len(set(format_keys))
+    assert len(story_keys) == len(set(story_keys))
 
 
 if __name__ == "__main__":

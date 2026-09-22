@@ -1,0 +1,5 @@
+ALTER TABLE daily_prophecies
+ADD COLUMN IF NOT EXISTS format_key TEXT,
+ADD COLUMN IF NOT EXISTS story_mode TEXT,
+ADD COLUMN IF NOT EXISTS outcome_key TEXT,
+ADD COLUMN IF NOT EXISTS lucky_user_id BIGINT;
