@@ -329,3 +329,82 @@ async def test_memory_v2_shadow_logs_but_only_inject_changes_prompt(monkeypatch,
     assert store.retrieve.await_args.args[3] == {742272644}      # Юра detected from «у Юры»
     injected = "Юра работает на складе" in messages[0]["content"]
     assert injected is (mode == "inject")
+
+
+# ── fallback chain, feedback, AI health ─────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_persona_falls_back_to_gemini_before_together():
+    h = _handler()
+    h._call_openrouter = AsyncMock(side_effect=RuntimeError("402 credits"))
+    h._call_gemini_text = AsyncMock(return_value="от джемини")
+    h._call_together = AsyncMock(return_value="от together")
+    assert await h._call_persona("Юра", "привет", "", [], CHAT) == "от джемини"
+    h._call_together.assert_not_awaited()
+    h._call_gemini_text = AsyncMock(side_effect=RuntimeError("safety"))
+    assert await h._call_persona("Юра", "привет", "", [], CHAT) == "от together"
+
+
+@pytest.mark.asyncio
+async def test_summary_llm_prefers_openrouter_then_gemini_never_ollama(monkeypatch):
+    from unittest.mock import MagicMock
+    monkeypatch.setattr(_mod.Settings, "OPENROUTER_API_KEY", "x", raising=False)
+    h = _handler()
+    h._call_ollama_direct = MagicMock(side_effect=AssertionError("must not wake the PC"))
+    h._openrouter_post = AsyncMock(side_effect=RuntimeError("down"))
+    h._gemini_model = MagicMock()
+    h._gemini_model.generate_content = MagicMock(return_value=MagicMock(text="Богдан провёл урок"))
+    assert await h._summarize_llm("sys", "prompt") == "Богдан провёл урок"
+
+
+def test_reaction_polarity():
+    assert llm_trace.reaction_polarity("🤣") == 1
+    assert llm_trace.reaction_polarity("❤️") == 1
+    assert llm_trace.reaction_polarity("👎") == -1
+    assert llm_trace.reaction_polarity("🤔") == 0
+
+
+@pytest.mark.asyncio
+async def test_reaction_on_jarvis_message_is_stored_with_trace():
+    from unittest.mock import MagicMock
+    from types import SimpleNamespace as NS
+    db = AsyncMock()
+    db.execute_query = AsyncMock(side_effect=[[("trace123",)], None, None])
+    h = _handler(db)
+    event = NS(chat=NS(id=CHAT), message_id=555, user=NS(id=742272644),
+               old_reaction=[], new_reaction=[NS(type="emoji", emoji="🤣"), NS(type="emoji", emoji="👎")])
+    await h._record_reaction_feedback(event)
+    inserts = [c.args[1] for c in db.execute_query.await_args_list if "INSERT INTO llm_feedback" in c.args[0]]
+    assert inserts == [(CHAT, 555, "trace123", 742272644, "reaction", "🤣", 1),
+                       (CHAT, 555, "trace123", 742272644, "reaction", "👎", -1)]
+
+
+@pytest.mark.asyncio
+async def test_reaction_on_human_message_is_ignored():
+    from types import SimpleNamespace as NS
+    db = AsyncMock()
+    db.execute_query = AsyncMock(side_effect=[[], []])
+    h = _handler(db)
+    event = NS(chat=NS(id=CHAT), message_id=1, user=None, old_reaction=[],
+               new_reaction=[NS(type="emoji", emoji="🔥")])
+    await h._record_reaction_feedback(event)
+    assert not any("INSERT" in c.args[0] for c in db.execute_query.await_args_list)
+
+
+def test_text_feedback_patterns():
+    neg, pos = MoltbotHandlers._NEGATIVE_FEEDBACK_RE, MoltbotHandlers._POSITIVE_FEEDBACK_RE
+    assert neg.search("опять ты про лисёнка, не тащи это")
+    assert neg.search("кринж")
+    assert pos.search("ахахах база") and pos.search("ору")
+    assert not neg.search("а что ты думаешь про патч") and not pos.search("а что ты думаешь про патч")
+
+
+@pytest.mark.asyncio
+async def test_ai_health_alerts_have_their_own_cooldown(monkeypatch):
+    from services.health_monitor import HealthMonitor
+    hm = HealthMonitor(None, AsyncMock(), None)
+    hm._check_ai_jobs = AsyncMock(return_value={"memory_stale": "Memory v2 stale"})
+    hm._check_openrouter_credits = AsyncMock(return_value={"openrouter_credits": "OpenRouter: $0.80"})
+    first = await hm._ai_issues()
+    assert sorted(first) == ["Memory v2 stale", "OpenRouter: $0.80"]
+    assert await hm._ai_issues() == []          # same issues within 6h stay quiet

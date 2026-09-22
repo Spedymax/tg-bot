@@ -25,6 +25,9 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _current: contextvars.ContextVar["LLMTrace | None"] = contextvars.ContextVar("llm_trace", default=None)
+# Set when a trace ends; visible to the awaiting handler (same task context), which
+# links the sent Telegram message to the trace so reactions can be attributed.
+_last_finished: contextvars.ContextVar["LLMTrace | None"] = contextvars.ContextVar("llm_trace_last", default=None)
 
 # Stable per-install salt so hashes can't be reversed by brute-forcing chat ids.
 _SALT = os.getenv("LLM_TRACE_SALT") or os.getenv("JARVIS_TOKEN") or "jarvis-trace"
@@ -49,6 +52,30 @@ CREATE_TABLE_SQL = (
     " data JSONB NOT NULL DEFAULT '{}')"
 )
 CREATE_INDEX_SQL = "CREATE INDEX IF NOT EXISTS llm_traces_chat_created_idx ON llm_traces (chat_id, created_at DESC)"
+MIGRATION_SQL = [
+    "ALTER TABLE llm_traces ADD COLUMN IF NOT EXISTS reply_message_id BIGINT",
+    "CREATE INDEX IF NOT EXISTS llm_traces_reply_msg_idx ON llm_traces (chat_id, reply_message_id)",
+    """CREATE TABLE IF NOT EXISTS llm_feedback (
+        id SERIAL PRIMARY KEY,
+        chat_id BIGINT NOT NULL,
+        message_id BIGINT NOT NULL,
+        trace_id TEXT,
+        user_id BIGINT,
+        kind TEXT NOT NULL,
+        value TEXT NOT NULL,
+        polarity SMALLINT NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+    "CREATE INDEX IF NOT EXISTS llm_feedback_msg_idx ON llm_feedback (chat_id, message_id)",
+]
+
+POSITIVE_REACTIONS = {"👍", "❤", "🔥", "🥰", "👏", "😁", "🤣", "🤩", "🎉", "😍", "💯", "🏆", "👌", "🫡", "😎",
+                      "🆒", "💘", "😘", "🤗", "⚡", "🍾", "😇", "🐳"}
+NEGATIVE_REACTIONS = {"👎", "💩", "🤮", "🥱", "😐", "🤨", "😴", "🖕", "😡", "🤬"}
+
+
+def reaction_polarity(emoji: str) -> int:
+    emoji = (emoji or "").replace("\ufe0f", "")
+    return 1 if emoji in POSITIVE_REACTIONS else -1 if emoji in NEGATIVE_REACTIONS else 0
 
 
 def opaque_id(*parts: Any) -> str:
@@ -83,6 +110,7 @@ class LLMTrace:
     tools: list[dict[str, Any]] = field(default_factory=list)
     memory_mode: str = ""
     memory_ids: list[int] = field(default_factory=list)
+    reply_message_id: int | None = None
     outcome: str = "pending"
     reply_chars: int = 0
     started: float = field(default_factory=time.monotonic)
@@ -133,7 +161,26 @@ def begin(kind: str, chat_id: int | None) -> tuple[LLMTrace, contextvars.Token]:
 
 
 def end(token: contextvars.Token) -> None:
+    finished = _current.get()
     _current.reset(token)
+    if finished is not None:
+        _last_finished.set(finished)
+
+
+def last_finished() -> "LLMTrace | None":
+    return _last_finished.get()
+
+
+async def link_reply(db, trace: "LLMTrace | None", message_id: int | None) -> None:
+    """Remember which Telegram message a trace produced (persist may still be in flight)."""
+    if db is None or trace is None or not message_id:
+        return
+    trace.reply_message_id = message_id
+    try:
+        await db.execute_query("UPDATE llm_traces SET reply_message_id = %s WHERE trace_id = %s",
+                               (message_id, trace.trace_id))
+    except Exception as e:
+        logger.warning(f"LLM trace link failed: {e}")
 
 
 def apply_response(attempt: Attempt | None, data: dict[str, Any]) -> None:
@@ -179,9 +226,10 @@ async def persist(trace: LLMTrace, db) -> None:
         await db.execute_query(
             "INSERT INTO llm_traces (trace_id, chat_id, kind, prompt_version, reasoning, final_model, "
             "final_provider, outcome, latency_ms, prompt_tokens, completion_tokens, cost_usd, "
-            "search_calls, reply_chars, data) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (trace_id) DO NOTHING",
+            "search_calls, reply_chars, data, reply_message_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (trace_id) DO UPDATE SET reply_message_id = "
+            "COALESCE(llm_traces.reply_message_id, EXCLUDED.reply_message_id)",
             (
                 trace.trace_id, trace.chat_id, trace.kind, trace.prompt_version, trace.reasoning,
                 final.model if final else None,
@@ -190,6 +238,7 @@ async def persist(trace: LLMTrace, db) -> None:
                 sum(1 for t in trace.tools if t["name"] == "web_search"),
                 trace.reply_chars,
                 json.dumps(trace.to_dict(), ensure_ascii=False),
+                trace.reply_message_id,
             ),
         )
     except Exception as e:
@@ -200,6 +249,8 @@ async def ensure_table(db) -> None:
     try:
         await db.execute_query(CREATE_TABLE_SQL)
         await db.execute_query(CREATE_INDEX_SQL)
+        for sql in MIGRATION_SQL:
+            await db.execute_query(sql)
     except Exception as e:
         logger.warning(f"LLM trace table setup failed: {e}")
 

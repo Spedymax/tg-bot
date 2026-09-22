@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Router, F, Bot
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, ReactionTypeEmoji
+from aiogram.types import Message, MessageReactionUpdated, ReactionTypeEmoji
 from aiogram.utils.chat_action import ChatActionSender
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -779,12 +779,19 @@ class MoltbotHandlers:
             raise
 
     async def _call_persona_simple(self, prompt: str, chat_id: int | None = None) -> str:
-        """Primary entry point for proactive/probabilistic messages: OpenRouter/Grok first, Together.ai on failure."""
+        """Proactive/probabilistic messages: OpenRouter/Grok → direct Gemini → Together.ai."""
         try:
             return await self._call_openrouter_simple(prompt, chat_id)
         except Exception as e:
-            logger.info(f"MoltBot: falling back to Together.ai (simple) after OpenRouter failure ({e})")
-            return await self._call_together_simple(prompt, chat_id)
+            logger.info(f"MoltBot: OpenRouter (simple) failed ({e}), falling back to Gemini")
+        try:
+            reply = self._clean_persona_reply(await self._call_gemini_text(
+                "Служебная задача", prompt, "проактивное участие в групповом чате", None, chat_id))
+            if reply:
+                return reply
+        except Exception as e:
+            logger.info(f"MoltBot: Gemini (simple) failed ({e}), trying Together.ai")
+        return await self._call_together_simple(prompt, chat_id)
 
     def _call_ollama_direct(self, content: str, bot=None, message=None) -> str:
         """Call Ollama directly. Routes through OllamaWakeManager for auto-wake.
@@ -998,28 +1005,10 @@ class MoltbotHandlers:
 - Память (первые две секции) — не длиннее ~1500 символов. Лучше пустая секция, чем мусор.
 - Верни ТОЛЬКО текст (две секции памяти + при необходимости НА ЗАКРЕП), без markdown-решёток, обёрток и пояснений."""
 
-        if not Settings.TOGETHER_API_KEY:
-            logger.warning("MoltBot: TOGETHER_API_KEY not set, falling back to Ollama for summary")
-            new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
-        else:
-            try:
-                data = await self._together_post(
-                    {
-                        "model": Settings.TOGETHER_MODEL,
-                        "messages": [
-                            {"role": "system", "content": "Ты ведёшь короткую память о групповом чате. Только факты, строгая планка для внутряков, без воды."},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "max_tokens": 900,
-                        "temperature": 0.4,
-                    },
-                    timeout=180,
-                )
-                new_summary = data["choices"][0]["message"]["content"]
-                new_summary = re.sub(r'<think>.*?(?:</think>|$)', '', new_summary, flags=re.DOTALL).strip()
-            except Exception as e:
-                logger.warning(f"MoltBot: Together.ai summary failed, falling back to Ollama: {e}")
-                new_summary = await asyncio.to_thread(self._call_ollama_direct, prompt)
+        new_summary = await self._summarize_llm(
+            "Ты ведёшь короткую память о групповом чате. Только факты, строгая планка для внутряков, без воды.",
+            prompt,
+        )
 
         if not new_summary or len(new_summary) < 50:
             logger.warning("MoltBot: LLM returned suspiciously short summary, skipping save")
@@ -1041,6 +1030,42 @@ class MoltbotHandlers:
         if proposed:
             detail += f"; кандидатов в закреп: {len(proposed)}"
         return True, detail
+
+    async def _summarize_llm(self, system: str, prompt: str) -> str:
+        """Background summarisation: OpenRouter (Gemini Flash) → direct Gemini → Together.
+        No Ollama here: a failed local call wakes the Windows PC for a background job."""
+        if Settings.OPENROUTER_API_KEY:
+            try:
+                data = await self._openrouter_post(
+                    {"model": MEMORY_EXTRACTOR_MODEL, "max_tokens": 3000, "temperature": 0.4,
+                     "reasoning": {"effort": "low"},
+                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]},
+                    timeout=120,
+                )
+                text = self._clean_persona_reply(data["choices"][0]["message"].get("content") or "")
+                if text:
+                    return text
+            except Exception as e:
+                logger.warning(f"MoltBot: summary via OpenRouter failed: {e}")
+        if getattr(self, "_gemini_model", None):
+            try:
+                response = await asyncio.to_thread(self._gemini_model.generate_content, f"{system}\n\n{prompt}")
+                text = (response.text or "").strip()
+                if text:
+                    return text
+            except Exception as e:
+                logger.warning(f"MoltBot: summary via Gemini failed: {e}")
+        if Settings.TOGETHER_API_KEY:
+            try:
+                data = await self._together_post(
+                    {"model": Settings.TOGETHER_MODEL, "max_tokens": 900, "temperature": 0.4,
+                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]},
+                    timeout=180,
+                )
+                return self._clean_persona_reply(data["choices"][0]["message"].get("content") or "")
+            except Exception as e:
+                logger.warning(f"MoltBot: summary via Together failed: {e}")
+        return ""
 
     _LORE_CAP = 20
     _MEMORY_CLEAR_SCOPES = {
@@ -1326,6 +1351,62 @@ class MoltbotHandlers:
             llm_trace.persist_in_background(trace, getattr(self, "db", None))
         return stats
 
+    # ── Feedback on Jarvis' messages ────────────────────────────────────────
+
+    _NEGATIVE_FEEDBACK_RE = re.compile(
+        r"не тащи|хватит (про|с|уже)|заебал\w* (с|уже|своим)|опять (ты )?(про|за сво)|надоел\w*|"
+        r"не смешно|кринж|душнил\w*|ты тупой|не то пишешь|что ты несёшь|что ты несешь", re.I)
+    _POSITIVE_FEEDBACK_RE = re.compile(
+        r"\bбаз(а|у|ированно)\b|\bору\b|ахах|хахах|\bжиза\b|красав|\bв точку\b|\bгениально\b|"
+        r"\bхорош\b|\bсильно\b|респект", re.I)
+
+    async def _trace_for_message(self, chat_id: int, message_id: int) -> tuple[bool, str | None]:
+        """(is Jarvis' message, trace_id or None)."""
+        rows = await self.db.execute_query(
+            "SELECT trace_id FROM llm_traces WHERE chat_id = %s AND reply_message_id = %s LIMIT 1",
+            (chat_id, message_id))
+        if rows:
+            return True, rows[0][0]
+        rows = await self.db.execute_query(
+            "SELECT 1 FROM messages WHERE chat_id = %s AND message_id = %s AND user_id = 0 LIMIT 1",
+            (chat_id, message_id))
+        return bool(rows), None
+
+    async def _store_feedback(self, chat_id: int, message_id: int, trace_id: str | None,
+                              user_id: int | None, kind: str, value: str, polarity: int) -> None:
+        try:
+            await self.db.execute_query(
+                "INSERT INTO llm_feedback (chat_id, message_id, trace_id, user_id, kind, value, polarity) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (chat_id, message_id, trace_id, user_id, kind, value[:200], polarity))
+        except Exception as e:
+            logger.warning(f"MoltBot: feedback store failed: {e}")
+
+    async def _record_reaction_feedback(self, event) -> None:
+        old = {getattr(r, "emoji", None) for r in (event.old_reaction or [])}
+        added = [r.emoji for r in (event.new_reaction or [])
+                 if getattr(r, "type", "") == "emoji" and r.emoji not in old]
+        if not added:
+            return
+        is_jarvis, trace_id = await self._trace_for_message(event.chat.id, event.message_id)
+        if not is_jarvis:
+            return
+        user_id = event.user.id if event.user else None
+        for emoji in added:
+            await self._store_feedback(event.chat.id, event.message_id, trace_id, user_id,
+                                       "reaction", emoji, llm_trace.reaction_polarity(emoji))
+        logger.info(f"MoltBot: feedback {added} on msg {event.message_id} (trace {trace_id})")
+
+    async def _record_text_feedback(self, message) -> None:
+        text = message.text or ""
+        polarity = -1 if self._NEGATIVE_FEEDBACK_RE.search(text) else 1 if self._POSITIVE_FEEDBACK_RE.search(text) else 0
+        if not polarity or message.reply_to_message is None:
+            return
+        target = message.reply_to_message.message_id
+        _, trace_id = await self._trace_for_message(message.chat.id, target)
+        await self._store_feedback(message.chat.id, target, trace_id, message.from_user.id,
+                                   "text", text, polarity)
+
     def _get_context_builder(self) -> ContextBuilder:
         # Tests and a few maintenance scripts instantiate the handler via __new__.
         builder = getattr(self, '_context_builder', None)
@@ -1521,12 +1602,20 @@ class MoltbotHandlers:
     async def _call_persona(self, sender_name: str, user_text: str,
                             chat_context: str, history: list[str] | None = None,
                             chat_id: int | None = None) -> str:
-        """Primary persona-chat entry point: OpenRouter/Grok first, Together.ai on failure."""
+        """Persona chat: OpenRouter/Grok → direct Gemini (separate provider and key, survives an
+        OpenRouter outage or empty balance) → Together.ai. Same ContextSnapshot on every route."""
         try:
             return await self._call_openrouter(sender_name, user_text, chat_context, history, chat_id)
         except Exception as e:
-            logger.info(f"MoltBot: falling back to Together.ai after OpenRouter failure ({e})")
-            return await self._call_together(sender_name, user_text, chat_context, history, chat_id)
+            logger.info(f"MoltBot: OpenRouter failed ({e}), falling back to Gemini")
+        try:
+            reply = self._clean_persona_reply(
+                await self._call_gemini_text(sender_name, user_text, chat_context, history, chat_id))
+            if reply:
+                return reply
+        except Exception as e:
+            logger.info(f"MoltBot: Gemini fallback failed ({e}), trying Together.ai")
+        return await self._call_together(sender_name, user_text, chat_context, history, chat_id)
 
     def _would_gemini_block(self, user_text: str) -> bool:
         """Ask Qwen whether Gemini would likely block this message due to safety filters."""
@@ -2461,6 +2550,7 @@ class MoltbotHandlers:
                     )
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
+                    await llm_trace.link_reply(self.db, llm_trace.last_finished(), getattr(sent, "message_id", None))
                     await self._store_bot_reply(
                         reply, message.chat.id, sent.message_id, reply_to=message.message_id
                     )
@@ -2737,6 +2827,110 @@ class MoltbotHandlers:
             _save_lore_lines(lines, message.chat.id)
             await message.reply(f"🗑 Откреплено: {removed}")
 
+        @router.message_reaction()
+        async def handle_reaction_update(event: MessageReactionUpdated):
+            try:
+                await self._record_reaction_feedback(event)
+            except Exception as e:
+                logger.warning(f"MoltBot: reaction feedback failed: {e}")
+
+        @router.message(Command(commands=['trace']))
+        async def handle_trace(message: Message):
+            """Debug view of the latest persona reply in this chat: what went into the prompt and how it was produced."""
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                return
+            rows = await self.db.execute_query(
+                "SELECT trace_id, created_at, data, reply_message_id FROM llm_traces "
+                "WHERE chat_id = %s AND kind = 'persona' ORDER BY created_at DESC LIMIT 1", (message.chat.id,))
+            if not rows:
+                await message.reply("Трейсов пока нет.")
+                return
+            trace_id, created, data, reply_mid = rows[0]
+            data = data if isinstance(data, dict) else json.loads(data)
+            route = " → ".join(
+                f"{a['provider']}:{a['model'].split('/')[-1]} {'✓' if a['ok'] else '✗ ' + (a.get('error') or '')[:60]} "
+                f"{a['latency_ms']}мс ${a['cost_usd']:.4f}" for a in data.get("attempts", []))
+            sections = ", ".join(f"{k} {v}" for k, v in (data.get("sections") or {}).items() if v)
+            tools = "; ".join(f"{t['name']}({t['reason']})" for t in data.get("tools", [])) or "—"
+            mem_ids = data.get("memory_ids") or []
+            mem_lines = ""
+            if mem_ids:
+                items = await self.db.execute_query("SELECT id, text FROM memory_items WHERE id = ANY(%s)", (mem_ids,))
+                mem_lines = "\n" + "\n".join(f"  #{i}: {t[:120]}" for i, t in items or [])
+            fb = await self.db.execute_query(
+                "SELECT value, polarity FROM llm_feedback WHERE trace_id = %s", (trace_id,)) or []
+            text = (
+                f"🔎 trace {trace_id} · {created:%d.%m %H:%M}\n"
+                f"prompt v{data.get('prompt_version')} · reasoning {data.get('reasoning') or '—'} · "
+                f"итог {data.get('outcome')} · {data.get('latency_ms')} мс\n"
+                f"маршрут: {route or '—'}\n"
+                f"контекст (символы): {sections or '—'}\n"
+                f"инструменты: {tools}\n"
+                f"память v2 [{data.get('memory_mode') or 'off'}]: {mem_ids or '—'}{mem_lines}\n"
+                f"фидбек: {' '.join(v for v, _ in fb) or '—'}"
+            )
+            await self._send_long_reply(message, html.escape(text))
+
+        @router.message(Command(commands=['ai_stats']))
+        async def handle_ai_stats(message: Message):
+            """Health of the AI stack over N days (default 7): usage, fallbacks, cost, feedback, memory."""
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                return
+            parts = (message.text or "").split()
+            days = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 7
+            chat_id = message.chat.id
+            by_kind = await self.db.execute_query(
+                "SELECT kind, COUNT(*), COALESCE(SUM(cost_usd), 0), "
+                "percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms), "
+                "percentile_cont(0.9) WITHIN GROUP (ORDER BY latency_ms), "
+                "COUNT(*) FILTER (WHERE outcome NOT IN ('ok', 'ignore', 'skip') AND outcome NOT LIKE 'react:%%') "
+                "FROM llm_traces WHERE chat_id = %s AND created_at > NOW() - %s * INTERVAL '1 day' GROUP BY kind",
+                (chat_id, days)) or []
+            persona = await self.db.execute_query(
+                "SELECT COUNT(*), "
+                "COUNT(*) FILTER (WHERE jsonb_array_length(data->'attempts') > 1), "
+                "COUNT(*) FILTER (WHERE search_calls > 0), "
+                "COUNT(*) FILTER (WHERE jsonb_array_length(COALESCE(data->'memory_ids', '[]'::jsonb)) > 0), "
+                "ROUND(AVG(reply_chars)), "
+                "COUNT(*) FILTER (WHERE reply_message_id IN (SELECT message_id FROM llm_feedback f WHERE f.chat_id = %s)) "
+                "FROM llm_traces WHERE chat_id = %s AND kind = 'persona' AND created_at > NOW() - %s * INTERVAL '1 day'",
+                (chat_id, chat_id, days)) or [(0, 0, 0, 0, 0, 0)]
+            reactions = await self.db.execute_query(
+                "SELECT COUNT(*) FILTER (WHERE outcome LIKE 'react:%%'), COUNT(*) FILTER (WHERE outcome = 'ignore') "
+                "FROM llm_traces WHERE chat_id = %s AND kind = 'reaction' AND created_at > NOW() - %s * INTERVAL '1 day'",
+                (chat_id, days)) or [(0, 0)]
+            fb = await self.db.execute_query(
+                "SELECT COUNT(*) FILTER (WHERE polarity > 0), COUNT(*) FILTER (WHERE polarity < 0), COUNT(*), "
+                "string_agg(DISTINCT value, ' ') FILTER (WHERE kind = 'reaction') "
+                "FROM llm_feedback WHERE chat_id = %s AND created_at > NOW() - %s * INTERVAL '1 day'",
+                (chat_id, days)) or [(0, 0, 0, None)]
+            mem = await self.db.execute_query(
+                "SELECT (SELECT COUNT(*) FROM memory_items WHERE chat_id = %s AND status = 'active' "
+                "AND (expires_at IS NULL OR expires_at > NOW())), "
+                "(SELECT COUNT(*) FROM memory_audit WHERE chat_id = %s AND action = 'reject' "
+                "AND created_at > NOW() - %s * INTERVAL '1 day'), "
+                "(SELECT updated_at FROM memory_extract_state WHERE chat_id = %s)",
+                (chat_id, chat_id, days, chat_id)) or [(0, 0, None)]
+            n, fallback, searched, with_mem, avg_chars, with_fb = persona[0]
+            lines = [f"📊 AI за {days} дн."]
+            for kind, count, cost, p50, p90, errors in sorted(by_kind):
+                lines.append(f"• {kind}: {count} вызовов, ${float(cost):.3f}, p50 {int(p50 or 0)} мс, "
+                             f"p90 {int(p90 or 0)} мс, ошибок {errors}")
+            if n:
+                lines.append(f"Ответы Джарвиса: {n}; фоллбэк {fallback} ({fallback * 100 // n}%), поиск {searched}, "
+                             f"с памятью v2 {with_mem}, средняя длина {int(avg_chars or 0)}, с реакцией людей {with_fb} "
+                             f"({with_fb * 100 // n}%)")
+            r_yes, r_no = reactions[0]
+            if r_yes or r_no:
+                lines.append(f"Реакции бота: поставил {r_yes}, промолчал {r_no}")
+            pos, neg, total, emojis = fb[0]
+            lines.append(f"Фидбек людей: 👍 {pos} / 👎 {neg} из {total}" + (f" · {emojis}" if emojis else ""))
+            active, rejected, cursor_at = mem[0]
+            lines.append(f"Память v2 [{MEMORY_V2_MODE}]: активных {active}, отклонено за период {rejected}, "
+                         f"последний разбор {cursor_at:%d.%m %H:%M}" if cursor_at else
+                         f"Память v2 [{MEMORY_V2_MODE}]: активных {active}, разборов ещё не было")
+            await message.reply(html.escape("\n".join(lines)))
+
         # ── Memory v2 admin ───────────────────────────────────────────────
         _MEM_KIND_RU = {"profile_fact": "факт", "preference": "предпочт.", "episode": "событие",
                         "open_loop": "незакрыто", "attributed_claim": "со слов", "lore_candidate": "мем?"}
@@ -2847,6 +3041,7 @@ class MoltbotHandlers:
             bot_info = await self.bot.get_me()
             if message.reply_to_message.from_user.id != bot_info.id:
                 return
+            await self._record_text_feedback(message)
             if await self._is_bot_mentioned(message):
                 return
 
@@ -2914,6 +3109,7 @@ class MoltbotHandlers:
                     )
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
+                    await llm_trace.link_reply(self.db, llm_trace.last_finished(), getattr(sent, "message_id", None))
                     await self._store_bot_reply(
                         reply, message.chat.id, sent.message_id, reply_to=message.message_id
                     )
@@ -2990,6 +3186,7 @@ class MoltbotHandlers:
                     )
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
+                    await llm_trace.link_reply(self.db, llm_trace.last_finished(), getattr(sent, "message_id", None))
                     await self._store_bot_reply(
                         reply, message.chat.id, sent.message_id, reply_to=message.message_id
                     )
@@ -3050,6 +3247,7 @@ class MoltbotHandlers:
                     )
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
+                    await llm_trace.link_reply(self.db, llm_trace.last_finished(), getattr(sent, "message_id", None))
                     await self._store_bot_reply(
                         reply, message.chat.id, sent.message_id, reply_to=message.message_id
                     )

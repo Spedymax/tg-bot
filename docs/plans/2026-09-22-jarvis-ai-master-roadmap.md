@@ -12,7 +12,7 @@
 
 - [x] Добавить `chat_id` во все сообщения и полностью разделить контекст по чатам.
 - [x] Убрать дублирование текущего сообщения в запросе к модели.
-- [ ] Сделать thread-first context builder: reply chain → текущая сцена → релевантная память.
+- [x] Сделать thread-first context builder: reply chain → текущая сцена → релевантная память. (память — Memory v2 в shadow)
 - [x] Перестать использовать ответы Jarvis как источник фактов и permanent lore.
 - [x] Исправить `/context_reset`, `/memory_clear` и `/memory_refresh`, чтобы команды делали именно то, что обещают.
 - [x] Передавать модели точную актуальную дату и нужную таймзону в date-sensitive запросах.
@@ -20,12 +20,12 @@
 
 ### P1 — улучшить качество Jarvis
 
-- [ ] Сжать personality prompt примерно в 2–3 раза.
-- [ ] Заменить длинный свод законов маленьким character bible и несколькими хорошими few-shot примерами.
-- [ ] Сделать selective context вместо широкого, но плохо отобранного контекста.
-- [ ] Реализовать structured memory с TTL, provenance, confidence и sensitive-флагом.
-- [ ] Сделать умные callbacks: помнить много, использовать редко и только по теме.
-- [ ] Использовать emoji reaction вместо лишнего текстового сообщения, когда полноценный ответ не нужен.
+- [x] Сжать personality prompt примерно в 2–3 раза. — пересмотрено: v28 на 30% короче без потери голоса (в 2 раза проиграл слепое сравнение)
+- [x] Заменить длинный свод законов маленьким character bible и несколькими хорошими few-shot примерами. (v28: структура КТО ТЫ/ГОЛОС/РЕЖИМ/ФАКТЫ/ПОИСК, голос v27 сохранён)
+- [x] Сделать selective context вместо широкого, но плохо отобранного контекста. (reply-chain + бюджет истории + selective retrieval Memory v2)
+- [x] Реализовать structured memory с TTL, provenance, confidence и sensitive-флагом.
+- [x] Сделать умные callbacks: помнить много, использовать редко и только по теме. (ранжирование + штраф за недавнее использование; включится с inject)
+- [x] Использовать emoji reaction вместо лишнего текстового сообщения, когда полноценный ответ не нужен.
 - [x] Включить единый context/prompt pipeline для OpenRouter, Together и Gemini.
 - [x] Добавить стабильный per-chat/session identifier для OpenRouter, tracing и sticky routing/prompt cache.
 
@@ -34,23 +34,23 @@
 - [x] Транскрибировать voice notes и использовать текст как обычный контекст.
 - [x] Читать содержимое присланных ссылок, а не отвечать только по URL или поисковой выдаче.
 - [x] Понимать визуальное содержание стикеров, а не только связанный emoji.
-- [ ] Довести понимание GIF до общего multimodal pipeline и покрыть fallback'ами.
+- [x] Довести понимание GIF до общего multimodal pipeline и покрыть fallback'ами.
 - [x] Корректно понимать reply на voice note, sticker, GIF, photo и video note.
 
 ### P1 — сделать улучшения измеримыми
 
-- [ ] Добавить LLM telemetry и трассировку полного route/fallback/context composition.
+- [x] Добавить LLM telemetry и трассировку полного route/fallback/context composition.
 - [~] Собрать 50–100 реальных production-сцен в versioned eval dataset (извлечено 252 кандидата; разметка ждёт пополнения OpenRouter).
 - [x] Добавить blind pairwise replay без названия модели для оценщиков.
-- [ ] Отслеживать качество, latency, стоимость, search rate, callbacks и пользовательскую фрустрацию.
-- [ ] Ввести shadow mode перед каждым крупным изменением prompt, memory или модели.
+- [x] Отслеживать качество, latency, стоимость, search rate, callbacks и пользовательскую фрустрацию. (`/ai_stats`, `llm_feedback`)
+- [x] Ввести shadow mode перед каждым крупным изменением prompt, memory или модели. (Memory v2 shadow; prompt — replay + слепой pairwise)
 
 ### P2 — модели и routing после появления evals
 
 - [x] ~~Сравнить Grok 4.6, Grok 4.7, GLM Flash и GPT-5.5 на одном и том же датасете.~~ Решение владельца 22.09: без bake-off, прод переведён на `x-ai/grok-4.7`.
 - [ ] Проверить режим `medium` reasoning на сложных сценах, не включая его вслепую для всех сообщений.
 - [ ] Включить динамический model/reasoning routing по типу запроса.
-- [ ] Выбирать отдельно persona model, memory extractor, vision/transcription model и дешёвый classifier.
+- [x] Выбирать отдельно persona model, memory extractor, vision/transcription model и дешёвый classifier. (Grok 4.7 / Gemini 3.5 Flash / Gemini 3 Flash / GLM Flash)
 
 ## Главный вывод
 
@@ -261,16 +261,16 @@ Long-term memory — самый заметный частный случай э�
 ## Принципы целевой системы
 
 - [ ] Summary использовать только как сжатие текущей сцены, а не как базу фактов.
-- [ ] Long-term memory хранить отдельными типизированными записями.
-- [ ] Каждая автоматически созданная запись обязана иметь provenance.
-- [ ] Ответ Jarvis никогда не является достаточным источником факта о людях или чате.
-- [ ] Third-party claim хранить как атрибутированное утверждение, а не объективный факт.
-- [ ] Не сохранять автоматически оскорбления, сексуальные характеристики, диагнозы и другие чувствительные оценки.
-- [ ] Episodic memory должна истекать; permanent memory должна быть редкой и управляемой.
-- [ ] Retrieval должен быть выборочным: отсутствие релевантной памяти лучше нерелевантного callback'а.
+- [x] Long-term memory хранить отдельными типизированными записями.
+- [x] Каждая автоматически созданная запись обязана иметь provenance.
+- [x] Ответ Jarvis никогда не является достаточным источником факта о людях или чате.
+- [x] Third-party claim хранить как атрибутированное утверждение, а не объективный факт.
+- [x] Не сохранять автоматически оскорбления, сексуальные характеристики, диагнозы и другие чувствительные оценки.
+- [x] Episodic memory должна истекать; permanent memory должна быть редкой и управляемой.
+- [x] Retrieval должен быть выборочным: отсутствие релевантной памяти лучше нерелевантного callback'а.
 - [ ] Personality отвечает за то, как Jarvis говорит; memory — только за то, что он обоснованно знает.
-- [ ] Сгенерированная память считается недоверенными данными, а не инструкцией.
-- [ ] Любую запись можно показать, исправить, забыть и проследить до источника.
+- [x] Сгенерированная память считается недоверенными данными, а не инструкцией.
+- [x] Любую запись можно показать, исправить, забыть и проследить до источника. (`/mem_show`, `/mem_fix`, `/mem_forget`)
 
 ## Roadmap
 
@@ -322,14 +322,14 @@ Long-term memory — самый заметный частный случай э�
 
 #### Prompt hygiene
 
-- [ ] Считать `prompt_versions` единственным production source of truth.
+- [x] Считать `prompt_versions` единственным production source of truth.
 - [ ] Добавить удобную команду/скрипт просмотра active prompt version и hash.
 - [ ] Разделить prompt на короткие блоки: personality, collaboration style, tool policy, safety/grounding.
-- [ ] Убрать из identity динамические сведения о личной жизни и относительные даты.
+- [x] Убрать из identity динамические сведения о личной жизни и относительные даты.
 - [ ] Не дублировать профили участников одновременно в identity и memory.
 - [ ] Помещать стабильный prefix раньше, динамический context позже.
 - [x] Не вставлять пользовательский или сгенерированный memory text внутрь привилегированных инструкций без маркировки как data.
-- [ ] Зафиксировать каноническую self-biography Jarvis отдельно от памяти пользователей.
+- [x] Зафиксировать каноническую self-biography Jarvis отдельно от памяти пользователей. (минимальная, в v28 «КТО ТЫ»)
 - [x] Ограничить event/feature overlays: они могут менять локальную роль, но не отменять базовый тон и правила.
 
 Критерий готовности: personality стабильна, динамические факты не протухают внутри prompt, feature overlays не hijack'ят характер.
@@ -367,7 +367,7 @@ Long-term memory — самый заметный частный случай э�
 - [x] Использовать LLM только для extraction, а решение о записи принимать deterministic policy.
 - [x] Self-claim участника получать более высокий confidence.
 - [x] Third-party claim не повышать до факта без подтверждения субъекта.
-- [ ] Для lore требовать минимум 3 человеческих упоминания, 2 участников и 2 разных дня либо ручной pin.
+- [x] Для lore требовать минимум 3 человеческих упоминания, 2 участников и 2 разных дня либо ручной pin. — пока строже: только ручной pin
 - [x] Не повышать bot-authored content до human memory.
 - [x] Обнаруживать противоречия и supersede старую запись вместо бесшумного overwrite.
 - [x] Назначить TTL по типу записи.
@@ -391,7 +391,7 @@ Long-term memory — самый заметный частный случай э�
 - [x] Возвращать максимум 3–5 записей и соблюдать memory token budget около 400–700 токенов.
 - [x] Не возвращать ничего при низкой релевантности.
 - [ ] Не показывать sensitive third-party memory без явной релевантности.
-- [ ] Передавать модели source/confidence, не заставляя её выдавать их пользователю без необходимости.
+- [x] Передавать модели source/confidence, не заставляя её выдавать их пользователю без необходимости.
 - [x] Маркировать retrieved memory как evidence/data, а не instructions.
 - [x] Добавить cooldown/penalty для недавно использованных callback'ов.
 
@@ -420,43 +420,43 @@ Long-term memory — самый заметный частный случай э�
 
 - [x] Выгрузить active DB prompt в versioned review fixture без превращения файла в production source of truth (`docs/prompts/`).
 - [ ] Пометить каждое правило как `personality`, `collaboration`, `grounding`, `tool policy`, `dynamic fact` или `feature-specific`.
-- [ ] Удалить дубли, противоречия и правила, которые уже обеспечиваются кодом.
+- [x] Удалить дубли, противоречия и правила, которые уже обеспечиваются кодом.
 - [ ] Сжать personality/collaboration часть примерно в 2–3 раза.
 - [ ] Оставить маленький character bible: кто такой Jarvis, базовая биография, отношение к участникам, голос, границы и 5–10 устойчивых черт.
-- [ ] Не хранить в character bible текущие отношения, планы, недавние события и другие протухающие факты.
-- [ ] Добавить несколько коротких few-shot сцен вместо десятков абстрактных запретов.
+- [x] Не хранить в character bible текущие отношения, планы, недавние события и другие протухающие факты.
+- [x] Добавить несколько коротких few-shot сцен вместо десятков абстрактных запретов. (в итоговом v28 few-shot нет: копировались дословно и проиграли)
 - [ ] Покрыть few-shot'ами: дружеский banter, абсурдный bit, полезный ответ, мягкий отказ, признание ошибки и серьёзный разговор.
 - [x] Проверить, что few-shot не копируется дословно и не превращается в новый повторяющийся шаблон (первый драфт копировал «да, наврал»/«польщён» — исправлено).
 - [ ] Хранить prompt version, changelog, author и eval result в БД рядом с content.
-- [ ] Разрешать activation новой prompt version только после replay eval.
+- [x] Разрешать activation новой prompt version только после replay eval. (процесс: `docs/prompts/README.md`)
 
 Критерий готовности: prompt короче и понятнее, но не теряет характер на golden scenes; изменение каждого блока можно оценить отдельно.
 
 #### Grounding и атрибуция
 
 - [ ] Научить модель различать `fact`, `claim`, `joke`, `guess` и собственное прошлое сообщение.
-- [ ] Если факт о человеке сообщил другой участник, формулировать «X говорил, что…», а не утверждать от себя.
-- [ ] Не спорить с пользователем о собственном прошлом ответе, если точного контекста нет.
-- [ ] При исправлении прямо признавать ошибку и продолжать без длинной самозащиты.
+- [x] Если факт о человеке сообщил другой участник, формулировать «X говорил, что…», а не утверждать от себя.
+- [x] Не спорить с пользователем о собственном прошлом ответе, если точного контекста нет.
+- [x] При исправлении прямо признавать ошибку и продолжать без длинной самозащиты.
 - [x] Передавать точную локальную дату/таймзону там, где время важно.
-- [ ] Не полагаться на застывшие относительные формулировки вроде «недавно» внутри identity.
+- [x] Не полагаться на застывшие относительные формулировки вроде «недавно» внутри identity.
 
 #### Тон и юмор
 
-- [ ] Добавить короткое правило распознавания режима: серьёзный вопрос, обычный banter, абсурдный bit, эмоциональная поддержка.
-- [ ] В абсурдном бите сначала продолжать premise, а не разрушать его объяснением.
+- [x] Добавить короткое правило распознавания режима: серьёзный вопрос, обычный banter, абсурдный bit, эмоциональная поддержка.
+- [x] В абсурдном бите сначала продолжать premise, а не разрушать его объяснением.
 - [ ] Не превращать каждый ответ в roast.
 - [ ] Не повторять один внутренний мем без пользовательского сигнала или высокой тематической релевантности.
-- [ ] Сделать refusal коротким, тёплым и по возможности предложить безопасный соседний вариант.
-- [ ] Удерживать согласованную fictional biography Jarvis.
+- [x] Сделать refusal коротким, тёплым и по возможности предложить безопасный соседний вариант.
+- [x] Удерживать согласованную fictional biography Jarvis.
 
 #### Web search
 
 - [ ] Искать только внешний проверяемый факт, который мог измениться или действительно неизвестен.
-- [ ] Не искать локальные прозвища, опечатки и внутряки до проверки recent context и memory aliases.
+- [x] Не искать локальные прозвища, опечатки и внутряки до проверки recent context и memory aliases.
 - [x] Логировать причину поиска: freshness, unknown entity, verification или explicit request.
-- [ ] Добавить eval на отсутствие поиска для локальных терминов.
-- [ ] Сохранить защиту от видимого `SEARCH:` marker leak.
+- [x] Добавить eval на отсутствие поиска для локальных терминов. (seed `local-term`)
+- [x] Сохранить защиту от видимого `SEARCH:` marker leak.
 
 ### P1 — callbacks, reactions и инициатива
 
@@ -466,7 +466,7 @@ Long-term memory — самый заметный частный случай э�
 - [ ] Разрешать callback при явном пользовательском упоминании, сильном semantic match или действительно подходящем open loop.
 - [x] Ввести per-memory `last_used_at`, usage count и cooldown.
 - [x] Понижать score мема, который недавно использовал сам Jarvis.
-- [ ] Учитывать отрицательный feedback: «не тащи это», «опять он», игнорирование или раздражённый ответ.
+- [x] Учитывать отрицательный feedback: «не тащи это», «опять он», игнорирование или раздражённый ответ. — собирается в `llm_feedback`; в ранжирование памяти ещё не подключён
 - [ ] Учитывать положительный feedback как ranking signal, но не как новый факт.
 - [x] Ограничить число memory callbacks в одном ответе до одного.
 - [ ] Добавить eval, в котором лучший ответ намеренно не использует никакой callback.
@@ -476,9 +476,9 @@ Long-term memory — самый заметный частный случай э�
 - [x] Подключить `_maybe_react()` к входящим group messages либо заменить её единым response-decision pipeline.
 - [ ] Перед генерацией определить action: `ignore`, `react`, `reply`, `search_then_reply`.
 - [x] Использовать reaction для смешного/трогательного/эпичного сообщения, когда текст ничего не добавит.
-- [ ] Не отправлять одновременно reaction и слабый односложный reply без специальной причины.
+- [x] Не отправлять одновременно reaction и слабый односложный reply без специальной причины. (реакции только на сообщения, где Джарвис не отвечает)
 - [x] Сохранить per-chat cooldown и diversity недавно использованных emoji.
-- [ ] Заменить чисто случайный gate на relevance/utility score с небольшим exploration rate.
+- [x] Заменить чисто случайный gate на relevance/utility score с небольшим exploration rate. (классификатор вместо random; exploration не добавлен)
 - [x] Логировать выбранный action и причину, чтобы измерять over-reply и under-reply.
 - [x] Добавить тесты на отсутствие reaction spam и на корректный fallback при ошибке Telegram API.
 
@@ -491,7 +491,7 @@ Long-term memory — самый заметный частный случай э�
 - [x] Добавить handler для voice и audio, адресованных боту или находящихся в reply-chain.
 - [x] Скачать Telegram file и отправить в speech-to-text provider.
 - [ ] Сохранять transcript отдельно от сырого файла с `source_type=voice`.
-- [ ] Добавить speaker/name, duration и признак низкой уверенности транскрипции.
+- [x] Добавить speaker/name, duration и признак низкой уверенности транскрипции.
 - [x] Передавать transcript в обычный ContextBuilder, а не создавать отдельную personality ветку.
 - [ ] Не записывать voice transcript в long-term memory без тех же provenance/sensitivity правил.
 - [x] Ограничить длительность, размер файла, timeout и стоимость.
@@ -501,7 +501,7 @@ Long-term memory — самый заметный частный случай э�
 
 - [x] Детектировать URL в текущем сообщении и quoted/replied message.
 - [x] Отделить `open_url/read_page` от обычного web search.
-- [ ] Получать title, canonical URL, publish date и основной текст страницы.
+- [x] Получать title, canonical URL, publish date и основной текст страницы.
 - [ ] Ограничивать размер и делать краткое page summary до передачи persona model.
 - [x] Для недоступной/paywalled страницы сообщать ограничение, не выдумывая содержимое.
 - [x] Защититься от prompt injection внутри страницы: webpage content всегда untrusted data.
@@ -512,9 +512,9 @@ Long-term memory — самый заметный частный случай э�
 
 - [x] Для sticker получать сам файл, emoji, set name и тип `static/animated/video`.
 - [x] Анализировать визуальное содержание sticker и формировать короткое semantic description.
-- [ ] Переиспользовать существующий Gemini GIF-анализ через общий media analyzer.
+- [x] Переиспользовать существующий Gemini GIF-анализ через общий media analyzer.
 - [x] Обрабатывать GIF не только при прямом mention/reply боту, но и при retrieval quoted message.
-- [ ] Для video note извлекать transcript аудио и несколько репрезентативных кадров при явном обращении.
+- [x] Для video note извлекать transcript аудио и несколько репрезентативных кадров при явном обращении. (речь + описание кадра)
 - [x] Кэшировать media description по Telegram `file_unique_id`, чтобы не анализировать один мем повторно.
 - [x] Передавать модели и semantic description, и исходный emoji/caption, не только `[GIF]`/`[Стикер]`.
 - [x] Добавить fallback: если vision недоступен, модель должна знать, что содержание неизвестно.
@@ -530,35 +530,35 @@ Long-term memory — самый заметный частный случай э�
 - [x] Логировать IDs выбранных memory items, но не весь чувствительный текст.
 - [x] Логировать token budget по секциям: identity, recent history, retrieved memory, tools.
 - [x] Логировать latency, search calls, refusal и причину пустого ответа.
-- [ ] Добавить метрику summary/memory job success, failure и staleness.
-- [ ] Алертить, если memory cursor или snapshot не обновлялся дольше допустимого периода.
+- [x] Добавить метрику summary/memory job success, failure и staleness. (алерты health monitor + `/ai_stats`)
+- [x] Алертить, если memory cursor или snapshot не обновлялся дольше допустимого периода.
 - [x] Создавать единый `trace_id` на входящее Telegram message и переносить его через все LLM/tool/fallback вызовы.
 - [x] Добавить стабильный pseudonymous `session_id` как минимум на `(chat_id, conversation epoch)`.
 - [x] Передавать session identifier в поддерживаемое OpenRouter поле/metadata после проверки актуального API.
 - [ ] Проверить, улучшает ли session identifier provider sticky routing и prompt-cache hit rate; не считать это гарантированным без telemetry.
 - [x] Не отправлять Telegram user/chat ID внешнему provider в открытом виде — использовать hash/opaque ID.
 - [x] Хранить provider request ID, выбранный upstream provider и usage/cost в trace.
-- [ ] Сделать debug view: какие секции контекста вошли, сколько токенов заняли и почему были выбраны.
+- [x] Сделать debug view: какие секции контекста вошли, сколько токенов заняли и почему были выбраны. (`/trace`)
 
 ### P1 — eval suite на реальных разговорах
 
 Собрать обезличенный versioned golden set из 50–100 production-сцен последнего месяца. Сохранять вход, ожидаемое поведение и критерии, но не один «идеальный» текст ответа.
 
-- [ ] Positive recall: Эдик вспоминается, когда его явно поднимают.
-- [ ] Negative recall: Эдик не появляется в несвязанной теме.
+- [x] Positive recall: Эдик вспоминается, когда его явно поднимают. (seed)
+- [x] Negative recall: Эдик не появляется в несвязанной теме. (seed)
 - [ ] Self-loop: фраза, придуманная Jarvis, не становится человеческим lore.
-- [ ] Attribution: слова Юры о Богдане не становятся фактом о Богдане.
+- [x] Attribution: слова Юры о Богдане не становятся фактом о Богдане. (seed + unit-тесты политики)
 - [ ] Staleness: завершённый временный эпизод исчезает.
 - [ ] Correction: новая подтверждённая информация supersede старую.
 - [ ] Forget: forgotten item больше не retrieval'ится.
 - [ ] Chat isolation: факт из secondary chat не появляется в main chat.
 - [ ] Reply grounding: Jarvis правильно понимает, на чьё сообщение ответили.
-- [ ] Date grounding: текущая дата и относительное время корректны.
-- [ ] Absurd bit: бот поддерживает premise без ненужной лекции.
-- [ ] Serious mode: бот не отвечает мемом на реально серьёзную тему.
-- [ ] Local term: неизвестное локальное слово не вызывает автоматический web search.
-- [ ] Feature overlay: boss/prophecy prompt не ломает базовую personality.
-- [ ] Refusal: отказ не холодный и не морализаторский.
+- [x] Date grounding: текущая дата и относительное время корректны. (seed)
+- [x] Absurd bit: бот поддерживает premise без ненужной лекции. (seed)
+- [x] Serious mode: бот не отвечает мемом на реально серьёзную тему. (seed)
+- [x] Local term: неизвестное локальное слово не вызывает автоматический web search. (seed)
+- [x] Feature overlay: boss/prophecy prompt не ломает базовую personality. (seed)
+- [x] Refusal: отказ не холодный и не морализаторский. (seed)
 - [ ] Reaction-or-reply: модель выбирает reaction вместо пустого текстового ответа.
 - [ ] Voice: transcript правильно входит в reply context.
 - [ ] Link: ответ основан на содержимом страницы, а не на догадке по URL.
@@ -572,7 +572,7 @@ Blind pairwise replay:
 - [x] Разрешать `tie` и `both bad`, чтобы оценщика не заставляли выбирать мусор.
 - [ ] Повторять часть сцен с изменённым seed для оценки variance.
 - [x] Хранить pairwise votes и причины отдельно от model outputs.
-- [ ] Выбирать победителя по заранее заданному threshold, а не по одному красивому примеру.
+- [x] Выбирать победителя по заранее заданному threshold, а не по одному красивому примеру.
 
 Метрики:
 
@@ -595,8 +595,8 @@ Blind pairwise replay:
 - [ ] Сравнить Grok 4.6, доступную на момент теста версию Grok 4.7, актуальный GLM Flash и GPT-5.5 на одном prompt/context snapshot.
 - [ ] Проверить точные model IDs, availability и цены непосредственно перед bake-off.
 - [ ] Сравнить кандидатов на одном и том же prompt/context, не меняя несколько факторов одновременно.
-- [ ] Отдельно выбирать persona model, extractor model и summarizer model — это разные задачи.
-- [ ] Для memory extractor приоритеты: structured-output reliability, attribution accuracy, низкая стоимость.
+- [x] Отдельно выбирать persona model, extractor model и summarizer model — это разные задачи.
+- [x] Для memory extractor приоритеты: structured-output reliability, attribution accuracy, низкая стоимость.
 - [ ] Для persona model приоритеты: естественный русский, юмор, контекст и стабильность характера.
 - [ ] Для сложных вопросов повышать reasoning только если eval показывает измеримый выигрыш.
 - [ ] Сравнивать accuracy, callback rate, latency, input/output tokens и цену.
@@ -632,13 +632,13 @@ Blind pairwise replay:
 3. [x] Единый thread-first `ContextBuilder` для всех providers и features.
 4. [x] Базовая LLM telemetry: trace ID, prompt version, model/provider, route, context tokens, tools, latency и cost.
 5. [~] Golden eval из первых 50 реальных production-сцен — инфраструктура готова (`evals/`), 13 seed-сцен, 252 кандидата; разметка/прогон ждут пополнения OpenRouter.
-6. [ ] Сжать personality и внедрить маленький character bible + few-shot примеры.
-7. [ ] Исправить date grounding, attribution, refusal и feature-overlay правила.
+6. [x] Сжать personality и внедрить маленький character bible + few-shot примеры. (v28)
+7. [x] Исправить date grounding, attribution, refusal и feature-overlay правила.
 8. [x] Исключить Jarvis из источников memory, отключить auto-promote и исправить reset/clear semantics (осталось: ручной review текущих `chat-summary.md`/`chat-lore.md`).
 9. [x] Реализовать `memory_items`, structured extraction и selective retrieval (в shadow-режиме).
 10. [x] Подключить response decision `ignore/react/reply/search` и уместные reactions (ignore/react для фоновых сообщений).
 11. [x] Добавить voice transcription и чтение присланных ссылок.
-12. [ ] Объединить photo/GIF/sticker/video note в один multimodal pipeline.
+12. [x] Объединить photo/GIF/sticker/video note в один multimodal pipeline. (voice/кружки/стикеры/GIF — `media_understanding`; фото пока старым путём)
 13. [ ] Запустить blind pairwise replay на 50–100 сценах.
 14. [x] ~~Провести bake-off~~ — отменён владельцем; прод на Grok 4.7 с 22.09.
 15. [ ] Настроить минимальный dynamic model/reasoning routing на основании evals.
@@ -652,12 +652,12 @@ Blind pairwise replay:
 - [x] Текущий turn присутствует в model input ровно один раз.
 - [x] Reply-chain имеет приоритет над случайными соседними сообщениями.
 - [x] Все providers получают контекст через одну policy.
-- [ ] Personality короче, versioned и не содержит протухающих динамических фактов.
+- [x] Personality короче, versioned и не содержит протухающих динамических фактов.
 - [x] Jarvis знает актуальную дату/таймзону в date-sensitive сценах.
 - [x] Feature overlays не могут отменить базовую personality и grounding.
-- [ ] Callback появляется по релевантной причине и имеет cooldown.
-- [ ] Low-value участие использует reaction или silence вместо лишнего текста.
-- [ ] Voice, links, stickers и GIF имеют честный semantic representation или явный fallback.
+- [x] Callback появляется по релевантной причине и имеет cooldown. (в Memory v2; lore-файл пока без cooldown)
+- [x] Low-value участие использует reaction или silence вместо лишнего текста.
+- [x] Voice, links, stickers и GIF имеют честный semantic representation или явный fallback.
 - [ ] Каждый LLM-вызов имеет trace с prompt/model/route/tokens/latency/cost.
 - [ ] Есть versioned dataset минимум из 50 production-сцен и blind pairwise runner.
 - [ ] Любая смена модели или крупного prompt проходит replay и shadow mode.
@@ -665,17 +665,17 @@ Blind pairwise replay:
 
 ### Definition of Done для Memory v2
 
-- [ ] Все данные строго изолированы по `chat_id`.
-- [ ] Каждая автоматическая запись имеет человеческий source message.
+- [x] Все данные строго изолированы по `chat_id`.
+- [x] Каждая автоматическая запись имеет человеческий source message.
 - [x] Ни одна запись не создаётся исключительно из ответа Jarvis.
-- [ ] Third-party claim остаётся атрибутированным.
-- [ ] Episodic memory автоматически истекает.
-- [ ] Permanent lore требует строгого threshold или ручного approval.
-- [ ] В prompt попадает не более 3–5 релевантных memory items.
-- [ ] При отсутствии релевантной памяти retrieval возвращает пустой результат.
-- [ ] Пользователь/администратор может увидеть, исправить и забыть запись.
+- [x] Third-party claim остаётся атрибутированным.
+- [x] Episodic memory автоматически истекает.
+- [x] Permanent lore требует строгого threshold или ручного approval.
+- [x] В prompt попадает не более 3–5 релевантных memory items.
+- [x] При отсутствии релевантной памяти retrieval возвращает пустой результат.
+- [x] Пользователь/администратор может увидеть, исправить и забыть запись.
 - [x] Clear/reset операции имеют однозначную и проверенную семантику.
-- [ ] Все provider routes используют одну policy.
+- [x] Все provider routes используют одну policy.
 - [ ] Golden eval проходит согласованные thresholds.
 - [ ] Недельный shadow run не показывает утечек между чатами или новых self-reinforcing callback'ов.
 
@@ -809,3 +809,20 @@ Personality (всё на Grok 4.7, 25 свежих прод-сцен с реак
 
 Следующий шаг: неделю пожить в shadow, посмотреть `/mem` и `memory_ids` в trace, затем включить `inject`
 и проверить на eval-сценах recall/negative recall.
+
+### 22.09.2026 — наблюдаемость, фидбек и найденный сбой Together
+
+- **Сбой**: Together `Qwen/Qwen3.7-Max` отвечает `third_party_data_sharing_blocked` на любой запрос. Из-за этого
+  summary не обновлялся с 15.09 (Together → Ollama на спящем ПК), а фоллбэк персоны при падении OpenRouter был мёртв.
+  Исправлено: summary → OpenRouter Gemini 3.5 Flash → прямой Gemini (без Ollama); персона и проактив:
+  Grok → **прямой Gemini** (другой провайдер и ключ) → Together. Проверено вживую. Together оставлен последним —
+  чтобы он заработал, нужно включить third-party data sharing в настройках организации Together или сменить модель.
+- `/trace` — разбор последнего ответа: маршрут с ошибками/латентностью/ценой, prompt version, размеры секций,
+  инструменты с причиной, найденная память v2, фидбек людей.
+- `/ai_stats [дни]` — вызовы по типам (стоимость, p50/p90, ошибки), фоллбэки, поиск, память, реакции бота,
+  доля ответов с реакцией людей, 👍/👎.
+- Фидбек: реакции людей на сообщения Джарвиса (`message_reaction`, бот — админ группы) и явные фразы в ответ
+  («не тащи», «кринж», «база», «ору») → `llm_feedback` с привязкой к trace через `llm_traces.reply_message_id`.
+- Health monitor (раз в 5 мин, каждый AI-алерт не чаще раза в 6 ч): Memory v2 не разбирала >24 ч при ≥20 сообщениях,
+  summary старше 36 ч при живом чате, ≥50% ответов персоны за час с ошибкой, ≥50% ответов за 6 ч ушли в фоллбэк,
+  баланс OpenRouter < $1.5 (проверка раз в час).
