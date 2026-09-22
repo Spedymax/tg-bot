@@ -356,6 +356,7 @@ def format_existing(items: dict[int, dict]) -> str:
 
 # ── store ────────────────────────────────────────────────────────────────────
 
+LORE_MIN_MENTIONS, LORE_MIN_PEOPLE, LORE_MIN_DAYS = 3, 2, 2
 MIN_BATCH = 20                  # wait for this many new human messages…
 MAX_WAIT = timedelta(hours=6)   # …or until the oldest pending one is this old
 BATCH_LIMIT = 200
@@ -410,8 +411,10 @@ class MemoryStore:
         return rows
 
     async def active_items(self, chat_id: int, limit: int = 80) -> dict[int, dict]:
+        """Active items plus lore candidates: candidates must be confirmable too, otherwise
+        every new mention of a meme would create a duplicate instead of adding evidence."""
         rows = await self._q(
-            f"SELECT {_ITEM_COLS} FROM memory_items WHERE chat_id = %s AND status = 'active' "
+            f"SELECT {_ITEM_COLS} FROM memory_items WHERE chat_id = %s AND status IN ('active', 'candidate') "
             "AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY last_seen_at DESC LIMIT %s",
             (chat_id, limit))
         return {r[0]: _row(r) for r in rows}
@@ -473,6 +476,36 @@ class MemoryStore:
         if ids:
             await self._q("UPDATE memory_items SET use_count = use_count + 1, last_used_at = NOW() "
                           "WHERE id = ANY(%s)", (ids,))
+
+    # ── lore candidates ─────────────────────────────────────────────────
+    async def lore_readiness(self, chat_id: int) -> list[dict]:
+        """Lore candidates with their human evidence: mentions, distinct people, distinct days.
+        Ready = LORE_MIN_MENTIONS / LORE_MIN_PEOPLE / LORE_MIN_DAYS (the roadmap threshold)."""
+        rows = await self._q(
+            f"SELECT {_ITEM_COLS}, "
+            "(SELECT COUNT(*) FROM messages m WHERE m.id = ANY(i.source_message_ids) AND m.user_id <> 0), "
+            "(SELECT COUNT(DISTINCT m.user_id) FROM messages m WHERE m.id = ANY(i.source_message_ids) AND m.user_id <> 0), "
+            "(SELECT COUNT(DISTINCT m.timestamp::date) FROM messages m WHERE m.id = ANY(i.source_message_ids) AND m.user_id <> 0) "
+            "FROM memory_items i WHERE chat_id = %s AND status = 'candidate' AND kind = 'lore_candidate' "
+            "AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY last_seen_at DESC",
+            (chat_id,))
+        out = []
+        for r in rows:
+            item = _row(r[:-3])
+            mentions, people, days = r[-3:]
+            item.update(mentions=mentions, people=people, days=days,
+                        ready=mentions >= LORE_MIN_MENTIONS and people >= LORE_MIN_PEOPLE and days >= LORE_MIN_DAYS)
+            out.append(item)
+        return out
+
+    async def mark_pinned(self, chat_id: int, item_id: int, by: int) -> dict | None:
+        rows = await self._q(
+            f"UPDATE memory_items SET status = 'pinned' WHERE id = %s AND chat_id = %s "
+            f"AND status = 'candidate' RETURNING {_ITEM_COLS}", (item_id, chat_id))
+        if not rows:
+            return None
+        await self.audit(chat_id, item_id, "pin", {"by": by})
+        return _row(rows[0])
 
     # ── admin ───────────────────────────────────────────────────────────
     async def list_items(self, chat_id: int, subject_user_id: int | None = None,

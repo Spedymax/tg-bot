@@ -323,7 +323,7 @@ Long-term memory — самый заметный частный случай э�
 #### Prompt hygiene
 
 - [x] Считать `prompt_versions` единственным production source of truth.
-- [ ] Добавить удобную команду/скрипт просмотра active prompt version и hash.
+- [x] Добавить удобную команду/скрипт просмотра active prompt version и hash (`/prompt` показывает версию, sha256, длину, note).
 - [ ] Разделить prompt на короткие блоки: personality, collaboration style, tool policy, safety/grounding.
 - [x] Убрать из identity динамические сведения о личной жизни и относительные даты.
 - [ ] Не дублировать профили участников одновременно в identity и memory.
@@ -409,7 +409,7 @@ Long-term memory — самый заметный частный случай э�
 - [x] `/memory_show <id>` показывает evidence и историю изменений.
 - [x] `/memory_forget <id>` помечает запись forgotten.
 - [x] `/memory_correct <id> <text>` создаёт revision и supersede.
-- [ ] `/memory_pin <id|text>` требует подтверждения для permanent lore.
+- [x] `/memory_pin <id|text>` требует подтверждения для permanent lore (в Memory v2: `/mem_lore` → `/mem_pin id`, только вручную).
 - [ ] `/memory_unpin <id>` понижает lore без удаления audit trail.
 - [ ] Добавить opt-out или запрет сохранения персональной памяти для участника.
 - [ ] Добавить retention policy для сырых сообщений и чувствительных данных.
@@ -638,7 +638,7 @@ Blind pairwise replay:
 9. [x] Реализовать `memory_items`, structured extraction и selective retrieval (в shadow-режиме).
 10. [x] Подключить response decision `ignore/react/reply/search` и уместные reactions (ignore/react для фоновых сообщений).
 11. [x] Добавить voice transcription и чтение присланных ссылок.
-12. [x] Объединить photo/GIF/sticker/video note в один multimodal pipeline. (voice/кружки/стикеры/GIF — `media_understanding`; фото пока старым путём)
+12. [x] Объединить photo/GIF/sticker/video note в один multimodal pipeline (`media_understanding`; фото в цитате — с кэшем; новое фото с вопросом — прямой анализ под вопрос).
 13. [ ] Запустить blind pairwise replay на 50–100 сценах.
 14. [x] ~~Провести bake-off~~ — отменён владельцем; прод на Grok 4.7 с 22.09.
 15. [x] ~~Настроить минимальный dynamic model/reasoning routing на основании evals.~~ Evals против: low не хуже medium при −40% цены и −40% латентности.
@@ -853,3 +853,11 @@ Personality (всё на Grok 4.7, 25 свежих прод-сцен с реак
 
 Обе конфигурации правильно решили все синтетические задачи. Medium не даёт выигрыша по качеству, но на 67% медленнее
 и на 40% дороже → остаётся low, авто-роутинг reasoning не вводится.
+
+### 22.09.2026 — мелочи по плану
+
+- Фото в цитате идёт через общий `media_understanding` с кэшем по `file_unique_id` (цитируемый мем анализируется один раз).
+- Исправлен баг Memory v2: кандидаты в легенды не участвовали в дедупе → каждое упоминание мема плодило дубль вместо
+  накопления источников. `/mem_lore` показывает кандидатов с числом упоминаний/людей/дней и ✅ по порогу 3/2/2,
+  `/mem_pin id` закрепляет в legend-файл (с аудитом).
+- `/prompt` показывает активную версию, sha256, длину и note.

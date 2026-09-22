@@ -323,30 +323,21 @@ class TestBuildReplyContext:
             assert "расшифровка: «го в доту»" in result
 
     @pytest.mark.asyncio
-    async def test_reply_to_photo_calls_gemini(self):
+    async def test_reply_to_photo_uses_cached_media_description(self):
         with patch.object(MoltbotHandlers, '__init__', lambda self, *a, **kw: None):
             handler = MoltbotHandlers.__new__(MoltbotHandlers)
-            handler.bot = AsyncMock()
-            handler._gemini_model = MagicMock()
-
-            file_mock = MagicMock()
-            file_mock.file_path = "photos/file.jpg"
-            handler.bot.get_file = AsyncMock(return_value=file_mock)
-            bio = MagicMock()
-            bio.read.return_value = b"fake_image_bytes"
-            handler.bot.download_file = AsyncMock(return_value=bio)
+            handler._media = MagicMock()
+            handler._media.fragment = AsyncMock(return_value="[Картинка: мем с котом]")
 
             reply_msg = _make_message(text=None, caption="ну вот")
             reply_msg.photo = [MagicMock()]
-            reply_msg.photo[-1].file_id = "abc123"
-
             msg = _make_message(text="@bot глянь", reply_to=reply_msg)
 
-            with patch.object(handler, '_analyze_image_with_gemini', return_value="мем с котом"):
-                result = await handler._build_reply_context(msg)
+            result = await handler._build_reply_context(msg)
 
-            assert "мем с котом" in result
+            assert "[Картинка: мем с котом]" in result
             assert "ну вот" in result
+            handler._media.fragment.assert_awaited_once_with(reply_msg)
 
 
 class TestEmptyTagGreeting:

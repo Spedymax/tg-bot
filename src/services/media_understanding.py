@@ -41,6 +41,8 @@ STICKER_PROMPT = (
     "Это стикер из Telegram. Одной короткой фразой: кто или что на нём и какую эмоцию/реакцию "
     "он выражает. Если есть текст — процитируй его."
 )
+PHOTO_PROMPT = ("Подробно опиши, что на картинке: кто/что, обстановка, настроение. Если есть текст — "
+                "процитируй дословно. Если это мем или скриншот переписки — перескажи суть.")
 GIF_PROMPT = "Это гифка (мем или реакция, без звука). Одной-двумя фразами: что происходит и какая реакция."
 
 
@@ -124,6 +126,12 @@ class MediaUnderstanding:
         """Prompt fragment for a media message (voice/audio/video note/sticker/GIF), or None
         if the message carries none of these. Never raises."""
         try:
+            if getattr(message, "photo", None):
+                photo = message.photo[-1]
+                if (getattr(photo, "file_size", 0) or 0) > MAX_FILE_BYTES:
+                    return "[Картинка: слишком большая, содержание неизвестно]"
+                desc = await self._analyze(photo.file_unique_id, "photo", photo.file_id, "image/jpeg", PHOTO_PROMPT)
+                return f"[Картинка: {desc}]" if desc else "[Картинка: содержание неизвестно]"
             if message.voice or message.audio:
                 media = message.voice or message.audio
                 text, reason = await self.transcribe_voice(media)
@@ -163,7 +171,7 @@ class MediaUnderstanding:
                 return f"[GIF: {desc}]" if desc else "[GIF: содержание неизвестно]"
         except Exception as e:
             logger.warning(f"media: fragment failed: {e}")
-            kind = ("Голосовое" if message.voice else "Кружок" if message.video_note
+            kind = ("Картинка" if getattr(message, "photo", None) else "Голосовое" if message.voice else "Кружок" if message.video_note
                     else "Стикер" if message.sticker else "GIF" if message.animation else "Медиа")
             return f"[{kind}: не удалось разобрать, содержание неизвестно]"
         return None

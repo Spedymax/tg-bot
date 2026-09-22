@@ -5,6 +5,7 @@ silently ignored to avoid spam from random chat members.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -138,8 +139,16 @@ async def loop_fix_approve(message: Message):
 async def cmd_prompt(message: Message):
     if not await _require_admin(message):
         return
-    text = await get_prompt_service().get_current_identity()
-    await _send_long(message, text, filename="identity.md")
+    service = get_prompt_service()
+    text = await service.get_current_identity()
+    vid = getattr(service, "_cache_version_id", None)
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    header = f"Активная версия: v{vid if vid is not None else '? (seed-файл)'} · sha256 {digest} · {len(text)} символов"
+    if vid is not None:
+        v = await service.get_version(vid)
+        if v and v.get("note"):
+            header += f"\n[{v['note']}]"
+    await _send_long(message, f"{header}\n\n{text}", filename=f"identity-v{vid}.md")
 
 
 @prompt_router.message(Command("setprompt"))

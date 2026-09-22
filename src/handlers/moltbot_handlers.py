@@ -400,19 +400,9 @@ class MoltbotHandlers:
         # Content extraction
         parts = []
 
-        # Photo in reply
+        # Photo in reply: generic description, cached per file (a quoted meme is analysed once)
         if reply.photo:
-            try:
-                file = await self.bot.get_file(reply.photo[-1].file_id)
-                bio = await self.bot.download_file(file.file_path)
-                image_bytes = bio.read()
-                desc = await asyncio.to_thread(
-                    self._analyze_image_with_gemini, image_bytes, ""
-                )
-                parts.append(f"[Картинка: {desc}]")
-            except Exception as e:
-                logger.warning(f"MoltBot: failed to analyze reply photo: {e}")
-                parts.append("[Картинка]")
+            parts.append(await self._get_media().fragment(reply) or "[Картинка: содержание неизвестно]")
 
         # Text or caption
         text = reply.text or reply.caption or ""
@@ -3003,6 +2993,39 @@ class MoltbotHandlers:
             head = (f"🧠 Memory v2 — режим <b>{MEMORY_V2_MODE}</b>, {len(items)} записей.\n"
                     "Источники: /mem_show id · забыть: /mem_forget id · исправить: /mem_fix id текст\n\n")
             await self._send_long_reply(message, head + body)
+
+        @router.message(Command(commands=['mem_lore']))
+        async def handle_mem_lore(message: Message):
+            """Lore candidates with human evidence; ✅ = meets 3 mentions / 2 people / 2 days."""
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                return
+            items = await self._get_memory_store().lore_readiness(message.chat.id)
+            if not items:
+                await message.reply("Кандидатов в легенды пока нет.")
+                return
+            lines = [f"{'✅' if it['ready'] else '🕓'} #{it['id']} {it['text']} — упоминаний {it['mentions']}, "
+                     f"людей {it['people']}, дней {it['days']}" for it in items]
+            await self._send_long_reply(message, html.escape(
+                "Кандидаты в легенды (✅ = 3 упоминания, 2 человека, 2 разных дня):\n" + "\n".join(lines)
+                + "\n\nЗакрепить: /mem_pin id"))
+
+        @router.message(Command(commands=['mem_pin']))
+        async def handle_mem_pin(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                return
+            arg = (message.text or "").split(maxsplit=1)
+            if len(arg) < 2 or not arg[1].strip().lstrip("#").isdigit():
+                await message.reply("Какую? /mem_pin <id> (список: /mem_lore)")
+                return
+            item = await self._get_memory_store().mark_pinned(
+                message.chat.id, int(arg[1].strip().lstrip("#")), message.from_user.id)
+            if not item:
+                await message.reply("Нет такого кандидата.")
+                return
+            lines = _lore_lines(message.chat.id)
+            lines.append(item["text"])
+            _save_lore_lines(lines, message.chat.id)
+            await message.reply(html.escape(f"📌 В легендах: {item['text']}"))
 
         @router.message(Command(commands=['mem_show']))
         async def handle_mem_show(message: Message):
