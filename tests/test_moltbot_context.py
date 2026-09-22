@@ -63,7 +63,7 @@ class TestGetRecentGroupMessages:
             handler.db = db
             handler._history_reset_time = {}
 
-            result = await handler._get_recent_group_messages(limit=50)
+            result = await handler._get_recent_group_messages(-1001, limit=50)
 
         assert len(result) == 2
         assert "[16:00 14.03] Богдан: привет" in result[0]
@@ -81,10 +81,114 @@ class TestGetRecentGroupMessages:
             handler.db = db
             handler._history_reset_time = {}
 
-            result = await handler._get_recent_group_messages(limit=50)
+            result = await handler._get_recent_group_messages(-1001, limit=50)
 
         assert len(result) == 1
         assert "Юра: old msg" in result[0]
+
+    @pytest.mark.asyncio
+    async def test_history_is_scoped_to_chat_and_excludes_current_turn(self):
+        records = [
+            (-1001, 10, "Макс", "только первый чат", datetime(2026, 3, 14, 15, 0)),
+            (-2002, 10, "Юра", "секрет второго чата", datetime(2026, 3, 14, 15, 1)),
+            (-1001, 11, "Богдан", "текущий turn", datetime(2026, 3, 14, 15, 2)),
+        ]
+
+        class ScopedDb:
+            async def execute_query(self, query, params):
+                assert "WHERE chat_id = %s" in query
+                chat_id, excluded, excluded_again, limit = params
+                assert excluded == excluded_again
+                rows = [
+                    (name, text, timestamp)
+                    for row_chat_id, message_id, name, text, timestamp in records
+                    if row_chat_id == chat_id and message_id != excluded
+                ]
+                return list(reversed(rows[-limit:]))
+
+        handler = MoltbotHandlers.__new__(MoltbotHandlers)
+        handler.db = ScopedDb()
+        handler._history_reset_time = {}
+
+        history = await handler._get_recent_group_messages(
+            -1001, limit=50, exclude_message_id=11
+        )
+
+        assert len(history) == 1
+        assert "только первый чат" in history[0]
+        assert all("секрет второго чата" not in line for line in history)
+        assert all("текущий turn" not in line for line in history)
+
+    @pytest.mark.asyncio
+    async def test_current_turn_occurs_once_in_model_messages(self):
+        handler = MoltbotHandlers.__new__(MoltbotHandlers)
+        with patch.object(_moltbot_mod, '_load_chat_summary', return_value=''), \
+                patch.object(_moltbot_mod, '_load_chat_lore', return_value=''):
+            messages = await handler._build_persona_messages(
+                "Богдан",
+                "текущий turn",
+                "групповой чат",
+                ["[16:00 14.03] Макс: предыдущий turn"],
+                -1001,
+            )
+
+        assert sum("текущий turn" in (item.get("content") or "") for item in messages) == 1
+
+    @pytest.mark.asyncio
+    async def test_reply_chain_is_scoped_to_chat(self):
+        db = AsyncMock(return_value=None)
+        db.execute_query = AsyncMock(return_value=[
+            ("Макс", "корень ветки", datetime(2026, 3, 14, 14, 55)),
+            ("Jarvis", "ответ в ветке", datetime(2026, 3, 14, 15, 0)),
+        ])
+        handler = MoltbotHandlers.__new__(MoltbotHandlers)
+        handler.db = db
+
+        chain = await handler._get_reply_chain(-1001, 42)
+
+        query, params = db.execute_query.await_args.args
+        assert "WHERE chat_id = %s AND message_id = %s" in query
+        assert "parent.chat_id = %s" in query
+        assert params[:3] == (-1001, 42, -1001)
+        assert "корень ветки" in chain[0]
+        assert "ответ в ветке" in chain[1]
+
+    @pytest.mark.asyncio
+    async def test_reply_chain_precedes_recent_scene_and_is_deduplicated(self):
+        handler = MoltbotHandlers.__new__(MoltbotHandlers)
+        handler._get_reply_chain = AsyncMock(return_value=[
+            "[15:00 14.03] Макс: начало ветки",
+            "[15:05 14.03] Jarvis: ответ",
+        ])
+        handler._get_recent_group_messages = AsyncMock(return_value=[
+            "[15:05 14.03] Jarvis: ответ",
+            "[15:10 14.03] Юра: соседняя сцена",
+        ])
+
+        history = await handler._build_thread_first_history(-1001, 42, 43)
+
+        assert history == [
+            "[15:00 14.03] Макс: начало ветки",
+            "[15:05 14.03] Jarvis: ответ",
+            "[15:10 14.03] Юра: соседняя сцена",
+        ]
+        handler._get_recent_group_messages.assert_awaited_once_with(
+            -1001, limit=100, exclude_message_id=43
+        )
+
+    @pytest.mark.asyncio
+    async def test_history_obeys_message_and_character_budgets(self):
+        handler = MoltbotHandlers.__new__(MoltbotHandlers)
+        handler._get_reply_chain = AsyncMock(return_value=["thread"])
+        handler._get_recent_group_messages = AsyncMock(return_value=[
+            "old-ambient", "middle", "newest"
+        ])
+
+        history = await handler._build_thread_first_history(
+            -1001, 42, 43, recent_limit=3, char_budget=19
+        )
+
+        assert history == ["thread", "middle", "newest"]
 
 
 class TestAskMoltbotContext:
@@ -269,3 +373,12 @@ def test_history_parser_preserves_bot_role_and_multiword_names(prefix):
         {'role': 'assistant', 'content': 'ответ'},
         {'role': 'user', 'content': 'Юра: привет'},
     ]
+
+
+@pytest.mark.parametrize('bot_name', ['Jarvis', 'Джарвис', 'MoltBot', 'Лолита'])
+def test_history_parser_recognizes_historical_bot_names(bot_name):
+    handler = MoltbotHandlers.__new__(MoltbotHandlers)
+    messages = handler._history_to_messages(
+        [f'[16:00 14.03] {bot_name}: ответ'], 'Юра', 'привет'
+    )
+    assert messages[0] == {'role': 'assistant', 'content': 'ответ'}

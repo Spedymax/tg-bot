@@ -88,9 +88,10 @@ def fetch(limit=2000):
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT name, message_text, timestamp FROM messages
-                   WHERE NOT (timestamp >= '2026-04-01' AND timestamp < '2026-04-06')
+                   WHERE chat_id = %s
+                     AND NOT (timestamp >= '2026-04-01' AND timestamp < '2026-04-06')
                    ORDER BY timestamp DESC LIMIT %s""",
-                (limit,),
+                (-1001294162183, limit),
             )
             rows = cur.fetchall()
         return [f"{fmt_ts(r[2])} {r[0] or 'Аноним'}: {r[1]}" for r in reversed(rows)]

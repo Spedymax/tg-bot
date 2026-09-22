@@ -19,6 +19,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from config.settings import Settings
 from services.circuit_breaker import ollama_breaker, together_breaker, openrouter_breaker
+from services.context_builder import ContextBuilder, ContextSnapshot
 
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CHAT_SUMMARY_PATH = os.path.join(_BASE_DIR, 'data', 'chat-summary.md')
@@ -52,19 +53,28 @@ class _AIRefusalError(Exception):
     """Raised when AI explicitly refuses to respond."""
 
 
-def _get_summary_mtime() -> datetime | None:
+def _chat_memory_path(base_path: str, chat_id: int | None) -> str:
+    """Keep legacy filenames for the main group; isolate every other chat."""
+    resolved_chat_id = chat_id if chat_id is not None else Settings.CHAT_IDS['main']
+    if resolved_chat_id == Settings.CHAT_IDS['main']:
+        return base_path
+    stem, ext = os.path.splitext(base_path)
+    return f"{stem}-{resolved_chat_id}{ext}"
+
+
+def _get_summary_mtime(chat_id: int | None = None) -> datetime | None:
     """Return the modification time of chat-summary.md, or None if missing."""
     try:
-        mtime = os.path.getmtime(CHAT_SUMMARY_PATH)
+        mtime = os.path.getmtime(_chat_memory_path(CHAT_SUMMARY_PATH, chat_id))
         return datetime.fromtimestamp(mtime, tz=timezone.utc)
     except Exception:
         return None
 
 
-def _load_chat_summary() -> str:
+def _load_chat_summary(chat_id: int | None = None) -> str:
     """Load the long-term chat summary written by the AI."""
     try:
-        with open(CHAT_SUMMARY_PATH, encoding="utf-8") as f:
+        with open(_chat_memory_path(CHAT_SUMMARY_PATH, chat_id), encoding="utf-8") as f:
             return f.read().strip()
     except FileNotFoundError:
         return ""
@@ -74,10 +84,10 @@ def _load_chat_summary() -> str:
         return ""
 
 
-def _load_chat_lore() -> str:
+def _load_chat_lore(chat_id: int | None = None) -> str:
     """Load pinned lore — permanent in-jokes the rolling summary must never drop."""
     try:
-        with open(CHAT_LORE_PATH, encoding="utf-8") as f:
+        with open(_chat_memory_path(CHAT_LORE_PATH, chat_id), encoding="utf-8") as f:
             return f.read().strip()
     except FileNotFoundError:
         return ""
@@ -86,14 +96,15 @@ def _load_chat_lore() -> str:
         return ""
 
 
-def _lore_lines() -> list[str]:
+def _lore_lines(chat_id: int | None = None) -> list[str]:
     """Pinned lore as a list of non-empty lines."""
-    return [ln.strip() for ln in _load_chat_lore().splitlines() if ln.strip()]
+    return [ln.strip() for ln in _load_chat_lore(chat_id).splitlines() if ln.strip()]
 
 
-def _save_lore_lines(lines: list[str]) -> None:
-    os.makedirs(os.path.dirname(CHAT_LORE_PATH), exist_ok=True)
-    with open(CHAT_LORE_PATH, "w", encoding="utf-8") as f:
+def _save_lore_lines(lines: list[str], chat_id: int | None = None) -> None:
+    path = _chat_memory_path(CHAT_LORE_PATH, chat_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines).strip() + ("\n" if lines else ""))
 
 
@@ -122,6 +133,8 @@ SPIKE_DELAY_MIN, SPIKE_DELAY_MAX = 5 * 60, 20 * 60  # seconds
 # Smart summary config
 SUMMARY_UPDATE_HOURS = 24     # update chat-summary.md every N hours
 SUMMARY_FETCH_HOURS = 48      # fetch messages from last N hours for summary
+HISTORY_MESSAGE_LIMIT = 100
+HISTORY_CHAR_BUDGET = 12_000  # conservative ~3K-token cap before prompt/memory
 CPH_TZ = ZoneInfo("Europe/Copenhagen")
 
 
@@ -137,12 +150,15 @@ class MoltbotHandlers:
         self._proactive_queued: set[int] = set()
         self._last_probabilistic_sent: dict[int, datetime] = {}
         self._last_reaction_time: dict[int, datetime] = {}
-        self._last_summary_update: datetime | None = _get_summary_mtime()
+        self._last_summary_update: dict[int, datetime | None] = {
+            chat_id: _get_summary_mtime(chat_id) for chat_id in CHAT_KEYS
+        }
         self._active_danetka: dict[int, dict] = {}
         self._photo_context: dict[int, str] = {}  # bot_reply_msg_id → original photo file_id
         self._prob_session_start: dict[int, datetime] = {}  # chat_id → when probabilistic session started
         self._reasoning_effort: str = REASONING_DEFAULT
         self._reasoning_last_activity: datetime | None = None  # last chat activity seen (for auto-reset)
+        self._context_builder = ContextBuilder(self._BOT_NAMES)
         self._load_state()
         self._init_gemini()
         asyncio.ensure_future(self._ensure_danetki_table())
@@ -437,46 +453,58 @@ class MoltbotHandlers:
                 name = message.from_user.first_name or message.from_user.username or 'Аноним'
                 reply_to = message.reply_to_message.message_id if message.reply_to_message else None
                 await self.db.execute_query(
-                    "INSERT INTO messages (user_id, message_text, timestamp, name, message_id, reply_to_message_id) "
-                    "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s, %s)",
-                    (message.from_user.id, message.text, name, message.message_id, reply_to),
+                    "INSERT INTO messages (chat_id, user_id, message_text, timestamp, name, message_id, reply_to_message_id) "
+                    "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s) "
+                    "ON CONFLICT (chat_id, message_id) WHERE message_id IS NOT NULL DO NOTHING",
+                    (message.chat.id, message.from_user.id, message.text, name, message.message_id, reply_to),
                 )
         except Exception as e:
             logger.warning(f"MoltBot: failed to store user message: {e}")
 
-    async def _store_bot_reply(self, text: str, msg_id: int | None = None, reply_to: int | None = None):
+    async def _store_bot_reply(self, text: str, chat_id: int,
+                               msg_id: int | None = None, reply_to: int | None = None):
         """Store Jarvis bot reply in the messages table.
         `reply_to` = message_id of the user message this reply answers (for reply-thread context)."""
         try:
             await self.db.execute_query(
-                "INSERT INTO messages (user_id, message_text, timestamp, name, message_id, reply_to_message_id) "
-                "VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s, %s)",
-                (0, text, "Jarvis", msg_id, reply_to),
+                "INSERT INTO messages (chat_id, user_id, message_text, timestamp, name, message_id, reply_to_message_id) "
+                "VALUES (%s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s) "
+                "ON CONFLICT (chat_id, message_id) WHERE message_id IS NOT NULL DO NOTHING",
+                (chat_id, 0, text, "Jarvis", msg_id, reply_to),
             )
         except Exception as e:
             logger.warning(f"MoltBot: failed to store bot reply: {e}")
 
-    async def _get_recent_group_messages(self, limit: int = 50, chat_id: int | None = None) -> list[str]:
+    async def _get_recent_group_messages(self, chat_id: int, limit: int = 50,
+                                         exclude_message_id: int | None = None) -> list[str]:
         """Fetch last `limit` messages from the group chat history in DB."""
         try:
-            reset_time = self._history_reset_time.get(chat_id) if chat_id else None
+            reset_time = self._history_reset_time.get(chat_id)
             if reset_time:
                 query = """
                     SELECT name, message_text, timestamp
                     FROM messages
-                    WHERE timestamp >= %s
+                    WHERE chat_id = %s
+                      AND timestamp >= %s
+                      AND (%s IS NULL OR message_id IS DISTINCT FROM %s)
                     ORDER BY timestamp DESC
                     LIMIT %s
                 """
-                rows = await self.db.execute_query(query, (reset_time, limit))
+                rows = await self.db.execute_query(
+                    query, (chat_id, reset_time, exclude_message_id, exclude_message_id, limit)
+                )
             else:
                 query = """
                     SELECT name, message_text, timestamp
                     FROM messages
+                    WHERE chat_id = %s
+                      AND (%s IS NULL OR message_id IS DISTINCT FROM %s)
                     ORDER BY timestamp DESC
                     LIMIT %s
                 """
-                rows = await self.db.execute_query(query, (limit,))
+                rows = await self.db.execute_query(
+                    query, (chat_id, exclude_message_id, exclude_message_id, limit)
+                )
             if not rows:
                 return []
             # Rows come newest-first; reverse to get chronological order
@@ -487,6 +515,88 @@ class MoltbotHandlers:
         except Exception as e:
             logger.error(f"MoltBot: error fetching chat history: {e}")
             return []
+
+    async def _get_reply_chain(self, chat_id: int, reply_to_message_id: int | None,
+                               limit: int = 12) -> list[str]:
+        """Return the quoted Telegram branch, oldest ancestor first."""
+        if reply_to_message_id is None:
+            return []
+        try:
+            rows = await self.db.execute_query(
+                """
+                WITH RECURSIVE reply_chain AS (
+                    SELECT name, message_text, timestamp, message_id,
+                           reply_to_message_id, 0 AS depth,
+                           ARRAY[message_id]::BIGINT[] AS path
+                    FROM messages
+                    WHERE chat_id = %s AND message_id = %s
+
+                    UNION ALL
+
+                    SELECT parent.name, parent.message_text, parent.timestamp,
+                           parent.message_id, parent.reply_to_message_id,
+                           child.depth + 1,
+                           child.path || parent.message_id
+                    FROM messages parent
+                    JOIN reply_chain child
+                      ON parent.chat_id = %s
+                     AND parent.message_id = child.reply_to_message_id
+                    WHERE child.depth < %s
+                      AND NOT parent.message_id = ANY(child.path)
+                )
+                SELECT name, message_text, timestamp
+                FROM reply_chain
+                ORDER BY depth DESC
+                """,
+                (chat_id, reply_to_message_id, chat_id, max(0, limit - 1)),
+            )
+            return [
+                f"{self._format_ts(row[2])} {row[0] or 'Аноним'}: {row[1]}"
+                for row in (rows or [])
+            ]
+        except Exception as e:
+            logger.error(f"MoltBot: error fetching reply chain: {e}")
+            return []
+
+    async def _build_thread_first_history(self, chat_id: int,
+                                          reply_to_message_id: int | None,
+                                          current_message_id: int | None,
+                                          recent_limit: int = HISTORY_MESSAGE_LIMIT,
+                                          char_budget: int = HISTORY_CHAR_BUDGET) -> list[str]:
+        """Compose reply branch first, then the broader scene without duplicates."""
+        thread = await self._get_reply_chain(chat_id, reply_to_message_id)
+        recent = await self._get_recent_group_messages(
+            chat_id, limit=recent_limit, exclude_message_id=current_message_id
+        )
+        seen: set[str] = set()
+        combined: list[str] = []
+        used_chars = 0
+
+        # The explicit reply branch has priority over ambient context.
+        for line in thread:
+            if line in seen or len(combined) >= recent_limit:
+                continue
+            remaining = char_budget - used_chars
+            if remaining <= 0:
+                break
+            kept = line[:remaining]
+            combined.append(kept)
+            seen.add(line)
+            used_chars += len(kept)
+
+        # Fill the remaining budget with the newest surrounding messages while
+        # preserving chronological order inside that selected scene.
+        recent_reversed: list[str] = []
+        for line in reversed(recent):
+            if line in seen or len(combined) + len(recent_reversed) >= recent_limit:
+                continue
+            if used_chars + len(line) > char_budget:
+                continue
+            recent_reversed.append(line)
+            seen.add(line)
+            used_chars += len(line)
+        combined.extend(reversed(recent_reversed))
+        return combined
 
     async def _together_post(self, payload: dict, timeout: float) -> dict:
         """POST to Together.ai (streaming) with retry on 5xx and transient errors.
@@ -557,28 +667,21 @@ class MoltbotHandlers:
                     continue
         raise last_exc if last_exc else _AIConnectionError("Together.ai retry exhausted")
 
-    async def _call_together_simple(self, prompt: str) -> str:
+    async def _call_together_simple(self, prompt: str, chat_id: int | None = None) -> str:
         """Call Together.ai with a raw prompt + IDENTITY. Used for proactive/probabilistic messages."""
         if not Settings.TOGETHER_API_KEY:
             raise _AIConnectionError("TOGETHER_API_KEY not set")
         if not together_breaker.allow_request():
             raise _AIConnectionError("together circuit breaker open")
-        try:
-            from services.prompt_service import get_prompt_service
-            identity = await get_prompt_service().get_current_identity()
-        except Exception:
-            identity = ""
-        system_msg = "\n\n".join([self._HARD_RULES, identity])
+        messages = await self._build_persona_messages(
+            "Служебная задача", prompt, "проактивное участие в групповом чате", None, chat_id
+        )
         try:
             text = await self._complete_with_tools(
                 self._together_post,
                 {
                     "model": Settings.TOGETHER_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_msg},
-                        {"role": "system", "content": self._POST_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
+                    "messages": messages,
                     "max_tokens": 500,
                     "temperature": 0.8,
                 },
@@ -591,28 +694,21 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: Together.ai simple call failed: {e}")
             raise _AIConnectionError(str(e))
 
-    async def _call_openrouter_simple(self, prompt: str) -> str:
+    async def _call_openrouter_simple(self, prompt: str, chat_id: int | None = None) -> str:
         """Call OpenRouter (Grok) with a raw prompt + IDENTITY. Primary for proactive/probabilistic messages."""
         if not Settings.OPENROUTER_API_KEY:
             raise _AIConnectionError("OPENROUTER_API_KEY not set")
         if not openrouter_breaker.allow_request():
             raise _AIConnectionError("openrouter circuit breaker open")
-        try:
-            from services.prompt_service import get_prompt_service
-            identity = await get_prompt_service().get_current_identity()
-        except Exception:
-            identity = ""
-        system_msg = "\n\n".join([self._HARD_RULES, identity])
+        messages = await self._build_persona_messages(
+            "Служебная задача", prompt, "проактивное участие в групповом чате", None, chat_id
+        )
         try:
             text = await self._complete_with_tools(
                 self._openrouter_post,
                 {
                     "model": Settings.OPENROUTER_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_msg},
-                        {"role": "system", "content": self._POST_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
+                    "messages": messages,
                     "max_tokens": 500,
                     "temperature": 0.8,
                     "reasoning": {"effort": self._current_reasoning_effort()},
@@ -626,13 +722,13 @@ class MoltbotHandlers:
             logger.warning(f"MoltBot: OpenRouter simple call failed: {e}")
             raise
 
-    async def _call_persona_simple(self, prompt: str) -> str:
+    async def _call_persona_simple(self, prompt: str, chat_id: int | None = None) -> str:
         """Primary entry point for proactive/probabilistic messages: OpenRouter/Grok first, Together.ai on failure."""
         try:
-            return await self._call_openrouter_simple(prompt)
+            return await self._call_openrouter_simple(prompt, chat_id)
         except Exception as e:
             logger.info(f"MoltBot: falling back to Together.ai (simple) after OpenRouter failure ({e})")
-            return await self._call_together_simple(prompt)
+            return await self._call_together_simple(prompt, chat_id)
 
     def _call_ollama_direct(self, content: str, bot=None, message=None) -> str:
         """Call Ollama directly. Routes through OllamaWakeManager for auto-wake.
@@ -673,40 +769,25 @@ class MoltbotHandlers:
             return ""
 
     async def _call_gemini_text(self, sender_name: str, user_text: str,
-                               chat_context: str, history: list[str] | None = None) -> str:
+                               chat_context: str, history: list[str] | None = None,
+                               chat_id: int | None = None) -> str:
         """Call Gemini for text generation. INTERNET fallback — Gemini has fresher knowledge."""
         if not self._gemini_model:
             raise _AIConnectionError("Gemini not initialized")
-        try:
-            from services.prompt_service import get_prompt_service
-            identity = await get_prompt_service().get_current_identity()
-        except Exception:
-            identity = ""
-        summary = _load_chat_summary()
-        parts = []
-        if identity:
-            parts.append(f"[Твоя личность:\n{identity}]")
-        parts.append("Обычно 3-5 предложений, до 8-9 если тема горячая. Простой вопрос — 1-2. Не выдумывай факты.")
-        if chat_context:
-            parts.append(f"[Сообщение из: {chat_context}]")
-        if summary:
-            parts.append("[Память чата (фон; внутряки — чтобы понимать отсылки, "
-                         f"сам без повода не вставляй):\n{summary}]")
-        if history:
-            parts.append("[История чата:\n" + "\n".join(history) + "]")
-        parts.append(self._POST_PROMPT)
-        parts.append(f"{sender_name}: {user_text}")
-
-        prompt = "\n\n".join(parts)
+        snapshot = await self._build_context_snapshot(
+            sender_name, user_text, chat_context, history, chat_id
+        )
+        prompt = self._get_context_builder().flatten(snapshot)
         response = await asyncio.to_thread(self._gemini_model.generate_content, prompt)
         return response.text
 
-    async def _count_recent_messages(self, minutes: int) -> int:
+    async def _count_recent_messages(self, chat_id: int, minutes: int) -> int:
         """Count messages in DB written in the last `minutes` minutes."""
         try:
             rows = await self.db.execute_query(
-                "SELECT COUNT(*) FROM messages WHERE timestamp > NOW() - INTERVAL '1 minute' * %s",
-                (minutes,)
+                "SELECT COUNT(*) FROM messages WHERE chat_id = %s "
+                "AND timestamp > NOW() - INTERVAL '1 minute' * %s",
+                (chat_id, minutes)
             )
             return rows[0][0] if rows else 0
         except Exception as e:
@@ -716,7 +797,7 @@ class MoltbotHandlers:
     async def _send_proactive_message(self, chat_id: int):
         """Build context and send a proactive (unprompted) message to the chat."""
         try:
-            history = await self._get_recent_group_messages(50, chat_id)
+            history = await self._get_recent_group_messages(chat_id, limit=50)
 
             context_prefix = ""
             if history:
@@ -733,13 +814,15 @@ class MoltbotHandlers:
                 "Напиши одно короткое сообщение как участник разговора.]"
             )
 
-            reply = await self._call_persona_simple(user_content)
+            reply = await self._call_persona_simple(user_content, chat_id)
 
             # Reply to the most recent stored message if we have its Telegram message_id
             reply_to = None
             try:
                 rows = await self.db.execute_query(
-                    "SELECT message_id FROM messages WHERE message_id IS NOT NULL ORDER BY timestamp DESC LIMIT 1"
+                    "SELECT message_id FROM messages WHERE chat_id = %s AND message_id IS NOT NULL "
+                    "ORDER BY timestamp DESC LIMIT 1",
+                    (chat_id,),
                 )
                 if rows and rows[0][0]:
                     reply_to = rows[0][0]
@@ -759,7 +842,7 @@ class MoltbotHandlers:
         last = self._last_proactive_sent.get(chat_id)
         if last and (datetime.now(timezone.utc) - last) < timedelta(hours=SPIKE_COOLDOWN_HOURS):
             return
-        count = await self._count_recent_messages(30)
+        count = await self._count_recent_messages(chat_id, 30)
         if count >= SPIKE_THRESHOLD:
             self._proactive_queued.add(chat_id)
             delay = random.randint(SPIKE_DELAY_MIN, SPIKE_DELAY_MAX)
@@ -774,14 +857,14 @@ class MoltbotHandlers:
 
     # ── Smart summary ─────────────────────────────────────────────────────────
 
-    async def _update_summary(self):
+    async def _update_summary(self, chat_id: int):
         """Fetch recent messages and ask Together.ai to rewrite chat-summary.md."""
         try:
             rows = await self.db.execute_query(
                 "SELECT name, message_text, timestamp FROM messages "
-                "WHERE timestamp >= NOW() - INTERVAL '%s hours' "
+                "WHERE chat_id = %s AND timestamp >= NOW() - INTERVAL '%s hours' "
                 "ORDER BY timestamp ASC",
-                (SUMMARY_FETCH_HOURS,),
+                (chat_id, SUMMARY_FETCH_HOURS),
             )
             if not rows:
                 return
@@ -791,8 +874,8 @@ class MoltbotHandlers:
             ]
             history_text = "\n".join(messages)
 
-            current_summary = _load_chat_summary()
-            current_lore = _load_chat_lore()
+            current_summary = _load_chat_summary(chat_id)
+            current_lore = _load_chat_lore(chat_id)
             now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
             prompt = f"""[СЛУЖЕБНЫЙ ЗАПРОС — пересборка короткой памяти чата]
@@ -867,18 +950,19 @@ class MoltbotHandlers:
             # Hard backstop against runaway growth (prompt asks for ~1500)
             summary_text = summary_text[:2500].strip()
 
-            os.makedirs(os.path.dirname(CHAT_SUMMARY_PATH), exist_ok=True)
-            with open(CHAT_SUMMARY_PATH, "w", encoding="utf-8") as f:
+            summary_path = _chat_memory_path(CHAT_SUMMARY_PATH, chat_id)
+            os.makedirs(os.path.dirname(summary_path), exist_ok=True)
+            with open(summary_path, "w", encoding="utf-8") as f:
                 f.write(summary_text)
-            logger.info(f"MoltBot: chat-summary.md updated ({len(summary_text)} chars)")
+            logger.info(f"MoltBot: summary updated for chat {chat_id} ({len(summary_text)} chars)")
             if pin_block:
-                self._promote_lore(pin_block)
+                self._promote_lore(pin_block, chat_id)
         except Exception as e:
             logger.error(f"MoltBot: summary update failed: {e}")
 
     _LORE_CAP = 20
 
-    def _promote_lore(self, pin_block: str):
+    def _promote_lore(self, pin_block: str, chat_id: int):
         """Append LLM-proposed permanent in-jokes to chat-lore.md (dedup + cap)."""
         def _sig_words(s: str) -> set:
             # proper nouns (Capitalized+lowercase tail) — the real key of an in-joke
@@ -887,7 +971,7 @@ class MoltbotHandlers:
             return {w.lower() for w in re.findall(r'[A-ZА-ЯЁ][a-zа-яё]{3,}', s)}
 
         try:
-            kept = _lore_lines()
+            kept = _lore_lines(chat_id)
             kept_lc = [l.lower() for l in kept]
             kept_sig = [_sig_words(l) for l in kept]
             added = []
@@ -907,19 +991,20 @@ class MoltbotHandlers:
                 if len(kept) >= self._LORE_CAP:
                     break
             if added:
-                _save_lore_lines(kept)
+                _save_lore_lines(kept, chat_id)
                 logger.info(f"MoltBot: auto-pinned {len(added)} lore item(s): {added}")
         except Exception as e:
             logger.error(f"MoltBot: lore promotion failed: {e}")
 
-    def _maybe_update_summary(self):
+    def _maybe_update_summary(self, chat_id: int):
         """Trigger summary update if enough time has passed (every SUMMARY_UPDATE_HOURS)."""
         now = datetime.now(timezone.utc)
-        if self._last_summary_update and (now - self._last_summary_update) < timedelta(hours=SUMMARY_UPDATE_HOURS):
+        last_update = self._last_summary_update.get(chat_id)
+        if last_update and (now - last_update) < timedelta(hours=SUMMARY_UPDATE_HOURS):
             return
-        self._last_summary_update = now
-        asyncio.create_task(self._update_summary())
-        logger.info("MoltBot: triggered background summary update (24h timer)")
+        self._last_summary_update[chat_id] = now
+        asyncio.create_task(self._update_summary(chat_id))
+        logger.info(f"MoltBot: triggered background summary update for chat {chat_id} (24h timer)")
 
     # ── Topic detection ───────────────────────────────────────────────────────
 
@@ -1025,75 +1110,55 @@ class MoltbotHandlers:
         return f"{self._POST_PROMPT_BASE}\n\n{inj}" if inj else self._POST_PROMPT_BASE
 
     # Bot names used to identify assistant messages in history
-    _BOT_NAMES = {"Кеша", "Иннокентий", "Лолита", "Ло", "Лола", "Jarvis"}
+    _BOT_NAMES = {
+        "Кеша", "Иннокентий", "Лолита", "Ло", "Лола",
+        "Jarvis", "Джарвис", "MoltBot",
+    }
+
+    def _get_context_builder(self) -> ContextBuilder:
+        # Tests and a few maintenance scripts instantiate the handler via __new__.
+        builder = getattr(self, '_context_builder', None)
+        if builder is None:
+            builder = ContextBuilder(self._BOT_NAMES)
+            self._context_builder = builder
+        return builder
 
     def _history_to_messages(self, history: list[str], sender_name: str,
                              user_text: str) -> list[dict]:
-        """Convert history strings to OpenAI-style message dicts.
-        History format: '14:30 Макс: текст' or '14:30 Лолита: текст'."""
-        messages = []
-        for line in (history or []):
-            # DB history uses "[14:30 18.09] Name: text"; legacy entries omit the date.
-            rest = re.sub(r'^(?:\[\d{2}:\d{2}(?:\s+\d{2}\.\d{2})?\]|\d{2}:\d{2})\s*', '', line)
-            colon_idx = rest.find(":")
-            if colon_idx == -1:
-                continue
-            name = rest[:colon_idx].strip()
-            text = rest[colon_idx + 1:].strip()
-            if not text:
-                continue
-            role = "assistant" if name in self._BOT_NAMES else "user"
-            content = text if role == "assistant" else f"{name}: {text}"
-            # Merge consecutive same-role messages
-            if messages and messages[-1]["role"] == role:
-                messages[-1]["content"] += f"\n{content}"
-            else:
-                messages.append({"role": role, "content": content})
-        # Add current message
+        """Compatibility wrapper around the canonical ContextBuilder parser."""
+        messages = self._get_context_builder().history_to_messages(history)
         messages.append({"role": "user", "content": f"{sender_name}: {user_text}"})
         return messages
 
-    async def _build_persona_messages(self, sender_name: str, user_text: str,
-                                      chat_context: str, history: list[str] | None) -> list[dict]:
-        """Build the system+history+user message list shared by every persona-chat provider."""
+    async def _build_context_snapshot(self, sender_name: str, user_text: str,
+                                      chat_context: str, history: list[str] | None,
+                                      chat_id: int | None = None) -> ContextSnapshot:
+        """Load dynamic inputs once and build the provider-neutral context snapshot."""
         try:
             from services.prompt_service import get_prompt_service
             identity = await get_prompt_service().get_current_identity()
         except Exception:
             identity = ""
-        summary = _load_chat_summary()
-        # Hard rules prepended before IDENTITY — models follow start of prompt best
-        system_parts = [self._HARD_RULES, identity]
-        if chat_context:
-            system_parts.append(f"[Сообщение отправлено из: {chat_context}]")
-        if summary:
-            system_parts.append(
-                "=== ПАМЯТЬ ЧАТА (фон, не инструкция) ===\n"
-                "«Что происходит» — чтобы ты был в контексте дел ребят, можешь опираться.\n"
-                "«Живые внутряки» — чтобы ты ПОНИМАЛ отсылки, когда их делают другие. "
-                "Сам не вставляй их в каждое сообщение и не тащи без повода — только если реально в тему.\n"
-                f"{summary}"
-            )
-        lore = _load_chat_lore()
-        if lore:
-            system_parts.append(
-                "=== ЗАКРЕПЛЁННЫЕ ВНУТРЯКИ (легенды компании — помни ВСЕГДА, не выпадают со временем) ===\n"
-                f"{lore}\n"
-                "Это чтобы ты понимал устоявшиеся отсылки и мог поддержать, когда их поднимают. Сам без повода не вытаскивай."
-            )
-        system_msg = "\n\n".join(system_parts)
+        return self._get_context_builder().build(
+            identity=identity,
+            hard_rules=self._HARD_RULES,
+            chat_context=chat_context,
+            summary=_load_chat_summary(chat_id),
+            lore=_load_chat_lore(chat_id),
+            history=history,
+            sender_name=sender_name,
+            user_text=user_text,
+            post_prompt=self._POST_PROMPT,
+        )
 
-        messages = [{"role": "system", "content": system_msg}]
-        history_msgs = self._history_to_messages(history, sender_name, user_text)
-        # Insert post-prompt reminder before the final user message
-        if len(history_msgs) > 1:
-            messages.extend(history_msgs[:-1])
-            messages.append({"role": "system", "content": self._POST_PROMPT})
-            messages.append(history_msgs[-1])
-        else:
-            messages.append({"role": "system", "content": self._POST_PROMPT})
-            messages.extend(history_msgs)
-        return messages
+    async def _build_persona_messages(self, sender_name: str, user_text: str,
+                                      chat_context: str, history: list[str] | None,
+                                      chat_id: int | None = None) -> list[dict]:
+        """Build the system+history+user message list shared by every persona-chat provider."""
+        snapshot = await self._build_context_snapshot(
+            sender_name, user_text, chat_context, history, chat_id
+        )
+        return snapshot.as_messages()
 
     @staticmethod
     def _clean_persona_reply(text: str) -> str:
@@ -1103,11 +1168,14 @@ class MoltbotHandlers:
         return text
 
     async def _call_together(self, sender_name: str, user_text: str,
-                             chat_context: str, history: list[str] | None = None) -> str:
+                             chat_context: str, history: list[str] | None = None,
+                             chat_id: int | None = None) -> str:
         """Call Together.ai with IDENTITY.md as system prompt and proper multi-turn."""
         if not Settings.TOGETHER_API_KEY:
             raise _AIConnectionError("TOGETHER_API_KEY not set")
-        messages = await self._build_persona_messages(sender_name, user_text, chat_context, history)
+        messages = await self._build_persona_messages(
+            sender_name, user_text, chat_context, history, chat_id
+        )
         text = await self._complete_with_tools(
             self._together_post,
             {
@@ -1151,7 +1219,8 @@ class MoltbotHandlers:
         raise last_exc if last_exc else _AIConnectionError("OpenRouter retry exhausted")
 
     async def _call_openrouter(self, sender_name: str, user_text: str,
-                               chat_context: str, history: list[str] | None = None) -> str:
+                               chat_context: str, history: list[str] | None = None,
+                               chat_id: int | None = None) -> str:
         """Call OpenRouter (Grok by default) — primary persona-chat model.
 
         Grok was picked over Together's Qwen after a direct A/B test: on a real
@@ -1164,7 +1233,9 @@ class MoltbotHandlers:
             raise _AIConnectionError("OPENROUTER_API_KEY not set")
         if not openrouter_breaker.allow_request():
             raise _AIConnectionError("openrouter circuit breaker open")
-        messages = await self._build_persona_messages(sender_name, user_text, chat_context, history)
+        messages = await self._build_persona_messages(
+            sender_name, user_text, chat_context, history, chat_id
+        )
         try:
             text = await self._complete_with_tools(
                 self._openrouter_post,
@@ -1185,13 +1256,14 @@ class MoltbotHandlers:
             raise
 
     async def _call_persona(self, sender_name: str, user_text: str,
-                            chat_context: str, history: list[str] | None = None) -> str:
+                            chat_context: str, history: list[str] | None = None,
+                            chat_id: int | None = None) -> str:
         """Primary persona-chat entry point: OpenRouter/Grok first, Together.ai on failure."""
         try:
-            return await self._call_openrouter(sender_name, user_text, chat_context, history)
+            return await self._call_openrouter(sender_name, user_text, chat_context, history, chat_id)
         except Exception as e:
             logger.info(f"MoltBot: falling back to Together.ai after OpenRouter failure ({e})")
-            return await self._call_together(sender_name, user_text, chat_context, history)
+            return await self._call_together(sender_name, user_text, chat_context, history, chat_id)
 
     def _would_gemini_block(self, user_text: str) -> bool:
         """Ask Qwen whether Gemini would likely block this message due to safety filters."""
@@ -1453,7 +1525,8 @@ class MoltbotHandlers:
         return re.sub(r"\n\s*\n\s*\n", "\n\n", cleaned).strip()
 
     async def _maybe_search(self, reply: str, sender_name: str, user_text: str,
-                            chat_context: str, history: list[str] | None) -> str | None:
+                            chat_context: str, history: list[str] | None,
+                            chat_id: int | None = None) -> str | None:
         """Legacy net: if reply contains a SEARCH: marker, search and re-generate. Returns new reply or None."""
         query = self._extract_search_query(reply)
         if not query:
@@ -1468,32 +1541,39 @@ class MoltbotHandlers:
             )
             augmented_text = f"{user_text}\n\n{search_context}"
             try:
-                return await self._call_persona(sender_name, augmented_text, chat_context, history)
+                return await self._call_persona(
+                    sender_name, augmented_text, chat_context, history, chat_id
+                )
             except Exception as e:
                 logger.warning(f"MoltBot: re-call after search failed: {e}")
         # Search failed or no results — try Gemini
         try:
-            return await self._call_gemini_text(sender_name, user_text, chat_context, history)
+            return await self._call_gemini_text(
+                sender_name, user_text, chat_context, history, chat_id
+            )
         except Exception as ge:
             logger.warning(f"MoltBot: Gemini fallback failed ({ge})")
         return None
 
     async def _ask_moltbot_routed(self, sender_name: str, user_text: str,
                                   chat_context: str,
-                                  history: list[str] | None = None) -> str:
+                                  history: list[str] | None = None,
+                                  chat_id: int | None = None) -> str:
         """Route: OpenRouter/Grok → Together.ai fallback. Web search is a native tool call
         (web_search → Brave); legacy SEARCH:/INTERNET text markers are intercepted as a fallback."""
         if not Settings.OPENROUTER_API_KEY and not Settings.TOGETHER_API_KEY:
             raise _AIConnectionError("Neither OPENROUTER_API_KEY nor TOGETHER_API_KEY set")
         logger.info(f"MoltBot: persona call for: {user_text[:60]}")
-        reply = await self._call_persona(sender_name, user_text, chat_context, history)
+        reply = await self._call_persona(sender_name, user_text, chat_context, history, chat_id)
         if not reply or not reply.strip():
             return reply
         logger.info(f"MoltBot: routed got reply ({len(reply)} chars): {reply[:100]!r}")
         # Legacy text markers (SEARCH: / INTERNET) — search is a tool call now,
         # but old prompt versions may still emit them. Never let them reach the chat.
         if self._extract_search_query(reply):
-            searched = await self._maybe_search(reply, sender_name, user_text, chat_context, history)
+            searched = await self._maybe_search(
+                reply, sender_name, user_text, chat_context, history, chat_id
+            )
             if searched and not self._extract_search_query(searched):
                 logger.info(f"MoltBot: legacy SEARCH resolved, returning: {searched[:100]!r}")
                 return searched
@@ -1504,7 +1584,9 @@ class MoltbotHandlers:
             raise _AIConnectionError("reply was only a SEARCH marker and search failed")
         if reply.strip().upper() == "INTERNET":
             logger.info(f"MoltBot: INTERNET → gemini for: {user_text[:60]}")
-            return await self._call_gemini_text(sender_name, user_text, chat_context, history)
+            return await self._call_gemini_text(
+                sender_name, user_text, chat_context, history, chat_id
+            )
         return reply
 
     async def _qwen_should_reply(self, sender_name: str, user_text: str,
@@ -1546,7 +1628,7 @@ class MoltbotHandlers:
             return False
 
         # Gate 2: activity threshold — 6+ messages in last 10 minutes
-        recent_count = await self._count_recent_messages(10)
+        recent_count = await self._count_recent_messages(chat_id, 10)
         if recent_count < 6:
             return False
 
@@ -1564,7 +1646,7 @@ class MoltbotHandlers:
         try:
             if is_cold_start:
                 # Cold start: picks from last 6 messages
-                history = await self._get_recent_group_messages(limit=6, chat_id=chat_id)
+                history = await self._get_recent_group_messages(chat_id, limit=6)
                 if not history:
                     return False
                 history_block = "\n".join(history)
@@ -1576,11 +1658,11 @@ class MoltbotHandlers:
                     "1-2 предложения максимум. Не представляйся, не начинай с обращения.\n"
                     "Если ни одно сообщение не стоит ответа — верни пустую строку."
                 )
-                reply = await self._call_persona_simple(prompt)
+                reply = await self._call_persona_simple(prompt, chat_id)
                 logger.info(f"MoltBot: cold start probabilistic for chat {chat_id}")
             else:
                 # Warm session: Qwen filter → Claude response
-                history = await self._get_recent_group_messages(limit=50, chat_id=chat_id)
+                history = await self._get_recent_group_messages(chat_id, limit=50)
                 should = await self._qwen_should_reply(sender_name, user_text, history)
                 if not should:
                     return False
@@ -1594,7 +1676,7 @@ class MoltbotHandlers:
                     "1-2 предложения максимум. Не представляйся, не начинай с обращения.\n"
                     "Если передумал — верни пустую строку.]"
                 )
-                reply = await self._call_persona_simple(prompt)
+                reply = await self._call_persona_simple(prompt, chat_id)
                 logger.info(f"MoltBot: warm session probabilistic for chat {chat_id}")
 
             reply = reply.strip()
@@ -1608,13 +1690,13 @@ class MoltbotHandlers:
                 results = await self._brave_search(search_q)
                 if results:
                     augmented = f"{prompt}\n\n[Результаты поиска '{search_q}':\n{results}\nОтвечай коротко.]"
-                    reply = await self._call_persona_simple(augmented)
+                    reply = await self._call_persona_simple(augmented, chat_id)
                 reply = self._strip_search_markers(reply)
                 if not reply:
                     return False
 
             sent = await self._send_long_reply(message, reply)
-            await self._store_bot_reply(reply, sent.message_id)
+            await self._store_bot_reply(reply, chat_id, sent.message_id)
             self._last_probabilistic_sent[chat_id] = now
             if is_cold_start:
                 self._prob_session_start[chat_id] = now
@@ -1928,8 +2010,9 @@ class MoltbotHandlers:
     async def _send_weekly_analytics(self, chat_id: int):
         try:
             total_rows = await self.db.execute_query(
-                "SELECT COUNT(*) FROM messages WHERE timestamp > NOW() - INTERVAL '7 days' AND user_id != 0",
-                ()
+                "SELECT COUNT(*) FROM messages WHERE chat_id = %s "
+                "AND timestamp > NOW() - INTERVAL '7 days' AND user_id != 0",
+                (chat_id,)
             )
             total = total_rows[0][0] if total_rows else 0
             if total == 0:
@@ -1938,19 +2021,19 @@ class MoltbotHandlers:
 
             per_person = await self.db.execute_query(
                 "SELECT name, COUNT(*) FROM messages "
-                "WHERE timestamp > NOW() - INTERVAL '7 days' AND user_id != 0 "
+                "WHERE chat_id = %s AND timestamp > NOW() - INTERVAL '7 days' AND user_id != 0 "
                 "GROUP BY name ORDER BY COUNT(*) DESC LIMIT 10",
-                ()
+                (chat_id,)
             )
             top_hours = await self.db.execute_query(
                 "SELECT EXTRACT(HOUR FROM timestamp)::int, COUNT(*) FROM messages "
-                "WHERE timestamp > NOW() - INTERVAL '7 days' AND user_id != 0 "
+                "WHERE chat_id = %s AND timestamp > NOW() - INTERVAL '7 days' AND user_id != 0 "
                 "GROUP BY 1 ORDER BY 2 DESC LIMIT 3",
-                ()
+                (chat_id,)
             )
 
             # Qwen topic summary
-            recent = await self._get_recent_group_messages(limit=300, chat_id=chat_id)
+            recent = await self._get_recent_group_messages(chat_id, limit=300)
             topics = ""
             if recent:
                 snippet = "\n".join(recent[-200:])
@@ -2013,7 +2096,7 @@ class MoltbotHandlers:
                 if hhmm == t and job_key not in sent_today:
                     sent_today.add(job_key)
                     # Only send if chat was active recently
-                    if await self._count_recent_messages(8 * 60) >= 5:
+                    if await self._count_recent_messages(chat_id, 8 * 60) >= 5:
                         await self._send_proactive_message(chat_id)
                     else:
                         logger.info(f"MoltBot: skipping {t} proactive — chat inactive")
@@ -2056,14 +2139,22 @@ class MoltbotHandlers:
             # Fetch group history only for group chats
             history = None
             if message.chat.type in ('group', 'supergroup'):
-                history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
+                history = await self._build_thread_first_history(
+                    message.chat.id,
+                    message.reply_to_message.message_id if message.reply_to_message else None,
+                    message.message_id,
+                )
 
             try:
                 async with ChatActionSender.typing(bot=self.bot, chat_id=message.chat.id):
-                    reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, history)
+                    reply = await self._ask_moltbot_routed(
+                        sender_name, user_text, chat_context, history, message.chat.id
+                    )
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
-                    await self._store_bot_reply(reply, sent.message_id, reply_to=message.message_id)
+                    await self._store_bot_reply(
+                        reply, message.chat.id, sent.message_id, reply_to=message.message_id
+                    )
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
@@ -2224,8 +2315,8 @@ class MoltbotHandlers:
             if message.from_user.id not in Settings.ADMIN_IDS:
                 await message.reply("У вас нет доступа.")
                 return
-            mem = _load_chat_summary()
-            lines = _lore_lines()
+            mem = _load_chat_summary(message.chat.id)
+            lines = _lore_lines(message.chat.id)
             pinned = ("\n\n📌 Закреплённые внутряки:\n" +
                       "\n".join(f"{i+1}. {ln}" for i, ln in enumerate(lines))) if lines else "\n\n📌 Закреплённых внутряков нет."
             body = (f"🧠 Память чата ({len(mem)} симв.):\n\n{mem}" if mem else "🧠 Память пуста.") + pinned
@@ -2237,8 +2328,9 @@ class MoltbotHandlers:
                 await message.reply("У вас нет доступа.")
                 return
             await message.reply("🧠 Пересобираю память (займёт несколько секунд)...")
-            self._last_summary_update = datetime.now(timezone.utc)
-            asyncio.create_task(self._update_summary())
+            chat_id = message.chat.id
+            self._last_summary_update[chat_id] = datetime.now(timezone.utc)
+            asyncio.create_task(self._update_summary(chat_id))
 
         @router.message(Command(commands=['memory_clear']))
         async def handle_memory_wipe(message: Message):
@@ -2246,8 +2338,9 @@ class MoltbotHandlers:
                 await message.reply("У вас нет доступа.")
                 return
             try:
-                if os.path.exists(CHAT_SUMMARY_PATH):
-                    os.remove(CHAT_SUMMARY_PATH)
+                summary_path = _chat_memory_path(CHAT_SUMMARY_PATH, message.chat.id)
+                if os.path.exists(summary_path):
+                    os.remove(summary_path)
                 await message.reply("🧠 Память обнулена.")
             except Exception as e:
                 await message.reply(f"Ошибка: {e}")
@@ -2261,9 +2354,9 @@ class MoltbotHandlers:
             if len(text) < 2 or not text[1].strip():
                 await message.reply("Что закрепить? `/память_закрепи <внутряк одной строкой>`")
                 return
-            lines = _lore_lines()
+            lines = _lore_lines(message.chat.id)
             lines.append(text[1].strip().replace("\n", " "))
-            _save_lore_lines(lines)
+            _save_lore_lines(lines, message.chat.id)
             await message.reply(f"📌 Закреплено ({len(lines)} всего). Бот теперь помнит это всегда.")
 
         @router.message(Command(commands=['memory_unpin', 'память_открепи', 'открепи']))
@@ -2271,7 +2364,7 @@ class MoltbotHandlers:
             if message.from_user.id not in Settings.ADMIN_IDS:
                 await message.reply("У вас нет доступа.")
                 return
-            lines = _lore_lines()
+            lines = _lore_lines(message.chat.id)
             if not lines:
                 await message.reply("Закреплённых внутряков нет.")
                 return
@@ -2285,7 +2378,7 @@ class MoltbotHandlers:
                 await message.reply(f"Нет такого номера (всего {len(lines)}).")
                 return
             removed = lines.pop(idx)
-            _save_lore_lines(lines)
+            _save_lore_lines(lines, message.chat.id)
             await message.reply(f"🗑 Откреплено: {removed}")
 
         @router.message(StateFilter(None), ~F.text.startswith('/'), F.func(lambda m: (
@@ -2352,14 +2445,22 @@ class MoltbotHandlers:
 
             history = None
             if message.chat.type in ('group', 'supergroup'):
-                history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
+                history = await self._build_thread_first_history(
+                    message.chat.id,
+                    message.reply_to_message.message_id if message.reply_to_message else None,
+                    message.message_id,
+                )
 
             try:
                 async with ChatActionSender.typing(bot=self.bot, chat_id=message.chat.id):
-                    reply = await self._ask_moltbot_routed(sender_name, user_text, chat_context, history)
+                    reply = await self._ask_moltbot_routed(
+                        sender_name, user_text, chat_context, history, message.chat.id
+                    )
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
-                    await self._store_bot_reply(reply, sent.message_id, reply_to=message.message_id)
+                    await self._store_bot_reply(
+                        reply, message.chat.id, sent.message_id, reply_to=message.message_id
+                    )
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:
@@ -2380,7 +2481,7 @@ class MoltbotHandlers:
         )))
         async def handle_probabilistic(message: Message):
             await self._store_user_message(message)
-            self._maybe_update_summary()
+            self._maybe_update_summary(message.chat.id)
             # asyncio.create_task(self._maybe_reply_probabilistic(message))
 
         @router.message(StateFilter(None), F.photo, F.func(lambda m: (
@@ -2397,7 +2498,11 @@ class MoltbotHandlers:
 
             history = None
             if message.chat.type in ('group', 'supergroup'):
-                history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
+                history = await self._build_thread_first_history(
+                    message.chat.id,
+                    message.reply_to_message.message_id if message.reply_to_message else None,
+                    message.message_id,
+                )
 
             try:
                 file = await self.bot.get_file(message.photo[-1].file_id)
@@ -2422,10 +2527,14 @@ class MoltbotHandlers:
 
             try:
                 async with ChatActionSender.typing(bot=self.bot, chat_id=message.chat.id):
-                    reply = await self._ask_moltbot_routed(sender_name, combined_text, chat_context, history)
+                    reply = await self._ask_moltbot_routed(
+                        sender_name, combined_text, chat_context, history, message.chat.id
+                    )
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
-                    await self._store_bot_reply(reply, sent.message_id, reply_to=message.message_id)
+                    await self._store_bot_reply(
+                        reply, message.chat.id, sent.message_id, reply_to=message.message_id
+                    )
                     self._photo_context[sent.message_id] = message.photo[-1].file_id
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
@@ -2449,7 +2558,11 @@ class MoltbotHandlers:
 
             history = None
             if message.chat.type in ('group', 'supergroup'):
-                history = await self._get_recent_group_messages(limit=100, chat_id=message.chat.id)
+                history = await self._build_thread_first_history(
+                    message.chat.id,
+                    message.reply_to_message.message_id if message.reply_to_message else None,
+                    message.message_id,
+                )
 
             try:
                 file = await self.bot.get_file(message.animation.file_id)
@@ -2474,10 +2587,14 @@ class MoltbotHandlers:
 
             try:
                 async with ChatActionSender.typing(bot=self.bot, chat_id=message.chat.id):
-                    reply = await self._ask_moltbot_routed(sender_name, combined_text, chat_context, history)
+                    reply = await self._ask_moltbot_routed(
+                        sender_name, combined_text, chat_context, history, message.chat.id
+                    )
                 if reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
-                    await self._store_bot_reply(reply, sent.message_id, reply_to=message.message_id)
+                    await self._store_bot_reply(
+                        reply, message.chat.id, sent.message_id, reply_to=message.message_id
+                    )
                 else:
                     await message.reply("🤐 AI отказался отвечать на это сообщение")
             except _AIConnectionError:

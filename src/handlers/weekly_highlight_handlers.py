@@ -117,20 +117,18 @@ class WeeklyHighlightHandlers:
 
     # ── Candidate selection ─────────────────────────────────────────────────
 
-    async def _fetch_week_messages(self) -> list[tuple]:
-        """Raw (id, user_id, name, message_text) rows from the last 7 days.
-        Note: `messages` has no chat_id column (same convention already used by
-        MoltbotHandlers._send_weekly_analytics) — this bot only ever tracks one group."""
+    async def _fetch_week_messages(self, chat_id: int) -> list[tuple]:
+        """Raw (id, user_id, name, message_text) rows from one chat for the last 7 days."""
         rows = await self.db.execute_query(
             "SELECT id, user_id, name, message_text FROM messages "
-            "WHERE timestamp > NOW() - INTERVAL '7 days' AND user_id != 0 "
+            "WHERE chat_id = %s AND timestamp > NOW() - INTERVAL '7 days' AND user_id != 0 "
             "ORDER BY timestamp",
-            (),
+            (chat_id,),
         )
         return [r for r in (rows or []) if r[3] and not r[3].strip().startswith('/')]
 
     async def _pick_candidates(self, chat_id: int) -> list[dict]:
-        rows = await self._fetch_week_messages()
+        rows = await self._fetch_week_messages(chat_id)
         return await self._select_candidates(rows)
 
     async def _select_candidates(self, rows: list[tuple]) -> list[dict]:

@@ -77,9 +77,9 @@ async def _resolve_user_id(arg: str) -> tuple[int | None, str | None]:
         ps = get_prompt_service()
         async with ps.db.connection() as conn:
             cur = await conn.execute(
-                "SELECT user_id FROM messages WHERE name = %s "
+                "SELECT user_id FROM messages WHERE chat_id = %s AND name = %s "
                 "ORDER BY timestamp DESC LIMIT 1",
-                (username,),
+                (Settings.CHAT_IDS['main'], username),
             )
             row = await cur.fetchone()
             if row:

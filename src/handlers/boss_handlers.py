@@ -368,11 +368,12 @@ class BossHandlers:
         rows = await self.db.execute_query(
             "SELECT p.player_id, COALESCE(("
             "  SELECT m.name FROM messages m WHERE m.user_id = p.player_id "
+            "    AND m.chat_id = %s "
             "    AND m.name IS NOT NULL AND m.name <> 'Jarvis' "
             "  ORDER BY m.timestamp DESC LIMIT 1"
             "), p.player_name) "
             "FROM pisunchik_data p ORDER BY p.player_id",
-            (),
+            (self.svc.event_chat_id,),
         )
         players = {}
         for player_id, raw_name in (rows or []):

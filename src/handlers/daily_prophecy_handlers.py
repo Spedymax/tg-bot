@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import random
 from zoneinfo import ZoneInfo
 
@@ -428,29 +429,33 @@ class DailyProphecyHandlers:
         except Exception as e:
             logger.error(f"DailyProphecy: failed to create table: {e}")
 
-    async def _get_roster(self) -> list[tuple[int, str]]:
+    async def _get_roster(self, chat_id: int) -> list[tuple[int, str]]:
         rows = await self.db.execute_query(
             "SELECT DISTINCT ON (user_id) user_id, name FROM messages "
-            "WHERE timestamp > NOW() - INTERVAL '14 days' AND user_id != 0 "
+            "WHERE chat_id = %s AND timestamp > NOW() - INTERVAL '14 days' AND user_id != 0 "
             "ORDER BY user_id, timestamp DESC",
-            (),
+            (chat_id,),
         )
         return [(r[0], NAME_OVERRIDES.get(r[1], r[1] or "Аноним")) for r in (rows or [])]
 
-    async def _get_yesterday_text(self, user_id: int) -> str:
+    async def _get_yesterday_text(self, chat_id: int, user_id: int) -> str:
         """Rolling last-24h window, same simplicity as _send_weekly_analytics's
         rolling 7-day window — avoids calendar-day/timezone boundary edge cases."""
         rows = await self.db.execute_query(
-            "SELECT message_text FROM messages WHERE user_id = %s "
+            "SELECT message_text FROM messages WHERE chat_id = %s AND user_id = %s "
             "AND timestamp > NOW() - INTERVAL '1 day' ORDER BY timestamp",
-            (user_id,),
+            (chat_id, user_id),
         )
         texts = [r[0] for r in (rows or []) if r[0]]
         return " / ".join(texts) if texts else ""
 
-    def _load_lore(self) -> str:
+    def _load_lore(self, chat_id: int) -> str:
         try:
-            with open(CHAT_LORE_PATH, encoding="utf-8") as f:
+            path = CHAT_LORE_PATH
+            if chat_id != Settings.CHAT_IDS['main']:
+                stem, ext = os.path.splitext(path)
+                path = f"{stem}-{chat_id}{ext}"
+            with open(path, encoding="utf-8") as f:
                 return f.read().strip()[:2000]
         except Exception:
             return ""
@@ -665,7 +670,7 @@ class DailyProphecyHandlers:
     async def post_daily_prophecy(self, chat_id: int):
         await self._ensure_table()
         try:
-            roster = await self._get_roster()
+            roster = await self._get_roster(chat_id)
             if not roster:
                 logger.info("DailyProphecy: empty roster, skipping")
                 return
@@ -673,7 +678,7 @@ class DailyProphecyHandlers:
             per_person = []
             any_activity = False
             for user_id, name in roster:
-                text = await self._get_yesterday_text(user_id)
+                text = await self._get_yesterday_text(chat_id, user_id)
                 if text:
                     any_activity = True
                 per_person.append((user_id, name, text))
@@ -689,7 +694,7 @@ class DailyProphecyHandlers:
             # cluster by bad luck (it hit 3 of 4 real days and people noticed).
             lore = ""
             if random.random() < 0.2 and not await self._lore_used_recently(chat_id):
-                lore = self._load_lore()
+                lore = self._load_lore(chat_id)
             recent_texts = await self._get_recent_prophecy_texts(chat_id)
             generation_history = await self._get_recent_generation_meta(chat_id)
             last_style = await self._get_last_style(chat_id)

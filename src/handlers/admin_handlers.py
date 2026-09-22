@@ -51,6 +51,7 @@ class AdminHandlers:
             query = """
                 CREATE TABLE IF NOT EXISTS messages (
                     id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
                     user_id INTEGER,
                     message_text TEXT,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -63,6 +64,26 @@ class AdminHandlers:
             await self.player_service.db.execute_query("""
                 ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_id BIGINT
             """)
+            # Legacy rows were written before the bot supported multiple chats.
+            # They all belong to the original/main group.
+            await self.player_service.db.execute_query("""
+                ALTER TABLE messages ADD COLUMN IF NOT EXISTS chat_id BIGINT
+            """)
+            await self.player_service.db.execute_query(
+                "UPDATE messages SET chat_id = %s WHERE chat_id IS NULL",
+                (Settings.CHAT_IDS['main'],),
+            )
+            await self.player_service.db.execute_query("""
+                ALTER TABLE messages ALTER COLUMN chat_id SET NOT NULL
+            """)
+            await self.player_service.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS messages_chat_timestamp_idx
+                ON messages (chat_id, timestamp DESC)
+            """)
+            await self.player_service.db.execute_query("""
+                CREATE UNIQUE INDEX IF NOT EXISTS messages_chat_message_id_uidx
+                ON messages (chat_id, message_id) WHERE message_id IS NOT NULL
+            """)
             logger.info("Messages table created/verified successfully")
         except Exception as e:
             logger.error(f"Error creating messages table: {e}")
@@ -74,12 +95,14 @@ class AdminHandlers:
             if message.text and not message.text.startswith('/') and not message.from_user.is_bot:
                 # Use existing table structure: id, user_id, message_text, timestamp, name
                 query = """
-                    INSERT INTO messages (user_id, message_text, timestamp, name, message_id)
-                    VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s)
+                    INSERT INTO messages (chat_id, user_id, message_text, timestamp, name, message_id)
+                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP, %s, %s)
+                    ON CONFLICT (chat_id, message_id) WHERE message_id IS NOT NULL DO NOTHING
                 """
                 # Combine first_name and username for the name field
                 name = message.from_user.first_name or message.from_user.username or 'Аноним'
                 params = (
+                    message.chat.id,
                     message.from_user.id,
                     message.text,
                     name,
@@ -89,17 +112,18 @@ class AdminHandlers:
         except Exception as e:
             logger.error(f"Error storing message: {e}")
 
-    async def _get_recent_messages(self, hours=12, limit=100):
+    async def _get_recent_messages(self, chat_id: int, hours=12, limit=100):
         """Get recent messages from the database"""
         try:
             query = """
                 SELECT name, message_text, timestamp
                 FROM messages
-                WHERE timestamp > NOW() - INTERVAL '1 hour' * %s
+                WHERE chat_id = %s
+                  AND timestamp > NOW() - INTERVAL '1 hour' * %s
                 ORDER BY timestamp DESC
                 LIMIT %s
             """
-            params = (hours, limit)
+            params = (chat_id, hours, limit)
             results = await self.player_service.db.execute_query(query, params)
 
             if not results:
@@ -899,7 +923,7 @@ class AdminHandlers:
                 return
             try:
                 waiting_msg = await message.reply("🔍 Анализирую сообщения за последние 12 часов...")
-                messages = await self._get_recent_messages(12, 100)
+                messages = await self._get_recent_messages(message.chat.id, 12, 100)
                 analysis = await asyncio.to_thread(self._analyze_messages_with_qwen, messages)
                 await self.bot.edit_message_text(
                     analysis,

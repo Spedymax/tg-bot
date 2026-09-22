@@ -12,6 +12,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from services import dungeon_logic as logic
+from config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,8 @@ class DungeonService:
             return {}
         names = await self.db.execute_query(
             "SELECT DISTINCT ON (user_id) user_id, name FROM messages "
-            "WHERE user_id = ANY(%s) AND name IS NOT NULL ORDER BY user_id, timestamp DESC", (ids,)
+            "WHERE chat_id = %s AND user_id = ANY(%s) AND name IS NOT NULL "
+            "ORDER BY user_id, timestamp DESC", (Settings.CHAT_IDS['main'], ids)
         )
         result = {}
         for uid, name in (names or []):
@@ -80,13 +82,16 @@ class DungeonService:
             if names:
                 rows = await self.db.execute_query(
                     "SELECT user_id, message_text FROM messages "
-                    "WHERE user_id = ANY(%s) AND length(message_text) BETWEEN 25 AND 140 "
+                    "WHERE chat_id = %s AND user_id = ANY(%s) "
+                    "AND length(message_text) BETWEEN 25 AND 140 "
                     "AND message_text NOT LIKE '/%%' AND message_text NOT LIKE 'http%%' "
-                    "ORDER BY random() LIMIT 60", (list(names.keys()),)
+                    "ORDER BY random() LIMIT 60", (Settings.CHAT_IDS['main'], list(names.keys()))
                 )
                 lore['messages'] = [{'name': names[uid], 'text': text} for uid, text in (rows or []) if uid in names]
             rows = await self.db.execute_query(
-                "SELECT candidates, votes FROM weekly_highlights WHERE status = 'finished' ORDER BY id DESC LIMIT 12", ()
+                "SELECT candidates, votes FROM weekly_highlights "
+                "WHERE chat_id = %s AND status = 'finished' ORDER BY id DESC LIMIT 12",
+                (Settings.CHAT_IDS['main'],)
             )
             for candidates, votes in (rows or []):
                 if isinstance(candidates, str):
