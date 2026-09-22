@@ -123,7 +123,7 @@ class ContextBuilder:
     def build(self, *, identity: str, hard_rules: str, chat_context: str,
               summary: str, lore: str, history: list[str] | None,
               sender_name: str, user_text: str, post_prompt: str,
-              clock: str = '', overlay: str = '') -> ContextSnapshot:
+              clock: str = '', overlay: str = '', retrieved_memory: str = '') -> ContextSnapshot:
         system_parts = [part for part in (hard_rules, identity) if part]
         if chat_context:
             system_parts.append(f'[Сообщение отправлено из: {chat_context}]')
@@ -140,6 +140,8 @@ class ContextBuilder:
                 f'{lore}\n'
                 'Используй только при явной тематической релевантности.'
             )
+        if retrieved_memory:
+            system_parts.append(retrieved_memory)
         if clock:
             # Dynamic and tiny: goes after the stable prefix so it never busts it.
             system_parts.append(
@@ -171,6 +173,7 @@ class ContextBuilder:
             'post_prompt': len(post_prompt),
             'clock': len(clock),
             'overlay': len(overlay),
+            'memory': len(retrieved_memory),
         }
         return ContextSnapshot(
             messages=tuple(messages),

@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 import logging
 import os
@@ -24,6 +25,7 @@ from services import llm_trace
 from services.persona_tools import WEB_SEARCH_TOOL
 from services.media_understanding import MediaUnderstanding
 from services.link_reader import links_block, extract_urls
+from services import memory_v2
 
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CHAT_SUMMARY_PATH = os.path.join(_BASE_DIR, 'data', 'chat-summary.md')
@@ -173,6 +175,10 @@ SUMMARY_CHAR_BUDGET = 60_000  # keeps the summarizer input bounded in a busy cha
 HISTORY_MESSAGE_LIMIT = 100
 # Cheap classifier for "react with an emoji or stay silent" on ambient messages.
 REACTION_MODEL = os.getenv("JARVIS_REACTION_MODEL", "z-ai/glm-5.3-flash")
+# Memory v2: off | shadow (extract + retrieve + log, prompt untouched) | inject
+MEMORY_V2_MODE = os.getenv("JARVIS_MEMORY_V2", "shadow").strip().lower()
+MEMORY_EXTRACTOR_MODEL = os.getenv("JARVIS_MEMORY_MODEL", "google/gemini-3.5-flash")
+MEMORY_EXTRACT_EVERY = timedelta(minutes=30)
 HISTORY_CHAR_BUDGET = 12_000  # conservative ~3K-token cap before prompt/memory
 CPH_TZ = ZoneInfo("Europe/Copenhagen")
 
@@ -205,6 +211,8 @@ class MoltbotHandlers:
         asyncio.ensure_future(self._ensure_danetki_table())
         asyncio.ensure_future(llm_trace.ensure_table(self.db))
         asyncio.ensure_future(self._get_media().ensure_table())
+        if MEMORY_V2_MODE != "off":
+            asyncio.ensure_future(self._memory_schema())
         asyncio.ensure_future(self._reminder_loop())
         self._register()
 
@@ -1205,6 +1213,119 @@ class MoltbotHandlers:
         "Jarvis", "Джарвис", "MoltBot",
     }
 
+    # ── Memory v2 ────────────────────────────────────────────────────────────
+
+    def _get_memory_store(self) -> memory_v2.MemoryStore:
+        store = getattr(self, "_memory_store", None)
+        if store is None:
+            store = memory_v2.MemoryStore(self.db)
+            self._memory_store = store
+        return store
+
+    async def _memory_schema(self) -> None:
+        try:
+            await self._get_memory_store().ensure_schema()
+        except Exception as e:
+            logger.error(f"MoltBot: memory v2 schema failed: {e}")
+
+    async def _retrieve_memory(self, sender_name: str, user_text: str, chat_id: int | None) -> str:
+        """Selective retrieval for the current turn. Always traced; injected only in inject mode.
+        Cached per trace so a provider fallback doesn't query twice."""
+        if MEMORY_V2_MODE == "off" or chat_id is None:
+            return ""
+        trace = llm_trace.current()
+        cache = getattr(self, "_retrieval_cache", None)
+        if cache is None:
+            cache = self._retrieval_cache = {}
+        if trace and trace.trace_id in cache:
+            return cache[trace.trace_id][1]
+        try:
+            author_id, _ = memory_v2.resolve_subject(sender_name)
+            mentioned = memory_v2.mentioned_user_ids(user_text)
+            items = await self._get_memory_store().retrieve(
+                chat_id, user_text, author_id, mentioned, datetime.now(timezone.utc))
+        except Exception as e:
+            logger.warning(f"MoltBot: memory retrieval failed: {e}")
+            items = []
+        block = memory_v2.format_block(items)
+        if trace:
+            trace.memory_mode = MEMORY_V2_MODE
+            trace.memory_ids = [it["id"] for it in items]
+            cache[trace.trace_id] = (items, block)
+            if len(cache) > 50:
+                cache.pop(next(iter(cache)))
+        if items:
+            logger.info(f"MoltBot: memory v2 [{MEMORY_V2_MODE}] retrieved {[it['id'] for it in items]}")
+        return block
+
+    async def _mark_memory_used(self, trace, reply: str) -> None:
+        if MEMORY_V2_MODE != "inject" or not trace or not reply:
+            return
+        items = (getattr(self, "_retrieval_cache", {}).get(trace.trace_id) or ([], ""))[0]
+        used = memory_v2.mark_used_ids(items, reply)
+        if used:
+            try:
+                await self._get_memory_store().mark_used(used)
+            except Exception as e:
+                logger.warning(f"MoltBot: memory mark_used failed: {e}")
+
+    def _maybe_extract_memory(self, chat_id: int) -> None:
+        """Throttled background extraction of new human messages into memory_items."""
+        if MEMORY_V2_MODE == "off" or not Settings.OPENROUTER_API_KEY:
+            return
+        last = getattr(self, "_memory_extract_last", {})
+        self._memory_extract_last = last
+        now = datetime.now(timezone.utc)
+        if last.get(chat_id) and now - last[chat_id] < MEMORY_EXTRACT_EVERY:
+            return
+        last[chat_id] = now
+        asyncio.create_task(self._extract_memory(chat_id))
+
+    async def _extract_memory(self, chat_id: int) -> dict:
+        store = self._get_memory_store()
+        now = datetime.now(timezone.utc)
+        stats = {"messages": 0, "insert": 0, "confirm": 0, "supersede": 0, "reject": 0}
+        trace, token = llm_trace.begin("memory_extract", chat_id)
+        try:
+            rows = await store.pending_batch(chat_id, now)
+            if not rows:
+                trace.finish("skip")
+                return stats
+            stats["messages"] = len(rows)
+            existing = await store.active_items(chat_id)
+            prompt = memory_v2.EXTRACT_PROMPT.format(
+                existing=memory_v2.format_existing(existing),
+                messages=memory_v2.format_messages_for_extractor(
+                    [(r[0], KNOWN_MEMBERS.get(r[4], r[1]), r[2], r[3]) for r in rows]),
+            )
+            data = await self._traced_attempt(MEMORY_EXTRACTOR_MODEL, MEMORY_EXTRACTOR_MODEL, lambda: self._openrouter_post(
+                {"model": MEMORY_EXTRACTOR_MODEL, "max_tokens": 6000, "temperature": 0.2,
+                 "reasoning": {"effort": "low"},
+                 "messages": [{"role": "user", "content": prompt}], **self._provider_ids(chat_id)},
+                timeout=180,
+            ))
+            llm_trace.apply_response(trace.attempts[-1] if trace.attempts else None, data)
+            raw = data["choices"][0]["message"].get("content") or ""
+            match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+            candidates = memory_v2.parse_candidates(json.loads(match.group(0)) if match else {})
+            batch = {r[0]: {"user_id": r[4], "name": KNOWN_MEMBERS.get(r[4], r[1]), "is_bot": r[4] == 0}
+                     for r in rows}
+            created_by = f"{memory_v2.EXTRACTOR_VERSION}/{memory_v2.POLICY_VERSION}/{MEMORY_EXTRACTOR_MODEL}"
+            for cand in candidates:
+                decision = memory_v2.decide(cand, batch, existing, now)
+                await store.apply(chat_id, decision, created_by)
+                stats[decision.action] += 1
+            await store.advance_cursor(chat_id, rows[-1][0])
+            trace.finish("ok", json.dumps(stats))
+            logger.info(f"MoltBot: memory v2 extraction for chat {chat_id}: {stats}")
+        except Exception as e:
+            trace.finish(f"error:{type(e).__name__}")
+            logger.warning(f"MoltBot: memory v2 extraction failed (cursor kept): {e}")
+        finally:
+            llm_trace.end(token)
+            llm_trace.persist_in_background(trace, getattr(self, "db", None))
+        return stats
+
     def _get_context_builder(self) -> ContextBuilder:
         # Tests and a few maintenance scripts instantiate the handler via __new__.
         builder = getattr(self, '_context_builder', None)
@@ -1232,6 +1353,7 @@ class MoltbotHandlers:
             prompt_version = getattr(prompt_service, "_cache_version_id", None)
         except Exception:
             identity = ""
+        memory_block = await self._retrieve_memory(sender_name, user_text, chat_id)
         snapshot = self._get_context_builder().build(
             identity=identity,
             hard_rules=self._HARD_RULES,
@@ -1244,6 +1366,7 @@ class MoltbotHandlers:
             post_prompt=self._POST_PROMPT_BASE,
             clock=self._clock_text(),
             overlay=self._persona_overlay(),
+            retrieved_memory=memory_block if MEMORY_V2_MODE == "inject" else "",
         )
         trace = llm_trace.current()
         if trace:
@@ -1699,6 +1822,7 @@ class MoltbotHandlers:
                 sender_name, user_text, chat_context, history, chat_id
             )
             trace.finish("ok" if reply and reply.strip() else "empty", reply)
+            await self._mark_memory_used(trace, reply)
             return reply
         except _AIRefusalError:
             trace.finish("refusal")
@@ -2613,6 +2737,97 @@ class MoltbotHandlers:
             _save_lore_lines(lines, message.chat.id)
             await message.reply(f"🗑 Откреплено: {removed}")
 
+        # ── Memory v2 admin ───────────────────────────────────────────────
+        _MEM_KIND_RU = {"profile_fact": "факт", "preference": "предпочт.", "episode": "событие",
+                        "open_loop": "незакрыто", "attributed_claim": "со слов", "lore_candidate": "мем?"}
+
+        def _fmt_item(it: dict) -> str:
+            exp = f", до {it['expires_at']:%d.%m}" if it.get("expires_at") else ""
+            mark = " 🕓" if it.get("status") == "candidate" else ""
+            return (f"#{it['id']} [{_MEM_KIND_RU.get(it['kind'], it['kind'])}{exp}, {it['confidence']:.2f}]{mark} "
+                    f"{it['text']}")
+
+        @router.message(Command(commands=['mem', 'память2']))
+        async def handle_mem_list(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                await message.reply("У вас нет доступа.")
+                return
+            arg = (message.text or "").split(maxsplit=1)
+            name = arg[1].strip() if len(arg) > 1 else ""
+            subject_id = memory_v2.resolve_subject(name)[0] if name and name != "all" else None
+            items = await self._get_memory_store().list_items(
+                message.chat.id, subject_id, include_candidates=(name == "all"))
+            if not items:
+                await message.reply(f"🧠 Memory v2 ({MEMORY_V2_MODE}): пусто.")
+                return
+            groups: dict[str, list[str]] = {}
+            for it in items:
+                groups.setdefault(it.get("subject_name") or "общее", []).append(html.escape(_fmt_item(it)))
+            body = "\n\n".join(f"<b>{html.escape(k)}</b>\n" + "\n".join(v) for k, v in groups.items())
+            head = (f"🧠 Memory v2 — режим <b>{MEMORY_V2_MODE}</b>, {len(items)} записей.\n"
+                    "Источники: /mem_show id · забыть: /mem_forget id · исправить: /mem_fix id текст\n\n")
+            await self._send_long_reply(message, head + body)
+
+        @router.message(Command(commands=['mem_show']))
+        async def handle_mem_show(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                return
+            arg = (message.text or "").split(maxsplit=1)
+            if len(arg) < 2 or not arg[1].strip().lstrip("#").isdigit():
+                await message.reply("Какую? /mem_show <id>")
+                return
+            item, evidence, history = await self._get_memory_store().get(message.chat.id, int(arg[1].strip().lstrip("#")))
+            if not item:
+                await message.reply("Нет такой записи.")
+                return
+            ev = "\n".join(f"{self._format_ts(ts)} {n}: {t[:200]}" for n, t, ts in evidence) or "(сообщения удалены)"
+            hist = "\n".join(f"{ts:%d.%m %H:%M} {a}" for a, _, ts in history)
+            await self._send_long_reply(message, html.escape(
+                f"{_fmt_item(item)}\nстатус: {item['status']}, тип утверждения: {item['claim_type']}, "
+                f"создано: {item['created_by']}, использовано: {item['use_count']}\n\nИсточники:\n{ev}\n\nИстория:\n{hist}"))
+
+        @router.message(Command(commands=['mem_forget']))
+        async def handle_mem_forget(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                return
+            arg = (message.text or "").split(maxsplit=1)
+            if len(arg) < 2 or not arg[1].strip().lstrip("#").isdigit():
+                await message.reply("Какую? /mem_forget <id>")
+                return
+            ok = await self._get_memory_store().forget(message.chat.id, int(arg[1].strip().lstrip("#")), message.from_user.id)
+            await message.reply("🗑 Забыто (в аудите осталось)." if ok else "Нет такой активной записи.")
+
+        @router.message(Command(commands=['mem_fix']))
+        async def handle_mem_fix(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                return
+            parts = (message.text or "").split(maxsplit=2)
+            if len(parts) < 3 or not parts[1].lstrip("#").isdigit():
+                await message.reply("Как? /mem_fix <id> <правильный текст>")
+                return
+            new_id = await self._get_memory_store().correct(
+                message.chat.id, int(parts[1].lstrip("#")), parts[2].strip(), message.from_user.id)
+            await message.reply(f"✏️ Исправлено: новая запись #{new_id}, старая помечена superseded."
+                                if new_id else "Нет такой активной записи.")
+
+        @router.message(Command(commands=['mem_run']))
+        async def handle_mem_run(message: Message):
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                return
+            await message.reply("🧠 Разбираю новые сообщения…")
+            store = self._get_memory_store()
+            now = datetime.now(timezone.utc)
+            # Admin run ignores the "wait for 20 messages" batching.
+            original = memory_v2.MIN_BATCH
+            memory_v2.MIN_BATCH = 1
+            try:
+                stats = await self._extract_memory(message.chat.id)
+            finally:
+                memory_v2.MIN_BATCH = original
+            await message.reply(
+                f"Готово: сообщений {stats['messages']}, новых {stats['insert']}, подтверждено {stats['confirm']}, "
+                f"обновлено {stats['supersede']}, отклонено {stats['reject']}. Список: /mem")
+
         @router.message(StateFilter(None), ~F.text.startswith('/'), F.func(lambda m: (
             m.reply_to_message is not None
             and m.reply_to_message.from_user is not None
@@ -2723,6 +2938,7 @@ class MoltbotHandlers:
         async def handle_probabilistic(message: Message):
             await self._store_user_message(message)
             self._maybe_update_summary(message.chat.id)
+            self._maybe_extract_memory(message.chat.id)
             # Text interjections stay off; a fitting emoji is the low-noise alternative.
             asyncio.create_task(self._maybe_react(message))
 

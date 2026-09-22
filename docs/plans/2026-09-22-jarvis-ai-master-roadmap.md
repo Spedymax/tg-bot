@@ -338,15 +338,15 @@ Long-term memory — самый заметный частный случай э�
 
 #### Схема данных
 
-- [ ] Создать таблицу `memory_items`.
-- [ ] Добавить поля `id`, `chat_id`, `subject_user_id`, `kind`, `text`, `normalized_key`.
-- [ ] Добавить `source_message_ids`, `source_author_ids` и/или отдельную таблицу связей с evidence.
-- [ ] Добавить `first_seen_at`, `last_seen_at`, `expires_at`.
-- [ ] Добавить `confidence`, `sensitive`, `created_by`.
-- [ ] Добавить состояния `candidate`, `active`, `superseded`, `rejected`, `forgotten`.
-- [ ] Добавить `supersedes_id` или историю revisions.
+- [x] Создать таблицу `memory_items`.
+- [x] Добавить поля `id`, `chat_id`, `subject_user_id`, `kind`, `text`, `normalized_key`.
+- [x] Добавить `source_message_ids`, `source_author_ids` и/или отдельную таблицу связей с evidence.
+- [x] Добавить `first_seen_at`, `last_seen_at`, `expires_at`.
+- [x] Добавить `confidence`, `sensitive`, `created_by`.
+- [x] Добавить состояния `candidate`, `active`, `superseded`, `rejected`, `forgotten`.
+- [x] Добавить `supersedes_id` или историю revisions.
 - [ ] Создать отдельную таблицу/структуру для ephemeral conversation summaries.
-- [ ] Версионировать extractor и policy, которыми создана запись.
+- [x] Версионировать extractor и policy, которыми создана запись.
 
 Предлагаемые типы:
 
@@ -360,18 +360,18 @@ Long-term memory — самый заметный частный случай э�
 
 #### Write pipeline
 
-- [ ] Обрабатывать только новые сообщения после durable cursor.
-- [ ] Извлекать memory candidates строгим Structured Output/JSON schema.
-- [ ] Требовать source message ID для каждого candidate.
-- [ ] Отбрасывать candidate, не поддержанный источником.
-- [ ] Использовать LLM только для extraction, а решение о записи принимать deterministic policy.
-- [ ] Self-claim участника получать более высокий confidence.
-- [ ] Third-party claim не повышать до факта без подтверждения субъекта.
+- [x] Обрабатывать только новые сообщения после durable cursor.
+- [x] Извлекать memory candidates строгим Structured Output/JSON schema.
+- [x] Требовать source message ID для каждого candidate.
+- [x] Отбрасывать candidate, не поддержанный источником.
+- [x] Использовать LLM только для extraction, а решение о записи принимать deterministic policy.
+- [x] Self-claim участника получать более высокий confidence.
+- [x] Third-party claim не повышать до факта без подтверждения субъекта.
 - [ ] Для lore требовать минимум 3 человеческих упоминания, 2 участников и 2 разных дня либо ручной pin.
-- [ ] Не повышать bot-authored content до human memory.
-- [ ] Обнаруживать противоречия и supersede старую запись вместо бесшумного overwrite.
-- [ ] Назначить TTL по типу записи.
-- [ ] Вести audit log accepted/rejected candidates.
+- [x] Не повышать bot-authored content до human memory.
+- [x] Обнаруживать противоречия и supersede старую запись вместо бесшумного overwrite.
+- [x] Назначить TTL по типу записи.
+- [x] Вести audit log accepted/rejected candidates.
 
 Стартовая TTL policy:
 
@@ -384,21 +384,21 @@ Long-term memory — самый заметный частный случай э�
 
 #### Retrieval pipeline
 
-- [ ] Всегда фильтровать по `chat_id`.
-- [ ] Определять текущего автора, упомянутых людей, reply target и тему.
-- [ ] Сначала выбирать кандидатов структурными фильтрами: subject, kind, status, TTL.
-- [ ] Затем ранжировать по relevance, confidence, recency и source quality.
-- [ ] Возвращать максимум 3–5 записей и соблюдать memory token budget около 400–700 токенов.
-- [ ] Не возвращать ничего при низкой релевантности.
+- [x] Всегда фильтровать по `chat_id`.
+- [x] Определять текущего автора, упомянутых людей, reply target и тему.
+- [x] Сначала выбирать кандидатов структурными фильтрами: subject, kind, status, TTL.
+- [x] Затем ранжировать по relevance, confidence, recency и source quality.
+- [x] Возвращать максимум 3–5 записей и соблюдать memory token budget около 400–700 токенов.
+- [x] Не возвращать ничего при низкой релевантности.
 - [ ] Не показывать sensitive third-party memory без явной релевантности.
 - [ ] Передавать модели source/confidence, не заставляя её выдавать их пользователю без необходимости.
-- [ ] Маркировать retrieved memory как evidence/data, а не instructions.
-- [ ] Добавить cooldown/penalty для недавно использованных callback'ов.
+- [x] Маркировать retrieved memory как evidence/data, а не instructions.
+- [x] Добавить cooldown/penalty для недавно использованных callback'ов.
 
 Начать без отдельной vector database:
 
-- [ ] Реализовать PostgreSQL full-text/trigram search.
-- [ ] Добавить нормализацию имён и aliases.
+- [x] Реализовать PostgreSQL full-text/trigram search.
+- [x] Добавить нормализацию имён и aliases.
 - [ ] Добавить embeddings/pgvector только если eval покажет недостаточный recall.
 
 Критерий готовности: бот вспоминает нужный факт по явной теме и молчит о нём в нерелевантном разговоре.
@@ -406,9 +406,9 @@ Long-term memory — самый заметный частный случай э�
 #### Управление памятью
 
 - [ ] `/memory` выводит структурированный список с ID, типом, сроком и кратким source.
-- [ ] `/memory_show <id>` показывает evidence и историю изменений.
-- [ ] `/memory_forget <id>` помечает запись forgotten.
-- [ ] `/memory_correct <id> <text>` создаёт revision и supersede.
+- [x] `/memory_show <id>` показывает evidence и историю изменений.
+- [x] `/memory_forget <id>` помечает запись forgotten.
+- [x] `/memory_correct <id> <text>` создаёт revision и supersede.
 - [ ] `/memory_pin <id|text>` требует подтверждения для permanent lore.
 - [ ] `/memory_unpin <id>` понижает lore без удаления audit trail.
 - [ ] Добавить opt-out или запрет сохранения персональной памяти для участника.
@@ -464,11 +464,11 @@ Long-term memory — самый заметный частный случай э�
 
 - [ ] Разделить способность распознать внутряк и решение самому его инициировать.
 - [ ] Разрешать callback при явном пользовательском упоминании, сильном semantic match или действительно подходящем open loop.
-- [ ] Ввести per-memory `last_used_at`, usage count и cooldown.
-- [ ] Понижать score мема, который недавно использовал сам Jarvis.
+- [x] Ввести per-memory `last_used_at`, usage count и cooldown.
+- [x] Понижать score мема, который недавно использовал сам Jarvis.
 - [ ] Учитывать отрицательный feedback: «не тащи это», «опять он», игнорирование или раздражённый ответ.
 - [ ] Учитывать положительный feedback как ranking signal, но не как новый факт.
-- [ ] Ограничить число memory callbacks в одном ответе до одного.
+- [x] Ограничить число memory callbacks в одном ответе до одного.
 - [ ] Добавить eval, в котором лучший ответ намеренно не использует никакой callback.
 
 #### Реакции вместо лишних сообщений
@@ -527,7 +527,7 @@ Long-term memory — самый заметный частный случай э�
 - [x] Все routes должны получать одинаковые recent context и retrieved memory с одинаковой policy.
 - [x] Fallback не должен незаметно менять личность или доступную память.
 - [x] Логировать `chat_id`, prompt version, model, provider, route, reasoning effort и fallback chain.
-- [ ] Логировать IDs выбранных memory items, но не весь чувствительный текст.
+- [x] Логировать IDs выбранных memory items, но не весь чувствительный текст.
 - [x] Логировать token budget по секциям: identity, recent history, retrieved memory, tools.
 - [x] Логировать latency, search calls, refusal и причину пустого ответа.
 - [ ] Добавить метрику summary/memory job success, failure и staleness.
@@ -635,8 +635,8 @@ Blind pairwise replay:
 6. [ ] Сжать personality и внедрить маленький character bible + few-shot примеры.
 7. [ ] Исправить date grounding, attribution, refusal и feature-overlay правила.
 8. [x] Исключить Jarvis из источников memory, отключить auto-promote и исправить reset/clear semantics (осталось: ручной review текущих `chat-summary.md`/`chat-lore.md`).
-9. [ ] Реализовать `memory_items`, structured extraction и selective retrieval.
-10. [ ] Подключить response decision `ignore/react/reply/search` и уместные reactions.
+9. [x] Реализовать `memory_items`, structured extraction и selective retrieval (в shadow-режиме).
+10. [x] Подключить response decision `ignore/react/reply/search` и уместные reactions (ignore/react для фоновых сообщений).
 11. [x] Добавить voice transcription и чтение присланных ссылок.
 12. [ ] Объединить photo/GIF/sticker/video note в один multimodal pipeline.
 13. [ ] Запустить blind pairwise replay на 50–100 сценах.
@@ -787,3 +787,25 @@ Personality (всё на Grok 4.7, 25 свежих прод-сцен с реак
   TikTok/Spotify (oEmbed), Threads/Instagram (OG для краулера Meta), остальное — OG + основной текст.
   Блок помечен как недоверенные данные; недоступная страница → «не выдумывай содержимое». SSRF: каждый hop,
   включая редиректы, должен резолвиться в публичный адрес (бот в домашней сети). Кэш 6 ч, лимит 1.5 МБ, таймаут 10 с.
+
+### 22.09.2026 — Memory v2 (shadow)
+
+- `services/memory_v2.py`: таблицы `memory_items` (тип, субъект, текст, источники-сообщения и авторы, claim_type,
+  confidence, sensitive, статус, supersedes, TTL, счётчик использования), `memory_audit`, `memory_extract_state` (курсор).
+- Запись: новые сообщения ЛЮДЕЙ после курсора, пачкой ≥20 или раз в 6 ч, не чаще раза в 30 мин → Gemini 3.5 Flash
+  (выбран на реальной пачке из 150 сообщений против GLM 5.3 и Flash-Lite: 3 точных записи против 8 с перепутанными людьми
+  и 0) → строгий JSON с id сообщений → детерминированная политика: без источника/от бота/sensitive — отказ;
+  тип утверждения по авторам (субъект среди авторов = сам сказал, иначе «X говорит, что…» с confidence 0.45);
+  два независимых автора +0.1; повтор = confirm (продление), противоречие = supersede; lore_candidate никогда не активен сам.
+  TTL: событие 21 д, незакрытое 30, предпочтение 180, «со слов» 60, мем-кандидат 45, факт — бессрочно.
+- Чтение: автор, упомянутые люди (со склонениями: «у Юры», «Бодю»), слова темы → FTS (русский стеммер, префиксы) +
+  фильтр по субъекту → ранжирование; запись без тематической связи или явного упоминания субъекта не достаётся;
+  ≤5 записей / ~500 токенов, штраф за использование в последние 6 ч, «со слов» — только если человек в сцене.
+- Режим `JARVIS_MEMORY_V2`: `shadow` по умолчанию — извлечение и поиск работают, ID найденного пишутся в trace
+  (`memory_ids`), промпт не меняется; `inject` — блок попадает в system prompt; `off`. Старые summary/lore пока работают параллельно.
+- Админ: `/mem [имя|all]`, `/mem_show id` (источники + история), `/mem_forget id`, `/mem_fix id текст`, `/mem_run`.
+- Прогон на последних 48 ч: 3 записи (Богдан репетиторствует, Юра работает там, где книги, Юра выбирает одежду на свадьбу),
+  1 отказ (sensitive). Поиск: «что у Юры на работе» → работа Юры; «как отсортировать список» → пусто.
+
+Следующий шаг: неделю пожить в shadow, посмотреть `/mem` и `memory_ids` в trace, затем включить `inject`
+и проверить на eval-сценах recall/negative recall.

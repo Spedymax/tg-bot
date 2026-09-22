@@ -302,3 +302,30 @@ async def test_maybe_react_ignore_does_not_touch_telegram(monkeypatch):
     await h._maybe_react(message)
     h.bot.set_message_reaction.assert_not_awaited()
     assert CHAT not in h._last_reaction_time
+
+
+# ── memory v2 shadow / inject ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["shadow", "inject"])
+async def test_memory_v2_shadow_logs_but_only_inject_changes_prompt(monkeypatch, mode):
+    monkeypatch.setattr(_mod, "MEMORY_V2_MODE", mode)
+    h = _handler()
+    store = AsyncMock()
+    store.retrieve = AsyncMock(return_value=[{"id": 6, "kind": "profile_fact", "confidence": 0.9,
+                                              "text": "Юра работает на складе с книгами"}])
+    h._memory_store = store
+    trace, token = llm_trace.begin("persona", CHAT)
+    try:
+        with patch.object(_mod, '_load_chat_summary', return_value=''), \
+                patch.object(_mod, '_load_chat_lore', return_value=''):
+            messages = await h._build_persona_messages("Макс", "что там у Юры на работе?", "", [], CHAT)
+            # provider fallback rebuilds the snapshot: retrieval must not run twice
+            await h._build_persona_messages("Макс", "что там у Юры на работе?", "", [], CHAT)
+    finally:
+        llm_trace.end(token)
+    assert trace.memory_ids == [6] and trace.memory_mode == mode
+    assert store.retrieve.await_count == 1
+    assert store.retrieve.await_args.args[3] == {742272644}      # Юра detected from «у Юры»
+    injected = "Юра работает на складе" in messages[0]["content"]
+    assert injected is (mode == "inject")

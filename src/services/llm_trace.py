@@ -81,6 +81,8 @@ class LLMTrace:
     sections: dict[str, int] = field(default_factory=dict)
     attempts: list[Attempt] = field(default_factory=list)
     tools: list[dict[str, Any]] = field(default_factory=list)
+    memory_mode: str = ""
+    memory_ids: list[int] = field(default_factory=list)
     outcome: str = "pending"
     reply_chars: int = 0
     started: float = field(default_factory=time.monotonic)
@@ -168,6 +170,7 @@ async def persist(trace: LLMTrace, db) -> None:
         "cost": cost,
         "tools": len(trace.tools),
         "sections": trace.sections,
+        "mem": trace.memory_ids,
     }
     logger.info("LLM_TRACE %s", json.dumps(summary, ensure_ascii=False))
     if db is None:
