@@ -40,8 +40,8 @@
 ### P1 — сделать улучшения измеримыми
 
 - [ ] Добавить LLM telemetry и трассировку полного route/fallback/context composition.
-- [ ] Собрать 50–100 реальных production-сцен в versioned eval dataset.
-- [ ] Добавить blind pairwise replay без названия модели для оценщиков.
+- [~] Собрать 50–100 реальных production-сцен в versioned eval dataset (извлечено 252 кандидата; разметка ждёт пополнения OpenRouter).
+- [x] Добавить blind pairwise replay без названия модели для оценщиков.
 - [ ] Отслеживать качество, latency, стоимость, search rate, callbacks и пользовательскую фрустрацию.
 - [ ] Ввести shadow mode перед каждым крупным изменением prompt, memory или модели.
 
@@ -305,7 +305,7 @@ Long-term memory — самый заметный частный случай э�
 - [x] Удалить предыдущий summary из списка доказательств при следующей пересборке.
 - [x] Временно отключить автоматический `_promote_lore()`.
 - [x] Оставить permanent pin только ручной административной операцией до появления строгой policy.
-- [ ] Вручную ревьюнуть существующие `chat-summary.md` и `chat-lore.md` перед миграцией.
+- [x] Вручную ревьюнуть существующие `chat-summary.md` и `chat-lore.md` перед миграцией (счёт упоминаний люди/бот — см. журнал; решение по lore за админом).
 
 Критерий готовности: бот не может сделать собственную выдумку постоянной только за счёт повторения.
 
@@ -566,12 +566,12 @@ Long-term memory — самый заметный частный случай э�
 
 Blind pairwise replay:
 
-- [ ] Генерировать ответы всех кандидатов на одном immutable input snapshot.
-- [ ] Перемешивать порядок A/B и скрывать model/provider/prompt version от оценщика.
-- [ ] Оценивать по отдельным осям: natural, funny, useful, grounded, not annoying.
-- [ ] Разрешать `tie` и `both bad`, чтобы оценщика не заставляли выбирать мусор.
+- [x] Генерировать ответы всех кандидатов на одном immutable input snapshot.
+- [x] Перемешивать порядок A/B и скрывать model/provider/prompt version от оценщика.
+- [x] Оценивать по отдельным осям: natural, funny, useful, grounded, not annoying.
+- [x] Разрешать `tie` и `both bad`, чтобы оценщика не заставляли выбирать мусор.
 - [ ] Повторять часть сцен с изменённым seed для оценки variance.
-- [ ] Хранить pairwise votes и причины отдельно от model outputs.
+- [x] Хранить pairwise votes и причины отдельно от model outputs.
 - [ ] Выбирать победителя по заранее заданному threshold, а не по одному красивому примеру.
 
 Метрики:
@@ -631,7 +631,7 @@ Blind pairwise replay:
 2. [x] Исправление duplicate current turn и reply-thread context.
 3. [x] Единый thread-first `ContextBuilder` для всех providers и features.
 4. [x] Базовая LLM telemetry: trace ID, prompt version, model/provider, route, context tokens, tools, latency и cost.
-5. [ ] Golden eval из первых 50 реальных production-сцен.
+5. [~] Golden eval из первых 50 реальных production-сцен — инфраструктура готова (`evals/`), 13 seed-сцен, 252 кандидата; разметка/прогон ждут пополнения OpenRouter.
 6. [ ] Сжать personality и внедрить маленький character bible + few-shot примеры.
 7. [ ] Исправить date grounding, attribution, refusal и feature-overlay правила.
 8. [x] Исключить Jarvis из источников memory, отключить auto-promote и исправить reset/clear semantics (осталось: ручной review текущих `chat-summary.md`/`chat-lore.md`).
@@ -727,3 +727,27 @@ Blind pairwise replay:
 
 Следующие шаги по порядку: ручной review текущих summary/lore → golden eval из 50 сцен (можно начать с `llm_traces`)
 → сжатие personality prompt → Memory v2.
+
+### 22.09.2026 — ревью памяти и eval-инфраструктура
+
+Ревью памяти (упоминания люди / бот, всё время; за 14 дней):
+
+| пункт | люди | бот | люди 14д | вывод |
+|---|---|---|---|---|
+| Эдик/Коваленко (lore) | 42 | 36 | 0 | оставить — сильная человеческая легенда |
+| Лисёнок (lore) | 13 | 50 | 3 | люди сами поднимают (в т.ч. 22.09), но бот тащит в 4 раза чаще — оставить с пометкой «только когда поднимают» |
+| ревил/skip | 25 | 3 | 2 | живой |
+| скам | 10 | 22 | 0 | в основном бот, выпадет |
+| кубы/поршень | 3 | 9 | 0 | бот-петля, выпадет |
+| слезинка Юры | 3 | 7 | 0 | придумал бот, выпадет |
+| Big Walk, Puh, Shadow mode, Никита, террористы | 1–4 | 0–1 | 0 | устарело, выпадет |
+
+Summary пересоберётся новым пайплайном сам (только люди, без старого summary), поэтому устаревшие пункты уйдут без ручной правки.
+
+Eval (`evals/`, см. `evals/README.md`): extract (DB → сцены с контекстом как в проде), LLM-разметка критериев,
+стратифицированный select, replay через реальный ContextBuilder (замороженные часы, застабленный поиск),
+judge (критерии + оси + флаги + детерминированный лишний поиск), слепой pairwise, бюджет-гард для общего ключа.
+Рефакторинг ради паритета: `format_clock`, `PERSONA_POST_PROMPT`, `compose_thread_first` → `services/context_builder.py`,
+`WEB_SEARCH_TOOL` → `services/persona_tools.py`.
+
+Блокер: на OpenRouter осталось ~$0.15 из $5 — это и основной маршрут прода. Разметка, прогон и судья стоят ~$10–15.

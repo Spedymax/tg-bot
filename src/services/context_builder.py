@@ -4,7 +4,71 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Iterable
+from zoneinfo import ZoneInfo
+
+KYIV_TZ = ZoneInfo("Europe/Kyiv")
+CET_TZ = ZoneInfo("Europe/Copenhagen")
+
+# Tone guard placed right before the current message (after history) on every route.
+PERSONA_POST_PROMPT = (
+    "(Тон: ты дружелюбный свой, а не уставший злой сосед. Стёб — по-доброму и со смехом, "
+    "не огрызайся и не отгоняй людей («не тегай», «не ной», «сам ищи» — так не отвечай). "
+    "Просят помочь — помоги, подкол только сверху ответа, а не вместо него.)"
+)
+
+_RU_WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
+_RU_MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля",
+              "августа", "сентября", "октября", "ноября", "декабря")
+
+
+def format_clock(now: datetime | None = None) -> str:
+    """Exact current date/time for date grounding: Kyiv (chat events) + CET (Макс, Богдан)."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    kyiv = now.astimezone(KYIV_TZ)
+    cet = now.astimezone(CET_TZ)
+    return (
+        f"{_RU_WEEKDAYS[kyiv.weekday()]}, {kyiv.day} {_RU_MONTHS[kyiv.month - 1]} "
+        f"{kyiv.year}, {kyiv:%H:%M} по Киеву; в Дании/Германии {cet:%H:%M}"
+    )
+
+
+def compose_thread_first(thread: list[str], recent: list[str], *,
+                         limit: int, char_budget: int) -> list[str]:
+    """Reply branch first, then the newest surrounding messages, without duplicates.
+
+    Both inputs are chronological. The explicit reply branch has priority over
+    ambient context; the rest of the budget goes to the newest scene lines,
+    kept in chronological order.
+    """
+    seen: set[str] = set()
+    combined: list[str] = []
+    used_chars = 0
+    for line in thread:
+        if line in seen or len(combined) >= limit:
+            continue
+        remaining = char_budget - used_chars
+        if remaining <= 0:
+            break
+        kept = line[:remaining]
+        combined.append(kept)
+        seen.add(line)
+        used_chars += len(kept)
+
+    recent_reversed: list[str] = []
+    for line in reversed(recent):
+        if line in seen or len(combined) + len(recent_reversed) >= limit:
+            continue
+        if used_chars + len(line) > char_budget:
+            continue
+        recent_reversed.append(line)
+        seen.add(line)
+        used_chars += len(line)
+    combined.extend(reversed(recent_reversed))
+    return combined
 
 
 @dataclass(frozen=True)

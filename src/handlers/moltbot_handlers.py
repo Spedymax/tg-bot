@@ -19,8 +19,9 @@ from apscheduler.triggers.cron import CronTrigger
 
 from config.settings import Settings
 from services.circuit_breaker import ollama_breaker, together_breaker, openrouter_breaker
-from services.context_builder import ContextBuilder, ContextSnapshot
+from services.context_builder import ContextBuilder, ContextSnapshot, PERSONA_POST_PROMPT, compose_thread_first, format_clock
 from services import llm_trace
+from services.persona_tools import WEB_SEARCH_TOOL
 
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CHAT_SUMMARY_PATH = os.path.join(_BASE_DIR, 'data', 'chat-summary.md')
@@ -170,7 +171,6 @@ SUMMARY_CHAR_BUDGET = 60_000  # keeps the summarizer input bounded in a busy cha
 HISTORY_MESSAGE_LIMIT = 100
 HISTORY_CHAR_BUDGET = 12_000  # conservative ~3K-token cap before prompt/memory
 CPH_TZ = ZoneInfo("Europe/Copenhagen")
-KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 
 class MoltbotHandlers:
@@ -611,35 +611,7 @@ class MoltbotHandlers:
         recent = await self._get_recent_group_messages(
             chat_id, limit=recent_limit, exclude_message_id=current_message_id
         )
-        seen: set[str] = set()
-        combined: list[str] = []
-        used_chars = 0
-
-        # The explicit reply branch has priority over ambient context.
-        for line in thread:
-            if line in seen or len(combined) >= recent_limit:
-                continue
-            remaining = char_budget - used_chars
-            if remaining <= 0:
-                break
-            kept = line[:remaining]
-            combined.append(kept)
-            seen.add(line)
-            used_chars += len(kept)
-
-        # Fill the remaining budget with the newest surrounding messages while
-        # preserving chronological order inside that selected scene.
-        recent_reversed: list[str] = []
-        for line in reversed(recent):
-            if line in seen or len(combined) + len(recent_reversed) >= recent_limit:
-                continue
-            if used_chars + len(line) > char_budget:
-                continue
-            recent_reversed.append(line)
-            seen.add(line)
-            used_chars += len(line)
-        combined.extend(reversed(recent_reversed))
-        return combined
+        return compose_thread_first(thread, recent, limit=recent_limit, char_budget=char_budget)
 
     async def _together_post(self, payload: dict, timeout: float) -> dict:
         """POST to Together.ai (streaming) with retry on 5xx and transient errors.
@@ -1170,11 +1142,7 @@ class MoltbotHandlers:
 
     _HARD_RULES = ""
 
-    _POST_PROMPT_BASE = (
-        "(Тон: ты дружелюбный свой, а не уставший злой сосед. Стёб — по-доброму и со смехом, "
-        "не огрызайся и не отгоняй людей («не тегай», «не ной», «сам ищи» — так не отвечай). "
-        "Просят помочь — помоги, подкол только сверху ответа, а не вместо него.)"
-    )
+    _POST_PROMPT_BASE = PERSONA_POST_PROMPT
 
     @staticmethod
     def _persona_overlay() -> str:
@@ -1194,20 +1162,9 @@ class MoltbotHandlers:
         inj = self._persona_overlay()
         return f"{self._POST_PROMPT_BASE}\n\n{inj}" if inj else self._POST_PROMPT_BASE
 
-    _RU_WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
-    _RU_MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля",
-                  "августа", "сентября", "октября", "ноября", "декабря")
-
-    @classmethod
-    def _clock_text(cls, now: datetime | None = None) -> str:
-        """Exact current date/time for date grounding: Kyiv (chat events) + CET (Макс, Богдан)."""
-        now = now or datetime.now(timezone.utc)
-        kyiv = now.astimezone(KYIV_TZ)
-        cph = now.astimezone(CPH_TZ)
-        return (
-            f"{cls._RU_WEEKDAYS[kyiv.weekday()]}, {kyiv.day} {cls._RU_MONTHS[kyiv.month - 1]} "
-            f"{kyiv.year}, {kyiv:%H:%M} по Киеву; в Дании/Германии {cph:%H:%M}"
-        )
+    @staticmethod
+    def _clock_text(now: datetime | None = None) -> str:
+        return format_clock(now)
 
     # Bot names used to identify assistant messages in history
     _BOT_NAMES = {
@@ -1536,35 +1493,7 @@ class MoltbotHandlers:
     # The model calls web_search(query) instead of emitting "SEARCH: ..." as
     # text — text markers leaked into the chat whenever the intercept missed.
     # ------------------------------------------------------------------
-    _WEB_SEARCH_TOOL = {
-        "type": "function",
-        "function": {
-            "name": "web_search",
-            "description": (
-                "Поиск в интернете. Вызывай, когда нужен свежий или точный факт, которого ты "
-                "не знаешь: новости, курсы, результаты матчей, кто такой X, что за X, что случилось. "
-                "Любой вопрос про незнакомого человека/вещь/событие — повод искать, а не отвечать «хз». "
-                "На болтовню, мнения и советы поиск не нужен. Прозвища, внутряки, опечатки и "
-                "слова из этого чата не ищи — сначала смотри историю и память чата."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Короткий поисковый запрос на русском (или на языке темы).",
-                    },
-                    "reason": {
-                        "type": "string",
-                        "enum": ["freshness", "unknown_entity", "verification", "explicit_request"],
-                        "description": "Почему нужен поиск: свежие данные, незнакомая сущность, "
-                                       "проверка факта или тебя прямо попросили поискать.",
-                    },
-                },
-                "required": ["query"],
-            },
-        },
-    }
+    _WEB_SEARCH_TOOL = WEB_SEARCH_TOOL
     # How many rounds of tool calls we allow before forcing a plain answer
     _MAX_TOOL_ROUNDS = 2
     # The model often asks for a batch of searches at once, and Brave is paced at
