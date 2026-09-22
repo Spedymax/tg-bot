@@ -321,6 +321,17 @@ class QuizScheduler:
         """Async scheduled job: broadcast today's correct answers."""
         await self.send_daily_answers()
 
+    @staticmethod
+    def _answers_report_day():
+        """Calendar day named by the answers schedule, not Kyiv's next day.
+
+        At 23:00 Berlin it is already midnight in Kyiv.  Dungeon runs and boss
+        hits must still be summarized for the Berlin date whose quiz answers are
+        being posted.
+        """
+        tz = pytz.timezone(Settings.ANSWERS_BROADCAST_TIMEZONE)
+        return datetime.now(tz).date()
+
     async def send_daily_answers(self):
         """Broadcast today's correct answers at evening."""
         try:
@@ -335,15 +346,16 @@ class QuizScheduler:
             player_scores = await self._get_player_scores_for_chat(self.target_chat_id)
 
             message = self._format_daily_answers(questions, player_scores)
+            report_day = self._answers_report_day()
             try:
                 from services.boss_service import get_boss_service
                 _boss = get_boss_service()
                 if _boss:
-                    message += await _boss.summary_block()
+                    message += await _boss.summary_block(report_day)
                 from services.dungeon_service import get_dungeon_service
                 _dg = get_dungeon_service()
                 if _dg:
-                    message += await _dg.summary_block()
+                    message += await _dg.summary_block(report_day)
             except Exception as _e:
                 logger.warning(f"Boss/dungeon summary in daily answers failed: {_e}")
             await self._send_long_message(self.target_chat_id, message)

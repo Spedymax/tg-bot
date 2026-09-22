@@ -34,6 +34,7 @@ DAMAGE = {
 
 HIJACK_HP_RATIO = 0.66   # ≤ 66% → Pudginio hijacks Jarvis for a day
 RAGE_HP_RATIO = 0.33     # ≤ 33% → rage: damage x2 for the rest of the event
+RAGE_HP_BONUS_RATIO = 0.30  # lvl 25 Flesh Heap talent: +30% max/current HP once
 HIJACK_HOURS = 24
 WEAK_HOURS = 24          # riddle solved → x2 damage, capped at the rage unlock
 REGEN_RATIO = 0.05       # +5% max HP after a full idle day
@@ -395,9 +396,16 @@ class BossService:
                 "  ORDER BY id DESC LIMIT 1 FOR UPDATE"
                 "), calc AS ("
                 "  SELECT *, GREATEST(0, old_hp - %s * multiplier) AS new_hp FROM target"
+                "), phased AS ("
+                "  SELECT *, "
+                "    (new_hp > 0 AND new_hp <= max_hp * %s AND rage_available AND old_phase < 2) AS rage_triggered, "
+                "    CASE WHEN new_hp > 0 AND new_hp <= max_hp * %s AND rage_available AND old_phase < 2 "
+                "         THEN FLOOR(max_hp * %s)::integer ELSE 0 END AS rage_hp_bonus "
+                "  FROM calc"
                 "), updated AS ("
                 "  UPDATE boss_events b SET "
-                "    hp = c.new_hp, last_damage_at = NOW(), "
+                "    hp = c.new_hp + c.rage_hp_bonus, "
+                "    max_hp = c.max_hp + c.rage_hp_bonus, last_damage_at = NOW(), "
                 "    phase = CASE WHEN c.new_hp > 0 AND c.new_hp <= c.max_hp * %s AND c.rage_available THEN 2 "
                 "                 WHEN c.new_hp > 0 AND c.new_hp <= c.max_hp * %s THEN GREATEST(b.phase, 1) "
                 "                 ELSE b.phase END, "
@@ -412,33 +420,41 @@ class BossService:
                 "        WHEN c.old_phase < 2 AND c.new_hp <= c.max_hp * %s AND c.rage_available THEN '[\"rage\"]'::jsonb "
                 "        WHEN c.old_phase < 1 AND c.new_hp <= c.max_hp * %s THEN '[\"hijack\"]'::jsonb "
                 "        ELSE '[]'::jsonb END, true) "
-                "  FROM calc c WHERE b.id = c.id "
-                "  RETURNING b.id, b.hp, b.max_hp, c.old_hp, c.old_phase, b.phase, c.multiplier"
+                "  FROM phased c WHERE b.id = c.id "
+                "  RETURNING b.id, b.hp, b.max_hp, c.old_hp, c.old_phase, b.phase, c.multiplier, "
+                "            c.old_hp - c.new_hp AS applied_damage, c.rage_hp_bonus"
                 "), logged AS ("
                 "  INSERT INTO boss_damage_log (event_id, player_id, player_name, source, amount) "
-                "  SELECT id, %s, %s, %s, old_hp - hp FROM updated RETURNING id"
-                ") SELECT id, hp, max_hp, old_hp, old_phase, phase, multiplier, "
+                "  SELECT id, %s, %s, %s, applied_damage FROM updated RETURNING id"
+                ") SELECT id, hp, max_hp, old_hp, old_phase, phase, multiplier, applied_damage, rage_hp_bonus, "
                 "  (SELECT COUNT(*) FROM logged) FROM updated",
-                (RAGE_UNLOCK_OFFSET_DAYS, base, RAGE_HP_RATIO, HIJACK_HP_RATIO,
+                (RAGE_UNLOCK_OFFSET_DAYS, base,
+                 RAGE_HP_RATIO, RAGE_HP_RATIO, RAGE_HP_BONUS_RATIO,
+                 RAGE_HP_RATIO, HIJACK_HP_RATIO,
                  RAGE_HP_RATIO, HIJACK_HP_RATIO, HIJACK_HOURS,
                  RAGE_HP_RATIO, RAGE_HP_RATIO, HIJACK_HP_RATIO,
                  player_id, player_name, source),
             )
             if not rows:
                 return None
-            event_id, new_hp, max_hp, old_hp, old_phase, new_phase, mult, _ = rows[0]
-            dmg = old_hp - new_hp
+            (event_id, new_hp, max_hp, old_hp, old_phase, new_phase, mult,
+             dmg, rage_hp_bonus, _) = rows[0]
             scenes = []
             if new_hp <= 0:
                 scenes.append('win')
             else:
-                ratio = new_hp / max_hp
+                # Thresholds are evaluated against HP before the one-off level-up.
+                # Once Flesh Heap adds health, the visible percentage rises again.
+                pre_bonus_hp = new_hp - rage_hp_bonus
+                pre_bonus_max_hp = max_hp - rage_hp_bonus
+                ratio = pre_bonus_hp / pre_bonus_max_hp
                 if old_phase < 1 and ratio <= HIJACK_HP_RATIO:
                     scenes.append('hijack')
-                if old_phase < 2 and new_phase == 2 and ratio <= RAGE_HP_RATIO:
+                if old_phase < 2 and new_phase == 2:
                     scenes.append('rage')
             result = {'event_id': event_id, 'damage': dmg, 'hp': new_hp, 'max_hp': max_hp,
-                      'killed': new_hp <= 0, 'multiplier': mult, 'scenes': scenes}
+                      'killed': new_hp <= 0, 'multiplier': mult, 'scenes': scenes,
+                      'rage_hp_bonus': rage_hp_bonus}
             logger.info(f"Boss: {player_name} ({player_id}) dealt {dmg} via {source}, hp {old_hp}→{new_hp}")
             return result
         except Exception as e:
@@ -512,14 +528,17 @@ class BossService:
         return riddle if rows else None
 
     # ── stats ─────────────────────────────────────────────────────────────────
-    async def damage_by_player(self, event_id: int, today_only: bool = False) -> list:
+    async def damage_by_player(self, event_id: int, today_only: bool = False,
+                               day=None) -> list:
         """[(player_id, name, total)] sorted desc. `today` is a Kyiv calendar day."""
         where = ""
         params: tuple = (event_id,)
         if today_only:
-            start = datetime.now(KYIV).replace(hour=0, minute=0, second=0, microsecond=0)
-            where = " AND created_at >= %s"
-            params = (event_id, start)
+            report_day = day or datetime.now(KYIV).date()
+            start = datetime.combine(report_day, datetime.min.time(), tzinfo=KYIV)
+            end = start + timedelta(days=1)
+            where = " AND created_at >= %s AND created_at < %s"
+            params = (event_id, start, end)
         rows = await self._query(
             "SELECT player_id, MAX(player_name), SUM(amount) FROM boss_damage_log "
             f"WHERE event_id = %s{where} GROUP BY player_id ORDER BY 3 DESC", params
@@ -532,8 +551,9 @@ class BossService:
         rows = await self._query("SELECT player_id, player_name FROM pisunchik_data", ())
         return [(r[0], r[1] or 'Игрок') for r in (rows or [])]
 
-    async def standings(self, ev: dict, today_only: bool = False) -> list:
-        dealt = {pid: (name, total) for pid, name, total in await self.damage_by_player(ev['id'], today_only)}
+    async def standings(self, ev: dict, today_only: bool = False, day=None) -> list:
+        dealt = {pid: (name, total) for pid, name, total
+                 in await self.damage_by_player(ev['id'], today_only, day)}
         result = []
         for pid, name in await self.registered_players(ev['chat_id']):
             # prefer the main-game name over whatever the damage source captured
@@ -594,12 +614,12 @@ class BossService:
         lines.append("Тривия, Wordle, /pisunchik и данж ранят его.")
         return "\n".join(lines)
 
-    async def summary_block(self) -> str:
+    async def summary_block(self, day=None) -> str:
         """Short block appended to the evening «правильные ответы» post."""
         ev = await self.get_active_event()
         if not ev:
             return ""
-        today = await self.standings(ev, today_only=True)
+        today = await self.standings(ev, today_only=True, day=day)
         pct = int(100 * ev['hp'] / max(1, ev['max_hp']))
         parts = [
             "",

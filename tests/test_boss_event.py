@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -102,7 +102,7 @@ class DamageDB:
 
 @pytest.mark.asyncio
 async def test_damage_uses_one_atomic_state_and_log_query():
-    db = DamageDB((7, 620, 1000, 670, 0, 1, 1, 1))
+    db = DamageDB((7, 620, 1000, 670, 0, 1, 1, 50, 0, 1))
     service = BossService(db)
     service._tables_ready = True
 
@@ -116,6 +116,7 @@ async def test_damage_uses_one_atomic_state_and_log_query():
         "killed": False,
         "multiplier": 1,
         "scenes": ["hijack"],
+        "rage_hp_bonus": 0,
     }
     assert len(db.calls) == 1
     query, params = db.calls[0]
@@ -128,7 +129,7 @@ async def test_damage_uses_one_atomic_state_and_log_query():
 
 @pytest.mark.asyncio
 async def test_overkill_records_only_hp_actually_removed():
-    db = DamageDB((7, 0, 1000, 12, 2, 2, 2, 1))
+    db = DamageDB((7, 0, 1000, 12, 2, 2, 2, 12, 0, 1))
     service = BossService(db)
     service._tables_ready = True
 
@@ -137,6 +138,43 @@ async def test_overkill_records_only_hp_actually_removed():
     assert result["damage"] == 12
     assert result["killed"] is True
     assert result["scenes"] == ["win"]
+
+
+@pytest.mark.asyncio
+async def test_rage_levelup_adds_thirty_percent_hp_without_hiding_hit_damage():
+    # The hit takes 10 HP (830 -> 820), then the one-off Flesh Heap talent adds
+    # 750 to both current and maximum HP (2500 * 30%).
+    db = DamageDB((7, 1570, 3250, 830, 1, 2, 1, 10, 750, 1))
+    service = BossService(db)
+    service._tables_ready = True
+
+    result = await service.deal_damage(42, "Макс", "admin", 10)
+
+    assert result["damage"] == 10
+    assert result["hp"] == 1570
+    assert result["max_hp"] == 3250
+    assert result["rage_hp_bonus"] == 750
+    assert result["scenes"] == ["rage"]
+    query, params = db.calls[0]
+    assert "max_hp = c.max_hp + c.rage_hp_bonus" in query
+    assert "SELECT id, %s, %s, %s, applied_damage" in query
+    assert params[4] == boss_service.RAGE_HP_BONUS_RATIO
+
+
+@pytest.mark.asyncio
+async def test_daily_damage_can_be_requested_for_previous_calendar_day():
+    db = DamageDB((42, "Макс", 123))
+    service = BossService(db)
+    service._tables_ready = True
+
+    rows = await service.damage_by_player(7, today_only=True, day=date(2026, 9, 20))
+
+    assert rows == [(42, "Макс", 123)]
+    query, params = db.calls[0]
+    assert "created_at >= %s AND created_at < %s" in query
+    assert params[1].date() == date(2026, 9, 20)
+    assert params[2].date() == date(2026, 9, 21)
+    assert str(params[1].tzinfo) == "Europe/Kyiv"
 
 
 def test_rage_and_riddle_weakness_never_stack_above_x2(monkeypatch):

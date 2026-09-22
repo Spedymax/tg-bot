@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -194,6 +194,30 @@ async def test_quiz_schedule_preserves_daily_answers_and_invalid_input_keeps_sch
         assert {job.id for job in scheduler._scheduler.get_jobs()} == set(jobs)
     finally:
         scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_evening_answers_pass_berlin_report_day_to_event_summaries(monkeypatch):
+    from services import boss_service, dungeon_service
+
+    report_day = date(2026, 9, 20)
+    boss = SimpleNamespace(summary_block=AsyncMock(return_value="\nboss"))
+    dungeon = SimpleNamespace(summary_block=AsyncMock(return_value="\ndungeon"))
+    monkeypatch.setattr(boss_service, 'get_boss_service', lambda: boss)
+    monkeypatch.setattr(dungeon_service, 'get_dungeon_service', lambda: dungeon)
+
+    scheduler = QuizScheduler(AsyncMock(), SimpleNamespace(), SimpleNamespace())
+    scheduler._get_todays_questions = AsyncMock(return_value=[('q', 'a', 'e', datetime.now(timezone.utc))])
+    scheduler._get_player_scores_for_chat = AsyncMock(return_value=[])
+    scheduler._format_daily_answers = Mock(return_value='answers')
+    scheduler._answers_report_day = Mock(return_value=report_day)
+    scheduler._send_long_message = AsyncMock()
+
+    await scheduler.send_daily_answers()
+
+    boss.summary_block.assert_awaited_once_with(report_day)
+    dungeon.summary_block.assert_awaited_once_with(report_day)
+    assert scheduler._send_long_message.await_args.args[1] == 'answers\nboss\ndungeon'
 
 
 @pytest.mark.asyncio

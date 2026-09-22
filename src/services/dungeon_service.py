@@ -227,10 +227,10 @@ class DungeonService:
             return f"💀 {name} — погиб в комнате {min(rooms + 1, logic.ROOMS)}"
         return f"🚶 {name} — проходит данж, комната {min(rooms + 1, logic.ROOMS)}"
 
-    async def summary_block(self) -> str:
+    async def summary_block(self, day: Optional[date] = None) -> str:
         """Block for the evening «правильные ответы» post."""
         try:
-            results = await self.today_results()
+            results = await self.today_results(day)
         except Exception as e:
             logger.warning(f"Dungeon: summary failed: {e}")
             return ""
