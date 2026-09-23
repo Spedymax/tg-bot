@@ -121,3 +121,26 @@ def test_budget_guard_protects_production_reserve(monkeypatch):
 def test_compose_thread_first_prioritises_reply_chain():
     out = compose_thread_first(["t1", "t2"], ["r1", "t2", "r2", "r3"], limit=4, char_budget=100)
     assert out == ["t1", "t2", "r2", "r3"]
+
+
+@pytest.mark.asyncio
+async def test_reply_cache_skips_paid_call(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(replay, "CACHE_PATH", str(tmp_path / "replies.jsonl"))
+    monkeypatch.setattr(replay, "_cache", None)
+    client = AsyncMock()
+    client.chat = AsyncMock(return_value={"choices": [{"message": {"content": "здарова"}}], "_latency_ms": 5,
+                                          "usage": {"prompt_tokens": 100, "completion_tokens": 5, "cost": 0.01}})
+    cfg = {"name": "prod", "model": "x-ai/grok-4.7", "reasoning": "minimal"}
+    first = await replay.run_scene(client, cfg, _scene(), "IDENTITY", 1)
+    second = await replay.run_scene(client, {**cfg, "name": "candidate"}, _scene(), "IDENTITY", 1)
+    assert first["reply"] == second["reply"] == "здарова"
+    assert client.chat.await_count == 1 and second["from_cache"] and second["usage"]["cost"] == 0.0
+    await replay.run_scene(client, cfg, _scene(), "IDENTITY v2", 1)      # different prompt → paid again
+    assert client.chat.await_count == 2
+    sent = client.chat.await_args_list[0].args[0]
+    assert sent["session_id"].startswith("eval-")                       # sticky routing for prompt cache
+
+
+def test_default_judge_is_free():
+    assert judge.DEFAULT_JUDGE == judge.GEMINI_DIRECT

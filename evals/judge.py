@@ -25,7 +25,19 @@ from evals.openrouter import OpenRouter, ensure_budget, parse_json_reply  # noqa
 from evals.replay import RUNS_DIR  # noqa: E402
 from evals.scenes import DATA_DIR, SEED_PATH, Scene, load_jsonl, load_scenes, save_jsonl  # noqa: E402
 
-DEFAULT_JUDGE = "anthropic/claude-sonnet-5"
+# Free by default: the bot's own Gemini key (like the labeler). Pass --judge anthropic/claude-sonnet-5
+# for decisions that deserve a stronger (paid, ~$0.01/reply) judge.
+GEMINI_DIRECT = "gemini-direct"
+DEFAULT_JUDGE = GEMINI_DIRECT
+_gemini = None
+
+
+def _gemini_judge():
+    global _gemini
+    if _gemini is None:
+        from evals.extract import _gemini_labeler
+        _gemini = _gemini_labeler()
+    return _gemini
 JUDGE_COST_PER_REPLY = 0.015
 JUDGE_HISTORY_LINES = 60   # 20 was too short: callbacks to earlier scene lines got flagged as invented
 REPORTS_DIR = os.path.join(DATA_DIR, "reports")
@@ -108,11 +120,18 @@ def _memory_block(scene: Scene) -> str:
     return "\n".join(parts) + ("\n" if parts else "")
 
 
+_gemini_sem = asyncio.Semaphore(4)
+
+
 async def _judge_json(client: OpenRouter, judge: str, prompt: str, max_tokens: int) -> dict:
     """One judge call with a single retry on unparseable output."""
     last = ""
     for _ in range(2):
         try:
+            if judge == GEMINI_DIRECT:
+                async with _gemini_sem:
+                    response = await asyncio.to_thread(_gemini_judge().generate_content, prompt)
+                return parse_json_reply(response.text or "")
             data = await client.chat({"model": judge, "max_tokens": max_tokens, "temperature": 0,
                                       "messages": [{"role": "user", "content": prompt}]})
             return parse_json_reply(data["choices"][0]["message"].get("content") or "")
@@ -226,7 +245,8 @@ def _report_md(title: str, summaries: dict[str, dict]) -> str:
 
 async def cmd_score(run_ids: list[str], scene_paths: list[str], judge: str) -> None:
     scenes = _scenes_by_id(scene_paths)
-    ensure_budget(JUDGE_COST_PER_REPLY * sum(len(load_jsonl(_run_path(r))) for r in run_ids))
+    if judge != GEMINI_DIRECT:
+        ensure_budget(JUDGE_COST_PER_REPLY * sum(len(load_jsonl(_run_path(r))) for r in run_ids))
     client = OpenRouter(concurrency=4)
     summaries = {}
     for run_id in run_ids:
@@ -254,7 +274,8 @@ async def cmd_pair(run_a: str, run_b: str, scene_paths: list[str], judge: str, r
     a_rows = {(r["scene_id"], r["seed"]): r for r in load_jsonl(_run_path(run_a))}
     b_rows = {(r["scene_id"], r["seed"]): r for r in load_jsonl(_run_path(run_b))}
     keys = sorted(set(a_rows) & set(b_rows))
-    ensure_budget(JUDGE_COST_PER_REPLY * len(keys))
+    if judge != GEMINI_DIRECT:
+        ensure_budget(JUDGE_COST_PER_REPLY * len(keys))
     rng = random.Random(rng_seed)
     client = OpenRouter(concurrency=4)
 
