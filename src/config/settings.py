@@ -21,7 +21,6 @@ class Settings:
     ADMIN_IDS = [741542965]  # Add more admin IDs if necessary
     CHAT_IDS = {
         'main': -1001294162183,
-        'secondary': -1002491624152
     }
     
     # AI configuration
@@ -82,7 +81,7 @@ class Settings:
     # deflecting ("это спам/шиза") on race/politics topics per the persona's
     # "no taboos, always have an opinion" rule.
     TOGETHER_API_KEY = os.getenv('TOGETHER_API_KEY')
-    TOGETHER_MODEL = os.getenv('TOGETHER_MODEL', 'Qwen/Qwen3-235B-A22B-Instruct-2507-tput')
+    TOGETHER_MODEL = os.getenv('TOGETHER_MODEL', 'moonshotai/Kimi-K3')
 
     # OpenRouter (primary persona-chat model — Grok, less prone to deflecting on
     # edgy topics than Qwen/Together; Together.ai above is the fallback on failure)

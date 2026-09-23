@@ -328,7 +328,7 @@ class OllamaWakeManager:
                 headers={"Authorization": f"Bearer {Settings.TOGETHER_API_KEY}"},
                 json={"model": Settings.TOGETHER_MODEL,
                       "messages": [{"role": "user", "content": prompt}],
-                      "max_tokens": 350},
+                      "max_tokens": 2000},  # Kimi-K3 spends tokens on reasoning first
                 timeout=30,
             )
             r.raise_for_status()

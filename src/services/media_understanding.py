@@ -102,9 +102,11 @@ class MediaUnderstanding:
     async def _analyze(self, key: str, kind: str, file_id: str, mime: str, prompt: str) -> str:
         cached = await self._cached(key)
         if cached is not None:
+            logger.info(f"media: {kind} {key} from cache: {cached[:800]}")
             return cached
         data = await self._download(file_id)
         text = await self._ask(data, mime, prompt)
+        logger.info(f"media: Gemini {kind} {key} ({len(data)} bytes): {text[:800] or '(пусто)'}")
         if text:
             await self._store(key, kind, text)
         return text

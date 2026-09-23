@@ -26,20 +26,6 @@ class MessagingService:
             logger.error(f"Error sending message to main group: {str(e)}")
             return False
     
-    def send_message_to_group2(self, bot: telebot.TeleBot, message: str, 
-                              parse_mode: str = 'HTML') -> bool:
-        """Send message to secondary group chat."""
-        try:
-            bot.send_message(
-                self.chat_ids.get('secondary'), 
-                message, 
-                parse_mode=parse_mode
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Error sending message to secondary group: {str(e)}")
-            return False
-    
     def send_message_to_chat(self, bot: telebot.TeleBot, chat_id: int, 
                            message: str, parse_mode: str = 'HTML') -> bool:
         """Send message to a specific chat."""

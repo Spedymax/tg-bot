@@ -201,7 +201,6 @@ KNOWN_MEMBERS = {
 # Chat ID → stable user key for MoltBot memory
 CHAT_KEYS = {
     -1001294162183: "tg-group-main",
-    -1002491624152: "tg-group-secondary",
 }
 
 # Proactive messaging config
@@ -779,7 +778,7 @@ class MoltbotHandlers:
                 {
                     "model": Settings.TOGETHER_MODEL,
                     "messages": messages,
-                    "max_tokens": 500,
+                    "max_tokens": 2000,  # Kimi-K3 reasons before answering; 500 left no room for the reply
                     "temperature": 0.8,
                 },
                 timeout=120,
@@ -1125,7 +1124,7 @@ class MoltbotHandlers:
             if not text and Settings.TOGETHER_API_KEY:
                 try:
                     data = await llm_trace.call(kind, "together", Settings.TOGETHER_MODEL, lambda: self._together_post(
-                        {"model": Settings.TOGETHER_MODEL, "max_tokens": max_tokens, "temperature": temperature,
+                        {"model": Settings.TOGETHER_MODEL, "max_tokens": max(max_tokens, 2000), "temperature": temperature,
                          "messages": messages}, timeout=120))
                     text = self._clean_persona_reply(data["choices"][0]["message"].get("content") or "")
                 except Exception as e:
