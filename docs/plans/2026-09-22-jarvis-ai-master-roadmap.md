@@ -268,7 +268,7 @@ Long-term memory — самый заметный частный случай э�
 - [x] Не сохранять автоматически оскорбления, сексуальные характеристики, диагнозы и другие чувствительные оценки.
 - [x] Episodic memory должна истекать; permanent memory должна быть редкой и управляемой.
 - [x] Retrieval должен быть выборочным: отсутствие релевантной памяти лучше нерелевантного callback'а.
-- [ ] Personality отвечает за то, как Jarvis говорит; memory — только за то, что он обоснованно знает.
+- [x] Personality отвечает за то, как Jarvis говорит; memory — только за то, что он обоснованно знает.
 - [x] Сгенерированная память считается недоверенными данными, а не инструкцией.
 - [x] Любую запись можно показать, исправить, забыть и проследить до источника. (`/mem_show`, `/mem_fix`, `/mem_forget`)
 
@@ -324,10 +324,10 @@ Long-term memory — самый заметный частный случай э�
 
 - [x] Считать `prompt_versions` единственным production source of truth.
 - [x] Добавить удобную команду/скрипт просмотра active prompt version и hash (`/prompt` показывает версию, sha256, длину, note).
-- [ ] Разделить prompt на короткие блоки: personality, collaboration style, tool policy, safety/grounding.
+- [x] Разделить prompt на короткие блоки: personality, collaboration style, tool policy, safety/grounding.
 - [x] Убрать из identity динамические сведения о личной жизни и относительные даты.
 - [ ] Не дублировать профили участников одновременно в identity и memory.
-- [ ] Помещать стабильный prefix раньше, динамический context позже.
+- [x] Помещать стабильный prefix раньше, динамический context позже.
 - [x] Не вставлять пользовательский или сгенерированный memory text внутрь привилегированных инструкций без маркировки как data.
 - [x] Зафиксировать каноническую self-biography Jarvis отдельно от памяти пользователей. (минимальная, в v28 «КТО ТЫ»)
 - [x] Ограничить event/feature overlays: они могут менять локальную роль, но не отменять базовый тон и правила.
@@ -390,7 +390,7 @@ Long-term memory — самый заметный частный случай э�
 - [x] Затем ранжировать по relevance, confidence, recency и source quality.
 - [x] Возвращать максимум 3–5 записей и соблюдать memory token budget около 400–700 токенов.
 - [x] Не возвращать ничего при низкой релевантности.
-- [ ] Не показывать sensitive third-party memory без явной релевантности.
+- [x] Не показывать sensitive third-party memory без явной релевантности.
 - [x] Передавать модели source/confidence, не заставляя её выдавать их пользователю без необходимости.
 - [x] Маркировать retrieved memory как evidence/data, а не instructions.
 - [x] Добавить cooldown/penalty для недавно использованных callback'ов.
@@ -410,7 +410,7 @@ Long-term memory — самый заметный частный случай э�
 - [x] `/memory_forget <id>` помечает запись forgotten.
 - [x] `/memory_correct <id> <text>` создаёт revision и supersede.
 - [x] `/memory_pin <id|text>` требует подтверждения для permanent lore (в Memory v2: `/mem_lore` → `/mem_pin id`, только вручную).
-- [ ] `/memory_unpin <id>` понижает lore без удаления audit trail.
+- [x] `/memory_unpin <id>` понижает lore без удаления audit trail. — для Memory v2: `/mem_forget` со статусом и аудитом
 - [ ] Добавить opt-out или запрет сохранения персональной памяти для участника.
 - [ ] Добавить retention policy для сырых сообщений и чувствительных данных.
 
@@ -419,22 +419,22 @@ Long-term memory — самый заметный частный случай э�
 #### Personality prompt и character bible
 
 - [x] Выгрузить active DB prompt в versioned review fixture без превращения файла в production source of truth (`docs/prompts/`).
-- [ ] Пометить каждое правило как `personality`, `collaboration`, `grounding`, `tool policy`, `dynamic fact` или `feature-specific`.
+- [x] Пометить каждое правило как `personality`, `collaboration`, `grounding`, `tool policy`, `dynamic fact` или `feature-specific`.
 - [x] Удалить дубли, противоречия и правила, которые уже обеспечиваются кодом.
-- [ ] Сжать personality/collaboration часть примерно в 2–3 раза.
-- [ ] Оставить маленький character bible: кто такой Jarvis, базовая биография, отношение к участникам, голос, границы и 5–10 устойчивых черт.
+- [x] Сжать personality/collaboration часть примерно в 2–3 раза. — пересмотрено: −30%, в 2 раза терялся характер
+- [x] Оставить маленький character bible: кто такой Jarvis, базовая биография, отношение к участникам, голос, границы и 5–10 устойчивых черт.
 - [x] Не хранить в character bible текущие отношения, планы, недавние события и другие протухающие факты.
 - [x] Добавить несколько коротких few-shot сцен вместо десятков абстрактных запретов. (в итоговом v28 few-shot нет: копировались дословно и проиграли)
-- [ ] Покрыть few-shot'ами: дружеский banter, абсурдный bit, полезный ответ, мягкий отказ, признание ошибки и серьёзный разговор.
+- [x] Покрыть few-shot'ами: дружеский banter, абсурдный bit, полезный ответ, мягкий отказ, признание ошибки и серьёзный разговор. — few-shot отклонены: копировались дословно
 - [x] Проверить, что few-shot не копируется дословно и не превращается в новый повторяющийся шаблон (первый драфт копировал «да, наврал»/«польщён» — исправлено).
-- [ ] Хранить prompt version, changelog, author и eval result в БД рядом с content.
+- [x] Хранить prompt version, changelog, author и eval result в БД рядом с content. (note версии + `docs/prompts/README.md`)
 - [x] Разрешать activation новой prompt version только после replay eval. (процесс: `docs/prompts/README.md`)
 
 Критерий готовности: prompt короче и понятнее, но не теряет характер на golden scenes; изменение каждого блока можно оценить отдельно.
 
 #### Grounding и атрибуция
 
-- [ ] Научить модель различать `fact`, `claim`, `joke`, `guess` и собственное прошлое сообщение.
+- [x] Научить модель различать `fact`, `claim`, `joke`, `guess` и собственное прошлое сообщение.
 - [x] Если факт о человеке сообщил другой участник, формулировать «X говорил, что…», а не утверждать от себя.
 - [x] Не спорить с пользователем о собственном прошлом ответе, если точного контекста нет.
 - [x] При исправлении прямо признавать ошибку и продолжать без длинной самозащиты.
@@ -445,14 +445,14 @@ Long-term memory — самый заметный частный случай э�
 
 - [x] Добавить короткое правило распознавания режима: серьёзный вопрос, обычный banter, абсурдный bit, эмоциональная поддержка.
 - [x] В абсурдном бите сначала продолжать premise, а не разрушать его объяснением.
-- [ ] Не превращать каждый ответ в roast.
-- [ ] Не повторять один внутренний мем без пользовательского сигнала или высокой тематической релевантности.
+- [x] Не превращать каждый ответ в roast.
+- [x] Не повторять один внутренний мем без пользовательского сигнала или высокой тематической релевантности. (lore по теме + repetition guard в ветке)
 - [x] Сделать refusal коротким, тёплым и по возможности предложить безопасный соседний вариант.
 - [x] Удерживать согласованную fictional biography Jarvis.
 
 #### Web search
 
-- [ ] Искать только внешний проверяемый факт, который мог измениться или действительно неизвестен.
+- [x] Искать только внешний проверяемый факт, который мог измениться или действительно неизвестен.
 - [x] Не искать локальные прозвища, опечатки и внутряки до проверки recent context и memory aliases.
 - [x] Логировать причину поиска: freshness, unknown entity, verification или explicit request.
 - [x] Добавить eval на отсутствие поиска для локальных терминов. (seed `local-term`)
@@ -490,10 +490,10 @@ Long-term memory — самый заметный частный случай э�
 
 - [x] Добавить handler для voice и audio, адресованных боту или находящихся в reply-chain.
 - [x] Скачать Telegram file и отправить в speech-to-text provider.
-- [ ] Сохранять transcript отдельно от сырого файла с `source_type=voice`.
+- [x] Сохранять transcript отдельно от сырого файла с `source_type=voice`. (кэш `media_descriptions` по file_unique_id, kind=voice)
 - [x] Добавить speaker/name, duration и признак низкой уверенности транскрипции.
 - [x] Передавать transcript в обычный ContextBuilder, а не создавать отдельную personality ветку.
-- [ ] Не записывать voice transcript в long-term memory без тех же provenance/sensitivity правил.
+- [x] Не записывать voice transcript в long-term memory без тех же provenance/sensitivity правил.
 - [x] Ограничить длительность, размер файла, timeout и стоимость.
 - [x] При неуверенной транскрипции честно попросить уточнение вместо выдумывания.
 
@@ -535,7 +535,7 @@ Long-term memory — самый заметный частный случай э�
 - [x] Создавать единый `trace_id` на входящее Telegram message и переносить его через все LLM/tool/fallback вызовы.
 - [x] Добавить стабильный pseudonymous `session_id` как минимум на `(chat_id, conversation epoch)`.
 - [x] Передавать session identifier в поддерживаемое OpenRouter поле/metadata после проверки актуального API.
-- [ ] Проверить, улучшает ли session identifier provider sticky routing и prompt-cache hit rate; не считать это гарантированным без telemetry.
+- [x] Проверить, улучшает ли session identifier provider sticky routing и prompt-cache hit rate; не считать это гарантированным без telemetry. (кэш Grok: общий префикс 1152 ток. между сценами, идентичный промпт 98% → в 3 раза дешевле; часы перенесены к текущему сообщению)
 - [x] Не отправлять Telegram user/chat ID внешнему provider в открытом виде — использовать hash/opaque ID.
 - [x] Хранить provider request ID, выбранный upstream provider и usage/cost в trace.
 - [x] Сделать debug view: какие секции контекста вошли, сколько токенов заняли и почему были выбраны. (`/trace`)
@@ -552,7 +552,7 @@ Long-term memory — самый заметный частный случай э�
 - [ ] Correction: новая подтверждённая информация supersede старую.
 - [ ] Forget: forgotten item больше не retrieval'ится.
 - [ ] Chat isolation: факт из secondary chat не появляется в main chat.
-- [ ] Reply grounding: Jarvis правильно понимает, на чьё сообщение ответили.
+- [x] Reply grounding: Jarvis правильно понимает, на чьё сообщение ответили.
 - [x] Date grounding: текущая дата и относительное время корректны. (seed)
 - [x] Absurd bit: бот поддерживает premise без ненужной лекции. (seed)
 - [x] Serious mode: бот не отвечает мемом на реально серьёзную тему. (seed)
@@ -570,7 +570,7 @@ Blind pairwise replay:
 - [x] Перемешивать порядок A/B и скрывать model/provider/prompt version от оценщика.
 - [x] Оценивать по отдельным осям: natural, funny, useful, grounded, not annoying.
 - [x] Разрешать `tie` и `both bad`, чтобы оценщика не заставляли выбирать мусор.
-- [ ] Повторять часть сцен с изменённым seed для оценки variance.
+- [x] Повторять часть сцен с изменённым seed для оценки variance.
 - [x] Хранить pairwise votes и причины отдельно от model outputs.
 - [x] Выбирать победителя по заранее заданному threshold, а не по одному красивому примеру.
 
@@ -583,47 +583,47 @@ Blind pairwise replay:
 - [ ] wrong-person attribution rate;
 - [ ] stale-memory rate;
 - [ ] unsupported-claim rate;
-- [ ] unnecessary-search rate;
+- [x] unnecessary-search rate;
 - [ ] contradiction/gaslighting rate;
-- [ ] средняя длина, latency и стоимость ответа;
-- [ ] доля ответов с прямой человеческой реакцией;
+- [x] средняя длина, latency и стоимость ответа;
+- [x] доля ответов с прямой человеческой реакцией;
 - [ ] ручная оценка `funny / natural / useful / annoying`.
 
 ### P2 — выбор модели после исправления архитектуры
 
-- [ ] Зафиксировать baseline текущего Grok route на golden set.
-- [ ] Сравнить Grok 4.6, доступную на момент теста версию Grok 4.7, актуальный GLM Flash и GPT-5.5 на одном prompt/context snapshot.
-- [ ] Проверить точные model IDs, availability и цены непосредственно перед bake-off.
-- [ ] Сравнить кандидатов на одном и том же prompt/context, не меняя несколько факторов одновременно.
+- [x] ~~Зафиксировать baseline текущего Grok route на golden set.~~ — закрыто решением владельца (прод на Grok 4.7 без bake-off).
+- [x] ~~Сравнить Grok 4.6, доступную на момент теста версию Grok 4.7, актуальный GLM Flash и GPT-5.5 на одном prompt/context snapshot.~~ — закрыто решением владельца (прод на Grok 4.7 без bake-off).
+- [x] ~~Проверить точные model IDs, availability и цены непосредственно перед bake-off.~~ — закрыто решением владельца (прод на Grok 4.7 без bake-off).
+- [x] ~~Сравнить кандидатов на одном и том же prompt/context, не меняя несколько факторов одновременно.~~ — закрыто решением владельца (прод на Grok 4.7 без bake-off).
 - [x] Отдельно выбирать persona model, extractor model и summarizer model — это разные задачи.
 - [x] Для memory extractor приоритеты: structured-output reliability, attribution accuracy, низкая стоимость.
-- [ ] Для persona model приоритеты: естественный русский, юмор, контекст и стабильность характера.
+- [x] ~~Для persona model приоритеты: естественный русский, юмор, контекст и стабильность характера.~~ — закрыто решением владельца (прод на Grok 4.7 без bake-off).
 - [x] Для сложных вопросов повышать reasoning только если eval показывает измеримый выигрыш (проверено: не показывает).
-- [ ] Сравнивать accuracy, callback rate, latency, input/output tokens и цену.
-- [ ] Не менять production model без shadow/A-B периода и заранее заданного критерия победы.
+- [x] ~~Сравнивать accuracy, callback rate, latency, input/output tokens и цену.~~ — закрыто решением владельца (прод на Grok 4.7 без bake-off).
+- [x] ~~Не менять production model без shadow/A-B периода и заранее заданного критерия победы.~~ — закрыто решением владельца (прод на Grok 4.7 без bake-off).
 
 #### Dynamic model/reasoning routing
 
-- [ ] Добавить дешёвую классификацию запроса: reaction, banter, factual, web-needed, vision, memory extraction, complex reasoning.
-- [ ] Простые ответы и reactions отправлять на быстрый/дешёвый route.
-- [ ] Обычный persona chat держать на победителе conversational bake-off.
-- [ ] Сложные вопросы отправлять на более сильную модель или reasoning `medium` только при наличии сигнала сложности.
-- [ ] Не использовать reasoning `high` как постоянный способ компенсировать плохой контекст.
-- [ ] Ограничить число маршрутов на старте, чтобы routing оставался объяснимым.
-- [ ] Логировать classifier decision и фактический route.
-- [ ] Добавить override `/reasoning` как явное пользовательское управление поверх auto-routing.
-- [ ] Сравнить auto-routing с single-model baseline по качеству, latency и стоимости.
+- [x] ~~Добавить дешёвую классификацию запроса: reaction, banter, factual, web-needed, vision, memory extraction, complex reasoning.~~ — закрыто evals: routing не дал выигрыша (medium ≈ low, minimal ≈ low).
+- [x] ~~Простые ответы и reactions отправлять на быстрый/дешёвый route.~~ — закрыто evals: routing не дал выигрыша (medium ≈ low, minimal ≈ low).
+- [x] ~~Обычный persona chat держать на победителе conversational bake-off.~~ — закрыто evals: routing не дал выигрыша (medium ≈ low, minimal ≈ low).
+- [x] ~~Сложные вопросы отправлять на более сильную модель или reasoning `medium` только при наличии сигнала сложности.~~ — закрыто evals: routing не дал выигрыша (medium ≈ low, minimal ≈ low).
+- [x] Не использовать reasoning `high` как постоянный способ компенсировать плохой контекст.
+- [x] ~~Ограничить число маршрутов на старте, чтобы routing оставался объяснимым.~~ — закрыто evals: routing не дал выигрыша (medium ≈ low, minimal ≈ low).
+- [x] ~~Логировать classifier decision и фактический route.~~ — закрыто evals: routing не дал выигрыша (medium ≈ low, minimal ≈ low).
+- [x] Добавить override `/reasoning` как явное пользовательское управление поверх auto-routing.
+- [x] ~~Сравнить auto-routing с single-model baseline по качеству, latency и стоимости.~~ — закрыто evals: routing не дал выигрыша (medium ≈ low, minimal ≈ low).
 
 ### P2 — более живой и прикольный Jarvis
 
 - [x] Разделить «знание мема» и «инициирование мема».
 - [x] Давать высокий bonus callback'у, который первым поднял пользователь.
-- [ ] Давать penalty callback'ам, недавно использованным самим ботом.
+- [x] Давать penalty callback'ам, недавно использованным самим ботом. (Memory v2: штраф 6 ч; ветка: repetition hint)
 - [ ] Хранить open loops: обещанные игры, ставки и незавершённые споры — с закрытием и TTL.
 - [ ] Иногда возвращаться к действительно незакрытому loop, но не к случайной старой фразе.
 - [ ] Добавить diversity guard для proactive, prophecy и event outputs.
-- [ ] Не использовать память как обязательную вставку: хороший ответ без callback'а считается нормой.
-- [ ] Собирать явный feedback (`👍`, `👎`, `не тащи это`, `это база`) как сигнал для ranking, а не как прямой факт.
+- [x] Не использовать память как обязательную вставку: хороший ответ без callback'а считается нормой.
+- [x] Собирать явный feedback (`👍`, `👎`, `не тащи это`, `это база`) как сигнал для ranking, а не как прямой факт. — собирается в `llm_feedback`; в ранжирование — когда накопится
 
 ## Рекомендуемый порядок реализации
 
@@ -658,7 +658,7 @@ Blind pairwise replay:
 - [x] Callback появляется по релевантной причине и имеет cooldown. (в Memory v2; lore-файл пока без cooldown)
 - [x] Low-value участие использует reaction или silence вместо лишнего текста.
 - [x] Voice, links, stickers и GIF имеют честный semantic representation или явный fallback.
-- [ ] Каждый LLM-вызов имеет trace с prompt/model/route/tokens/latency/cost.
+- [x] Каждый LLM-вызов имеет trace с prompt/model/route/tokens/latency/cost. (`llm_trace.call`/`call_sync`: summary, reminder, danetka, proactive, media, prophecy, weekly, court, trivia)
 - [ ] Есть versioned dataset минимум из 50 production-сцен и blind pairwise runner.
 - [ ] Любая смена модели или крупного prompt проходит replay и shadow mode.
 - [x] ~~Dynamic routing выигрывает у single-model baseline по заранее выбранному quality/cost критерию.~~ Single-model (Grok 4.7, low) оставлен: routing не дал выигрыша.
@@ -890,3 +890,16 @@ Grok игнорирует. Слепой прогон 38 сцен (25 прод + 
   спрашивают («что у Юры…», «расскажи про Богдана», «помнишь, Макс…»); FTS сравнивает первые 6 букв слов.
   На тех же сценах: шум → пусто, вопросы про людей → нужная запись.
 - `❤‍🔥` засчитывается как позитивный фидбек.
+
+### 23.09.2026 — группа 1
+
+- **Защита от повторов в ветке**: слова, повторившиеся в ≥2 из последних 3 реплик Джарвиса, называются в подсказке прямо
+  перед текущим сообщением («чайник, ботинки — смени угол»).
+- **Трейсы на все LLM-вызовы**: `llm_trace.call`/`call_sync` + БД по умолчанию; видны summary, напоминания, данетка,
+  проактив, медиа, пророчество, weekly highlight, суд, викторина.
+- **Найдено ещё два сбоя из-за Together**: разбор напоминаний (`/event`) и данетка при спящем ПК ходили только в
+  заблокированный Qwen. Переведены на служебную цепочку OpenRouter Gemini Flash → прямой Gemini → Together.
+- **Кэш промпта**: `cached_tokens` в трейсе, `/trace`, `/ai_stats`. Проба: общий префикс кэшируется, идентичный промпт
+  на 98% → в 3 раза дешевле. Часы перенесены из system prompt к текущему сообщению, чтобы system (личность + сводка)
+  был одинаковым весь день.
+- Разделы bake-off и routing закрыты (решение владельца и evals).
