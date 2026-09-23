@@ -194,7 +194,7 @@ async def _main():
         BotCommand(command="events",          description="Список ивентов"),
         BotCommand(command="event_del",       description="Удалить ивент по номеру"),
         BotCommand(command="context_reset",   description="Сбросить краткосрочный контекст чата"),
-        BotCommand(command="reasoning",       description="Глубина раздумий: low/medium/high (сброс на low через 3ч тишины)"),
+        BotCommand(command="reasoning",       description="Глубина раздумий: minimal/low/medium/high (сброс на minimal через 3ч тишины)"),
         BotCommand(command="memory",          description="Показать память чата (адм)"),
         BotCommand(command="memory_refresh",  description="Пересобрать память чата (адм)"),
         BotCommand(command="memory_clear",    description="Стереть память: rolling | lore | all (адм)"),

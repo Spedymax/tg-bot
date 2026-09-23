@@ -37,14 +37,17 @@ CHAT_LORE_CANDIDATES_PATH = os.path.join(_BASE_DIR, 'data', 'chat-lore-candidate
 STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "moltbot_state.json")
 
 # Live-switchable reasoning depth for the OpenRouter/Grok persona model.
-# "low" is the everyday default (fast, cheap, same tone); people bump it to
-# "high" from the chat for a serious talk. After REASONING_RESET_AFTER of chat
+# "minimal" is the everyday default: on Grok 4.7 it matched "low" in a blind eval
+# (38 scenes, 2026-09-23) with shorter slow tails (p90 14.7s vs 18.4s, max 21.7s vs 29.9s).
+# People bump it from the chat for a serious talk; after REASONING_RESET_AFTER of chat
 # silence it falls back to the default on its own.
-REASONING_LEVELS = ("low", "medium", "high")
-REASONING_DEFAULT = "low"
+REASONING_LEVELS = ("minimal", "low", "medium", "high")
+REASONING_DEFAULT = "minimal"
 REASONING_RESET_AFTER = timedelta(hours=3)
 _REASONING_ALIASES = {
-    "low": "low", "lo": "low", "лоу": "low", "мало": "low", "выкл": "low", "off": "low", "норм": "low",
+    "minimal": "minimal", "min": "minimal", "минимум": "minimal", "мало": "minimal", "выкл": "minimal",
+    "off": "minimal", "норм": "minimal",
+    "low": "low", "lo": "low", "лоу": "low",
     "medium": "medium", "mid": "medium", "med": "medium", "мид": "medium", "средне": "medium", "средний": "medium",
     "high": "high", "hi": "high", "хай": "high", "макс": "high", "max": "high", "много": "high", "серьёзно": "high", "серьезно": "high",
 }
@@ -268,8 +271,11 @@ class MoltbotHandlers:
                 self._history_reset_time[int(chat_id_str)] = datetime.fromisoformat(ts)
             for chat_id_str, ts in data.get("memory_cursor", {}).items():
                 self._memory_cursor[int(chat_id_str)] = datetime.fromisoformat(ts)
-            if data.get("reasoning_effort") in REASONING_LEVELS:
-                self._reasoning_effort = data["reasoning_effort"]
+            saved = data.get("reasoning_effort")
+            if saved == "low" and not data.get("reasoning_default_minimal"):
+                saved = REASONING_DEFAULT   # "low" was the default before 2026-09-23, not a choice
+            if saved in REASONING_LEVELS:
+                self._reasoning_effort = saved
             if data.get("reasoning_last_activity"):
                 self._reasoning_last_activity = datetime.fromisoformat(data["reasoning_last_activity"])
             logger.info(f"MoltBot: loaded state for {len(self._history_reset_time)} chat(s)")
@@ -289,6 +295,7 @@ class MoltbotHandlers:
                     str(k): v.isoformat() for k, v in getattr(self, "_memory_cursor", {}).items()
                 },
                 "reasoning_effort": self._reasoning_effort,
+                "reasoning_default_minimal": True,
                 "reasoning_last_activity": (
                     self._reasoning_last_activity.isoformat() if self._reasoning_last_activity else None
                 ),
@@ -2729,12 +2736,12 @@ class MoltbotHandlers:
                     tail = f"\nСброс на {REASONING_DEFAULT} через {mins // 60}ч {mins % 60:02d}м тишины в чате."
                 await message.reply(
                     f"🧠 Ризонинг сейчас: {current}{tail}\n"
-                    "Поменять: /reasoning low | medium | high"
+                    "Поменять: /reasoning minimal | low | medium | high"
                 )
                 return
             level = _parse_reasoning_level(arg)
             if level is None:
-                await message.reply(f"Не понял «{arg.strip()}». Варианты: low, medium, high.")
+                await message.reply(f"Не понял «{arg.strip()}». Варианты: minimal, low, medium, high.")
                 return
             self._set_reasoning_effort(level)
             hours = int(REASONING_RESET_AFTER.total_seconds() // 3600)

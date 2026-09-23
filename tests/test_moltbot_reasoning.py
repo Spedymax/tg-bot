@@ -29,7 +29,7 @@ class TestParse:
     @pytest.mark.parametrize("raw,expected", [
         ("high", "high"), ("HIGH", "high"), (" хай ", "high"), ("макс", "high"),
         ("medium", "medium"), ("мид", "medium"),
-        ("low", "low"), ("лоу", "low"), ("выкл", "low"),
+        ("low", "low"), ("лоу", "low"), ("выкл", "minimal"), ("minimal", "minimal"), ("мало", "minimal"),
         ("turbo", None), ("", None), (None, None),
     ])
     def test_aliases(self, raw, expected):
@@ -37,10 +37,10 @@ class TestParse:
 
 
 class TestAutoReset:
-    def test_default_is_low(self, tmp_path):
+    def test_default_is_minimal(self, tmp_path):
         h = _handler(tmp_path)
         with patch.object(_m, 'STATE_PATH', str(tmp_path / 's.json')):
-            assert h._current_reasoning_effort() == "low"
+            assert h._current_reasoning_effort() == "minimal"
 
     def test_high_sticks_while_chat_active(self, tmp_path):
         h = _handler(tmp_path)
@@ -54,9 +54,9 @@ class TestAutoReset:
         with patch.object(_m, 'STATE_PATH', str(tmp_path / 's.json')):
             h._set_reasoning_effort("high")
             h._reasoning_last_activity = datetime.now(timezone.utc) - timedelta(hours=3, seconds=1)
-            assert h._current_reasoning_effort() == "low"
+            assert h._current_reasoning_effort() == "minimal"
             # and the reset is persisted
-            assert json.load(open(tmp_path / 's.json'))["reasoning_effort"] == "low"
+            assert json.load(open(tmp_path / 's.json'))["reasoning_effort"] == "minimal"
 
     def test_activity_pushes_reset_forward(self, tmp_path):
         h = _handler(tmp_path)
@@ -92,7 +92,20 @@ class TestPersistence:
         h = _handler(tmp_path)
         with patch.object(_m, 'STATE_PATH', str(p)):
             h._load_state()
-        assert h._reasoning_effort == "low"
+        assert h._reasoning_effort == "minimal"
+
+    def test_old_saved_low_default_migrates_but_new_choice_sticks(self, tmp_path):
+        p = tmp_path / 's.json'
+        p.write_text(json.dumps({"history_reset_time": {}, "reasoning_effort": "low"}))
+        h = _handler(tmp_path)
+        with patch.object(_m, 'STATE_PATH', str(p)):
+            h._load_state()
+        assert h._reasoning_effort == "minimal"          # pre-2026-09-23 default, not a choice
+        p.write_text(json.dumps({"history_reset_time": {}, "reasoning_effort": "low",
+                                 "reasoning_default_minimal": True}))
+        with patch.object(_m, 'STATE_PATH', str(p)):
+            h._load_state()
+        assert h._reasoning_effort == "low"              # chosen after the switch: kept
 
     def test_set_rejects_unknown(self, tmp_path):
         h = _handler(tmp_path)
