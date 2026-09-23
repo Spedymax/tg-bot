@@ -127,6 +127,12 @@ def gauge(title, targets, unit="none", max_=None, thresholds=None, desc=""):
                         "showThresholdLabels": False, "showThresholdMarkers": True}}
 
 
+def last24h(panel: dict) -> dict:
+    """Prometheus history starts 2026-09-23: on a 7-day range the auto step (~20 min) finds no samples yet."""
+    panel["timeFrom"] = "24h"
+    return panel
+
+
 UPDOWN = [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}]
 RED_GREEN = [{"color": "red", "value": None}, {"color": "green", "value": 1}]
 
@@ -222,9 +228,11 @@ GROUP BY 1 HAVING AVG(value::text::numeric) > 0 ORDER BY 2 DESC""", "table")], d
 L.place(ts("Длина ответа", [pg("""
 SELECT $__timeGroupAlias(created_at, $__interval), AVG(reply_chars) AS "средняя", MAX(reply_chars) AS "макс"
 FROM traces WHERE kind = 'persona' AND outcome = 'ok' AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1""")], unit="none"), 8)
-L.place(table("Ошибки провайдеров", [pg("""
+_errors = table("Ошибки провайдеров", [pg("""
 SELECT created_at AS "время", kind AS "тип", provider AS "провайдер", model AS "модель", latency_ms AS "мс", LEFT(error, 160) AS "ошибка"
-FROM trace_attempts WHERE NOT ok AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50""", "table")]), 8)
+FROM trace_attempts WHERE NOT ok AND $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50""", "table")])
+_errors["fieldConfig"]["defaults"]["noValue"] = "Ошибок нет ✅"
+L.place(_errors, 8)
 L.end()
 L = Line(9)
 L.place(table("Последние ответы Джарвиса (трейсы)", [pg("""
@@ -364,12 +372,12 @@ L.place(stat("Статус", [prom("max(tg_boss_active)", instant=True)],
              mappings=[{"type": "value", "options": {"0": {"text": "не идёт", "color": "text"}, "1": {"text": "идёт", "color": "green"}}}]), 4)
 L.end()
 L = Line(8)
-L.place(ts("HP во времени", [prom("max(tg_boss_hp)", "HP"), prom("max(tg_boss_max_hp) * 0.66", "порог захвата (66%)", "B"),
+L.place(last24h(ts("HP во времени", [prom("max(tg_boss_hp)", "HP"), prom("max(tg_boss_max_hp) * 0.66", "порог захвата (66%)", "B"),
                              prom("max(tg_boss_max_hp) * 0.33", "порог ярости (33%)", "C")],
            desc="Из метрики экспортёра — учитывает ночной реген (в журнале урона его нет). История — с 23.09.",
            overrides=[{"matcher": {"id": "byRegexp", "options": "порог.*"},
                        "properties": [{"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 10]}},
-                                      {"id": "custom.fillOpacity", "value": 0}]}]), 12)
+                                      {"id": "custom.fillOpacity", "value": 0}]}])), 12)
 L.place(ts("Урон по источникам (текущий ивент)", [pg(f"""
 SELECT $__timeGroupAlias(created_at, $__interval, 0), source AS metric, SUM(amount) AS value
 FROM boss_damage WHERE event_id = {CUR_EVENT} AND $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 1""")],
@@ -411,29 +419,36 @@ L.end()
 # ═════════════════════════════ 8. Игры ═════════════════════════════
 row("🎮 Игры: викторина и Wordle")
 L = Line(8)
-L.place(ts("Правильные ответы в викторине", [pg("""
-SELECT date_added::timestamp AS time, player_name AS metric, COUNT(*) AS value
-FROM trivia_answers WHERE $__timeFilter(date_added::timestamp) GROUP BY 1, 2 ORDER BY 1""")], draw="bars", fill=80, stack=True,
-           legend_calcs=["sum"]), 12)
+L.place(ts("Викторина: правильные ответы по дням", [pg("""
+SELECT $__timeGroupAlias(sent_at, '1d', 0), player_name AS metric, COUNT(*) FILTER (WHERE correct) AS value
+FROM trivia_results WHERE $__timeFilter(sent_at) GROUP BY 1, 2 ORDER BY 1""")], draw="bars", fill=80, stack=True,
+           legend_calcs=["sum"], desc="Из question_state (✅/❌ по игрокам), дата — когда вопрос отправлен в чат"), 8)
+_acc = table("Викторина: точность за период", [pg("""
+SELECT player_name AS "игрок", COUNT(*) AS "ответов", COUNT(*) FILTER (WHERE correct) AS "верно",
+       ROUND(100.0 * COUNT(*) FILTER (WHERE correct) / COUNT(*)) AS "точность %"
+FROM trivia_results WHERE $__timeFilter(sent_at) GROUP BY 1 ORDER BY 4 DESC""", "table")])
+_acc["fieldConfig"]["defaults"]["noValue"] = "За период викторин не было"
+L.place(_acc, 6)
 L.place(bars("Wordle: победы и средние попытки", [pg("""
 SELECT player_name AS "игрок", COUNT(*) FILTER (WHERE won) AS "побед", COUNT(*) FILTER (WHERE finished AND NOT won) AS "проигрышей",
        ROUND(AVG(attempts) FILTER (WHERE won), 1) AS "ср. попыток"
-FROM wordle_games WHERE $__timeFilter(date::timestamp) GROUP BY 1 ORDER BY 2 DESC""", "table")]), 12)
+FROM wordle_games WHERE $__timeFilter(date::timestamp) GROUP BY 1 ORDER BY 2 DESC""", "table")]), 10)
 L.end()
 
 # ═════════════════════════════ 9. Процессы ═════════════════════════════
 row("🖥 Процессы ботов")
 L = Line(8)
-L.place(ts("Память процессов", [prom("max by (bot) (tg_bot_rss_bytes)", "{{bot}}")], unit="bytes", legend_calcs=["last", "max"]), 8)
-L.place(ts("CPU процессов", [prom("sum by (bot) (rate(tg_bot_cpu_seconds_total[5m]))", "{{bot}}")], unit="percentunit",
-           legend_calcs=["mean", "max"]), 8)
-L.place(ts("Ошибки и предупреждения в логе (окно 5 мин)", [prom('max by (level) (tg_bot_log_lines_5m{log="main"})', "{{level}}")],
-           draw="bars", fill=70), 8)
+L.place(last24h(ts("Память процессов", [prom("max by (bot) (tg_bot_rss_bytes)", "{{bot}}")], unit="bytes",
+                   legend_calcs=["last", "max"])), 8)
+L.place(last24h(ts("CPU процессов", [prom("sum by (bot) (rate(tg_bot_cpu_seconds_total[5m]))", "{{bot}}")],
+                   unit="percentunit", legend_calcs=["mean", "max"])), 8)
+L.place(last24h(ts("Ошибки и предупреждения в логе (окно 5 мин)",
+                   [prom('max by (level) (tg_bot_log_lines_5m{log="main"})', "{{level}}")], draw="bars", fill=70)), 8)
 L.end()
 L = Line(7)
-L.place(ts("Живы ли процессы", [prom("max by (bot) (tg_bot_up)", "{{bot}}")], min_=0, max_=1.2, draw="line", fill=0,
-           desc="Провал до 0 = бот лежал; частые короткие провалы = рестарты"), 12)
-L.place(ts("Баланс OpenRouter", [prom("max(tg_openrouter_credits_usd)", "$")], unit="currencyUSD"), 12)
+L.place(last24h(ts("Живы ли процессы", [prom("max by (bot) (tg_bot_up)", "{{bot}}")], min_=0, max_=1.2, draw="line", fill=0,
+                   desc="Провал до 0 = бот лежал; частые короткие провалы = рестарты")), 12)
+L.place(last24h(ts("Баланс OpenRouter", [prom("max(tg_openrouter_credits_usd)", "$")], unit="currencyUSD")), 12)
 L.end()
 
 dashboard = {
