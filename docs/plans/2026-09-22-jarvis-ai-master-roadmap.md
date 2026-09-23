@@ -40,7 +40,7 @@
 ### P1 — сделать улучшения измеримыми
 
 - [x] Добавить LLM telemetry и трассировку полного route/fallback/context composition.
-- [~] Собрать 50–100 реальных production-сцен в versioned eval dataset (извлечено 252 кандидата; разметка ждёт пополнения OpenRouter).
+- [x] Собрать 50–100 реальных production-сцен в versioned eval dataset (`data/evals/golden-v1.jsonl`, 60 сцен, 23.09).
 - [x] Добавить blind pairwise replay без названия модели для оценщиков.
 - [x] Отслеживать качество, latency, стоимость, search rate, callbacks и пользовательскую фрустрацию. (`/ai_stats`, `llm_feedback`)
 - [x] Ввести shadow mode перед каждым крупным изменением prompt, memory или модели. (Memory v2 shadow; prompt — replay + слепой pairwise)
@@ -631,7 +631,7 @@ Blind pairwise replay:
 2. [x] Исправление duplicate current turn и reply-thread context.
 3. [x] Единый thread-first `ContextBuilder` для всех providers и features.
 4. [x] Базовая LLM telemetry: trace ID, prompt version, model/provider, route, context tokens, tools, latency и cost.
-5. [~] Golden eval из первых 50 реальных production-сцен — инфраструктура готова (`evals/`), 13 seed-сцен, 252 кандидата; разметка/прогон ждут пополнения OpenRouter.
+5. [x] Golden eval: `data/evals/golden-v1.jsonl` — 60 реальных сцен + 13 seed + 8 hard. Baseline-прогон — после пополнения OpenRouter (~$1.5).
 6. [x] Сжать personality и внедрить маленький character bible + few-shot примеры. (v28)
 7. [x] Исправить date grounding, attribution, refusal и feature-overlay правила.
 8. [x] Исключить Jarvis из источников memory, отключить auto-promote и исправить reset/clear semantics (осталось: ручной review текущих `chat-summary.md`/`chat-lore.md`).
@@ -659,7 +659,7 @@ Blind pairwise replay:
 - [x] Low-value участие использует reaction или silence вместо лишнего текста.
 - [x] Voice, links, stickers и GIF имеют честный semantic representation или явный fallback.
 - [x] Каждый LLM-вызов имеет trace с prompt/model/route/tokens/latency/cost. (`llm_trace.call`/`call_sync`: summary, reminder, danetka, proactive, media, prophecy, weekly, court, trivia)
-- [ ] Есть versioned dataset минимум из 50 production-сцен и blind pairwise runner.
+- [x] Есть versioned dataset минимум из 50 production-сцен и blind pairwise runner.
 - [ ] Любая смена модели или крупного prompt проходит replay и shadow mode.
 - [x] ~~Dynamic routing выигрывает у single-model baseline по заранее выбранному quality/cost критерию.~~ Single-model (Grok 4.7, low) оставлен: routing не дал выигрыша.
 
@@ -903,3 +903,14 @@ Grok игнорирует. Слепой прогон 38 сцен (25 прод + 
   на 98% → в 3 раза дешевле. Часы перенесены из system prompt к текущему сообщению, чтобы system (личность + сводка)
   был одинаковым весь день.
 - Разделы bake-off и routing закрыты (решение владельца и evals).
+
+### 23.09.2026 — эталонный набор golden-v1
+
+- 153 сцены размечены прямым Gemini 3 Flash (бесплатный ключ бота, без трат OpenRouter; промпт разметчика требует
+  русский язык и конкретные проверяемые критерии, «грубость чата — фон, не критерий»), 152 пригодны.
+- Отбор 60: не больше 35% сцен с недовольством людей (21), остальное — round-robin по 14 категориям, свежие первыми;
+  критерии «будь агрессивным» отбрасываются. Период 09.08–22.09.
+- Категории: banter 12, memory_recall 9, absurd_bit 8, useful_answer 7, self_reference 5, serious 4, factual_fresh 4,
+  local_term 3, roast_request 3, attribution / correction / refusal / overlay / other по 1.
+- Не сделано: baseline-прогон текущей прод-конфигурации на golden-v1 (~$0.5 прогон + ~$0.9 судья) — упирается в
+  прод-резерв OpenRouter; и ручной просмотр слабых сцен (несколько с критериями «по общему смыслу»).

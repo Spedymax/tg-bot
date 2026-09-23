@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -161,7 +162,30 @@ LABEL_PROMPT = """Ты помогаешь собрать eval-датасет д�
   "no_search": true/false,       // веб-поиск здесь не нужен (болтовня, внутряк, мнение)
   "callback_policy": "none|allowed|expected",  // уместно ли вспоминать старые внутряки
   "notes": "..."                 // одна строка: что проверяет сцена
-}}"""
+}}
+
+Требования к разметке:
+- Все поля — на русском.
+- Критерии — конкретные для ЭТОЙ сцены и проверяемые: на какой вопрос ответить, какой факт из истории учесть,
+  какой бит продолжить, кого не перепутать. Плохо: «поддерживает токсичный тон». Хорошо: «объясняет, что Дагон —
+  предмет из доты, и шутит в эту сторону», «не путает, кто просил описание — Богдан, а адресат Юра».
+- Грубость чата — фон, а не критерий: не пиши «должен быть агрессивным/оскорблять».
+- keep=false, если без внешнего контекста невозможно понять, каким должен быть хороший ответ."""
+
+
+GEMINI_DIRECT = "gemini-direct"
+
+
+def _gemini_labeler():
+    """Direct Google Gemini (the bot's own free key) — labels without spending OpenRouter credits."""
+    import google.generativeai as genai
+    from config.settings import Settings
+    genai.configure(api_key=Settings.GEMINI_API_KEY)
+    safety = [{"category": c, "threshold": "BLOCK_NONE"} for c in (
+        "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+        "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT")]
+    return genai.GenerativeModel("gemini-3-flash-preview", safety_settings=safety,
+                                 generation_config={"temperature": 0, "response_mime_type": "application/json"})
 
 
 async def label(model: str, limit: int | None) -> None:
@@ -175,8 +199,11 @@ async def label(model: str, limit: int | None) -> None:
     if not todo:
         print("nothing to label")
         return
-    ensure_budget(LABEL_COST_PER_SCENE * len(todo))
+    gemini = _gemini_labeler() if model == GEMINI_DIRECT else None
+    if gemini is None:
+        ensure_budget(LABEL_COST_PER_SCENE * len(todo))
     client = OpenRouter(concurrency=4)
+    sem = asyncio.Semaphore(4)
 
     async def one(row: dict) -> None:
         ref = row["reference"]
@@ -189,9 +216,16 @@ async def label(model: str, limit: int | None) -> None:
             categories="|".join(CATEGORIES),
         )
         try:
-            data = await client.chat({"model": model, "max_tokens": 3000, "temperature": 0,
-                                      "messages": [{"role": "user", "content": prompt}]})
-            row["label"] = parse_json_reply(data["choices"][0]["message"]["content"])
+            if gemini is not None:
+                async with sem:
+                    response = await asyncio.to_thread(gemini.generate_content, prompt)
+                row["label"] = parse_json_reply(response.text)
+                row["label"]["labeler"] = "gemini-3-flash-preview"
+            else:
+                data = await client.chat({"model": model, "max_tokens": 3000, "temperature": 0,
+                                          "messages": [{"role": "user", "content": prompt}]})
+                row["label"] = parse_json_reply(data["choices"][0]["message"]["content"])
+                row["label"]["labeler"] = model
         except Exception as e:
             row["label"] = {"error": str(e)[:300]}
         done[row["id"]] = row
@@ -206,8 +240,14 @@ async def label(model: str, limit: int | None) -> None:
 
 # ── select ───────────────────────────────────────────────────────────────────
 
+_TONE_ONLY = re.compile(r"агрессив|токсичн|оскорбл|грубо(?:сть)?\b|доминант", re.I)
+
+
 def to_scene(row: dict, summary: str, lore: str) -> Scene:
-    lab = row["label"]
+    lab = dict(row["label"])
+    # The chat's rudeness is background, not a goal: drop criteria that only ask for a harsher tone.
+    criteria = [c for c in (lab.get("criteria") or []) if not _TONE_ONLY.search(c)]
+    lab["criteria"] = criteria or list(lab.get("criteria") or [])
     category = lab.get("category") if lab.get("category") in CATEGORIES else "other"
     policy = lab.get("callback_policy") if lab.get("callback_policy") in CALLBACK_POLICIES else "allowed"
     ref = dict(row["reference"])
@@ -223,12 +263,17 @@ def to_scene(row: dict, summary: str, lore: str) -> Scene:
     )
 
 
+FRUSTRATION_SHARE = 0.35   # scenes where people were unhappy — important, but not the whole set
+
+
 def select(rows: list[dict], n: int) -> list[dict]:
     usable = [r for r in rows if r.get("label", {}).get("keep") and r["label"].get("criteria")]
-    picked = [r for r in usable if r["label"].get("frustration") or r["label"].get("reaction_signal") == "negative"]
+    frustrated = sorted((r for r in usable if r["label"].get("frustration")
+                         or r["label"].get("reaction_signal") == "negative"), key=lambda r: r["at"], reverse=True)
+    picked = frustrated[: max(1, int(n * FRUSTRATION_SHARE))]
     by_cat: dict[str, list[dict]] = defaultdict(list)
     for r in usable:
-        if r not in picked:
+        if r not in frustrated:          # the frustration quota is already filled above
             by_cat[r["label"].get("category", "other")].append(r)
     # newest first inside each category, then round-robin so no category dominates
     for bucket in by_cat.values():
