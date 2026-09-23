@@ -119,6 +119,7 @@ class AdminHandlers:
                 SELECT name, message_text, timestamp
                 FROM messages
                 WHERE chat_id = %s
+                  AND (user_id <> 0 OR name = 'Jarvis')  -- people + Jarvis, not quiz/Wordle/boss posts
                   AND timestamp > NOW() - INTERVAL '1 hour' * %s
                 ORDER BY timestamp DESC
                 LIMIT %s

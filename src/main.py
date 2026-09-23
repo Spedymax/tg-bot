@@ -78,6 +78,10 @@ async def _main():
         token=Settings.TELEGRAM_BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    # Every message the bot sends/edits lands in `messages` with its real author
+    # (quiz, Wordle, boss…), so Jarvis sees game posts in history and reply chains.
+    from middleware.outgoing_messages import OutgoingMessageLogger
+    bot.session.middleware(OutgoingMessageLogger(db_manager))
     storage = RedisStorage(redis=redis)
     dp = Dispatcher(storage=storage)
 

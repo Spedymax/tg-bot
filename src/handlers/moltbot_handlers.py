@@ -1447,7 +1447,8 @@ class MoltbotHandlers:
         if rows:
             return True, rows[0][0]
         rows = await self.db.execute_query(
-            "SELECT 1 FROM messages WHERE chat_id = %s AND message_id = %s AND user_id = 0 LIMIT 1",
+            # Game posts (quiz, Wordle, boss…) are bot rows too, but reactions on them aren't about Jarvis.
+            "SELECT 1 FROM messages WHERE chat_id = %s AND message_id = %s AND user_id = 0 AND name = 'Jarvis' LIMIT 1",
             (chat_id, message_id))
         return bool(rows), None
 
