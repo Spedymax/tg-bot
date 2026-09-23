@@ -20,7 +20,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from config.settings import Settings
 from services.circuit_breaker import ollama_breaker, together_breaker, openrouter_breaker
-from services.context_builder import ContextBuilder, ContextSnapshot, PERSONA_POST_PROMPT, compose_thread_first, format_clock
+from services.context_builder import ContextBuilder, ContextSnapshot, PERSONA_POST_PROMPT, ThreadLine, anchored_window, format_clock
 from services import llm_trace
 from services.persona_tools import WEB_SEARCH_TOOL
 from services.media_understanding import MediaUnderstanding
@@ -682,17 +682,51 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: error fetching reply chain: {e}")
             return []
 
+    async def _get_recent_rows(self, chat_id: int, limit: int,
+                               exclude_message_id: int | None = None) -> list[tuple[int, str]]:
+        """Recent history as chronological (db id, formatted line) — ids anchor the cache-friendly window."""
+        reset_time = getattr(self, "_history_reset_time", {}).get(chat_id)
+        try:
+            rows = await self.db.execute_query(
+                """
+                SELECT id, name, message_text, timestamp
+                FROM messages
+                WHERE chat_id = %s
+                  AND (%s::timestamptz IS NULL OR timestamp >= %s::timestamptz)
+                  AND (%s::bigint IS NULL OR message_id IS DISTINCT FROM %s::bigint)
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (chat_id, reset_time, reset_time, exclude_message_id, exclude_message_id, limit),
+            )
+        except Exception as e:
+            logger.error(f"MoltBot: error fetching chat history: {e}")
+            return []
+        return [(row[0], f"{self._format_ts(row[3])} {row[1] or 'Аноним'}: {row[2]}")
+                for row in reversed(rows or [])]
+
     async def _build_thread_first_history(self, chat_id: int,
                                           reply_to_message_id: int | None,
                                           current_message_id: int | None,
                                           recent_limit: int = HISTORY_MESSAGE_LIMIT,
                                           char_budget: int = HISTORY_CHAR_BUDGET) -> list[str]:
-        """Compose reply branch first, then the broader scene without duplicates."""
+        """Recent scene as an append-only (anchored) window + older reply-branch lines as ThreadLine.
+
+        The window keeps its first line between turns so consecutive requests share a long prefix
+        (xAI prompt cache); reply-chain ancestors that fell out of it are rendered after the history
+        by ContextBuilder, right before the current turn."""
         thread = await self._get_reply_chain(chat_id, reply_to_message_id)
-        recent = await self._get_recent_group_messages(
-            chat_id, limit=recent_limit, exclude_message_id=current_message_id
-        )
-        return compose_thread_first(thread, recent, limit=recent_limit, char_budget=char_budget)
+        rows = await self._get_recent_rows(chat_id, int(recent_limit * 1.5), exclude_message_id=current_message_id)
+        anchors = getattr(self, "_history_anchor", None)
+        if anchors is None:
+            anchors = self._history_anchor = {}
+        window, anchor = anchored_window(rows, anchors.get(chat_id), limit=recent_limit, char_budget=char_budget)
+        if anchor is not None:
+            anchors[chat_id] = anchor
+        in_window = set(window)
+        extra = [ThreadLine(line[:1500]) for line in thread if line not in in_window]
+        return window + extra
+
 
     async def _together_post(self, payload: dict, timeout: float) -> dict:
         """POST to Together.ai (streaming) with retry on 5xx and transient errors.

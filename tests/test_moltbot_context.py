@@ -154,41 +154,34 @@ class TestGetRecentGroupMessages:
         assert "ответ в ветке" in chain[1]
 
     @pytest.mark.asyncio
-    async def test_reply_chain_precedes_recent_scene_and_is_deduplicated(self):
+    async def test_reply_branch_outside_window_becomes_thread_lines(self):
         handler = MoltbotHandlers.__new__(MoltbotHandlers)
         handler._get_reply_chain = AsyncMock(return_value=[
-            "[15:00 14.03] Макс: начало ветки",
+            "[09:00 14.03] Макс: начало ветки",
             "[15:05 14.03] Jarvis: ответ",
         ])
-        handler._get_recent_group_messages = AsyncMock(return_value=[
-            "[15:05 14.03] Jarvis: ответ",
-            "[15:10 14.03] Юра: соседняя сцена",
+        handler._get_recent_rows = AsyncMock(return_value=[
+            (10, "[15:05 14.03] Jarvis: ответ"),
+            (11, "[15:10 14.03] Юра: соседняя сцена"),
         ])
 
         history = await handler._build_thread_first_history(-1001, 42, 43)
 
-        assert history == [
-            "[15:00 14.03] Макс: начало ветки",
-            "[15:05 14.03] Jarvis: ответ",
-            "[15:10 14.03] Юра: соседняя сцена",
-        ]
-        handler._get_recent_group_messages.assert_awaited_once_with(
-            -1001, limit=100, exclude_message_id=43
-        )
+        assert history[:2] == ["[15:05 14.03] Jarvis: ответ", "[15:10 14.03] Юра: соседняя сцена"]
+        assert history[2:] == ["[09:00 14.03] Макс: начало ветки"]
+        assert isinstance(history[2], _moltbot_mod.ThreadLine)          # rendered after history
+        handler._get_recent_rows.assert_awaited_once_with(-1001, 150, exclude_message_id=43)
 
     @pytest.mark.asyncio
-    async def test_history_obeys_message_and_character_budgets(self):
+    async def test_window_is_anchored_between_turns(self):
         handler = MoltbotHandlers.__new__(MoltbotHandlers)
-        handler._get_reply_chain = AsyncMock(return_value=["thread"])
-        handler._get_recent_group_messages = AsyncMock(return_value=[
-            "old-ambient", "middle", "newest"
-        ])
-
-        history = await handler._build_thread_first_history(
-            -1001, 42, 43, recent_limit=3, char_budget=19
-        )
-
-        assert history == ["thread", "middle", "newest"]
+        handler._get_reply_chain = AsyncMock(return_value=[])
+        rows = [(i, f"[15:{i:02d} 14.03] Юра: сообщение {i}") for i in range(1, 6)]
+        handler._get_recent_rows = AsyncMock(return_value=rows)
+        first = await handler._build_thread_first_history(-1001, None, 99, recent_limit=10, char_budget=10_000)
+        handler._get_recent_rows = AsyncMock(return_value=rows + [(6, "[15:06 14.03] Макс: новое")])
+        second = await handler._build_thread_first_history(-1001, None, 100, recent_limit=10, char_budget=10_000)
+        assert second[:len(first)] == first and second[-1].endswith("новое")   # append-only prefix
 
 
 class TestAskMoltbotContext:

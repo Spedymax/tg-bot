@@ -328,7 +328,8 @@ async def test_memory_v2_shadow_logs_but_only_inject_changes_prompt(monkeypatch,
     assert trace.memory_ids == [6] and trace.memory_mode == mode
     assert store.retrieve.await_count == 1
     assert store.retrieve.await_args.args[3] == {742272644}      # Юра detected from «у Юры»
-    injected = "Юра работает на складе" in messages[0]["content"]
+    injected = any("Юра работает на складе" in m["content"] for m in messages if m["role"] == "system")
+    assert "Юра работает на складе" not in messages[0]["content"]      # never in the cached system prefix
     assert injected is (mode == "inject")
 
 

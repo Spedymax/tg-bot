@@ -99,10 +99,12 @@ async def load_identities() -> dict[int, str]:
 
 
 def build_messages(scene: Scene, identity: str, overlay: str | None = None) -> list[dict]:
+    from services.context_builder import ThreadLine
     at = datetime.fromisoformat(scene.at)
+    history = [ThreadLine(h[2:]) if h.startswith("↪ ") else h for h in scene.history]
     snapshot = ContextBuilder(BOT_NAMES).build(
         identity=identity, hard_rules="", chat_context=scene.chat_context,
-        summary=scene.summary, lore=scene.lore, history=scene.history,
+        summary=scene.summary, lore=scene.lore, history=history,
         sender_name=scene.trigger_sender, user_text=scene.trigger_text,
         post_prompt=PERSONA_POST_PROMPT, clock=format_clock(at),
         overlay=scene.overlay if overlay is None else overlay,
