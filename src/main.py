@@ -12,7 +12,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import BotCommand, ErrorEvent
+from aiogram.types import (BotCommand, BotCommandScopeChat, BotCommandScopeChatMember,
+                           BotCommandScopeDefault, ErrorEvent)
 from redis.asyncio import Redis
 
 from config.settings import Settings
@@ -173,7 +174,7 @@ async def _main():
     boss_h.start_scheduler()
 
     # ── Register Telegram command menu ───────────────────────────────────────
-    await bot.set_my_commands([
+    all_commands = [
         BotCommand(command="start",           description="Профиль / начать игру"),
         BotCommand(command="pisunchik",       description="Прокачать писунчик"),
         BotCommand(command="leaderboard",     description="Таблица лидеров"),
@@ -218,7 +219,27 @@ async def _main():
         BotCommand(command="grant",           description="Дать админ-доступ (адм)"),
         BotCommand(command="revoke",          description="Отозвать админ-доступ"),
         BotCommand(command="admins",          description="Список админов промпта"),
-    ])
+    ]
+    # Admin commands stay protected in their handlers; the menu just doesn't show them
+    # to everyone. Admins get the full list in private chat and in every group.
+    admin_only = {
+        "wordle_test", "memory", "memory_refresh", "memory_clear", "memory_pin", "memory_unpin",
+        "trace", "ai_stats", "mem", "mem_show", "mem_forget", "mem_fix", "mem_run", "mem_lore", "mem_pin",
+        "sho_tam_novogo", "analitika", "prompt", "setprompt", "promptlog", "promptshow", "rollback",
+        "grant", "revoke", "admins",
+    }
+    public_commands = [c for c in all_commands if c.command not in admin_only]
+    await bot.set_my_commands(public_commands, scope=BotCommandScopeDefault())
+    for admin_id in Settings.ADMIN_IDS:
+        scopes = [BotCommandScopeChat(chat_id=admin_id)] + [
+            BotCommandScopeChatMember(chat_id=chat_id, user_id=admin_id)
+            for chat_id in Settings.CHAT_IDS.values()
+        ]
+        for scope in scopes:
+            try:
+                await bot.set_my_commands(all_commands, scope=scope)
+            except Exception as error:  # e.g. bot not in that chat
+                logger.warning("Could not set admin commands for %s: %s", scope, error)
     logger.info("Bot commands registered")
 
     try:
