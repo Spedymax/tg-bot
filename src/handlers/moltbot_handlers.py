@@ -1383,6 +1383,11 @@ class MoltbotHandlers:
             llm_trace.persist_in_background(trace, getattr(self, "db", None))
         return stats
 
+    @staticmethod
+    def _admin_chat(message) -> int:
+        """Admin tools used in a private chat look at the main group (that's where Jarvis lives)."""
+        return Settings.CHAT_IDS['main'] if message.chat.type == 'private' else message.chat.id
+
     # ── Feedback on Jarvis' messages ────────────────────────────────────────
 
     _NEGATIVE_FEEDBACK_RE = re.compile(
@@ -2746,9 +2751,9 @@ class MoltbotHandlers:
             if message.from_user.id not in Settings.ADMIN_IDS:
                 await message.reply("У вас нет доступа.")
                 return
-            mem = _load_chat_summary(message.chat.id)
-            lines = _lore_lines(message.chat.id)
-            candidates = _lore_candidate_lines(message.chat.id)
+            mem = _load_chat_summary(self._admin_chat(message))
+            lines = _lore_lines(self._admin_chat(message))
+            candidates = _lore_candidate_lines(self._admin_chat(message))
             pinned = ("\n\n📌 Закреплённые внутряки:\n" +
                       "\n".join(f"{i+1}. {ln}" for i, ln in enumerate(lines))) if lines else "\n\n📌 Закреплённых внутряков нет."
             queued = ("\n\n🕓 Кандидаты в закреп (бот их не использует, пока не закрепишь: /memory_pin к<номер>):\n" +
@@ -2762,7 +2767,7 @@ class MoltbotHandlers:
                 await message.reply("У вас нет доступа.")
                 return
             await message.reply("🧠 Пересобираю память (займёт несколько секунд)...")
-            chat_id = message.chat.id
+            chat_id = self._admin_chat(message)
             self._last_summary_update[chat_id] = datetime.now(timezone.utc)
 
             async def refresh_and_report():
@@ -2791,7 +2796,7 @@ class MoltbotHandlers:
                     "Краткосрочный контекст сбрасывается отдельно: /context_reset"
                 )
                 return
-            chat_id = message.chat.id
+            chat_id = self._admin_chat(message)
             try:
                 removed = []
                 if scope in ("rolling", "all"):
@@ -2819,7 +2824,7 @@ class MoltbotHandlers:
             if len(text) < 2 or not text[1].strip():
                 await message.reply("Что закрепить? `/память_закрепи <внутряк одной строкой>`")
                 return
-            chat_id = message.chat.id
+            chat_id = self._admin_chat(message)
             arg = text[1].strip()
             candidate_ref = re.fullmatch(r'[кk](\d+)', arg.lower())
             if candidate_ref:
@@ -2842,7 +2847,7 @@ class MoltbotHandlers:
             if message.from_user.id not in Settings.ADMIN_IDS:
                 await message.reply("У вас нет доступа.")
                 return
-            lines = _lore_lines(message.chat.id)
+            lines = _lore_lines(self._admin_chat(message))
             if not lines:
                 await message.reply("Закреплённых внутряков нет.")
                 return
@@ -2856,7 +2861,7 @@ class MoltbotHandlers:
                 await message.reply(f"Нет такого номера (всего {len(lines)}).")
                 return
             removed = lines.pop(idx)
-            _save_lore_lines(lines, message.chat.id)
+            _save_lore_lines(lines, self._admin_chat(message))
             await message.reply(f"🗑 Откреплено: {removed}")
 
         @router.message_reaction()
@@ -2873,7 +2878,7 @@ class MoltbotHandlers:
                 return
             rows = await self.db.execute_query(
                 "SELECT trace_id, created_at, data, reply_message_id FROM llm_traces "
-                "WHERE chat_id = %s AND kind = 'persona' ORDER BY created_at DESC LIMIT 1", (message.chat.id,))
+                "WHERE chat_id = %s AND kind = 'persona' ORDER BY created_at DESC LIMIT 1", (self._admin_chat(message),))
             if not rows:
                 await message.reply("Трейсов пока нет.")
                 return
@@ -2910,7 +2915,7 @@ class MoltbotHandlers:
                 return
             parts = (message.text or "").split()
             days = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 7
-            chat_id = message.chat.id
+            chat_id = self._admin_chat(message)
             by_kind = await self.db.execute_query(
                 "SELECT kind, COUNT(*), COALESCE(SUM(cost_usd), 0), "
                 "percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms), "
@@ -2982,7 +2987,7 @@ class MoltbotHandlers:
             name = arg[1].strip() if len(arg) > 1 else ""
             subject_id = memory_v2.resolve_subject(name)[0] if name and name != "all" else None
             items = await self._get_memory_store().list_items(
-                message.chat.id, subject_id, include_candidates=(name == "all"))
+                self._admin_chat(message), subject_id, include_candidates=(name == "all"))
             if not items:
                 await message.reply(f"🧠 Memory v2 ({MEMORY_V2_MODE}): пусто.")
                 return
@@ -2999,7 +3004,7 @@ class MoltbotHandlers:
             """Lore candidates with human evidence; ✅ = meets 3 mentions / 2 people / 2 days."""
             if message.from_user.id not in Settings.ADMIN_IDS:
                 return
-            items = await self._get_memory_store().lore_readiness(message.chat.id)
+            items = await self._get_memory_store().lore_readiness(self._admin_chat(message))
             if not items:
                 await message.reply("Кандидатов в легенды пока нет.")
                 return
@@ -3018,13 +3023,13 @@ class MoltbotHandlers:
                 await message.reply("Какую? /mem_pin <id> (список: /mem_lore)")
                 return
             item = await self._get_memory_store().mark_pinned(
-                message.chat.id, int(arg[1].strip().lstrip("#")), message.from_user.id)
+                self._admin_chat(message), int(arg[1].strip().lstrip("#")), message.from_user.id)
             if not item:
                 await message.reply("Нет такого кандидата.")
                 return
-            lines = _lore_lines(message.chat.id)
+            lines = _lore_lines(self._admin_chat(message))
             lines.append(item["text"])
-            _save_lore_lines(lines, message.chat.id)
+            _save_lore_lines(lines, self._admin_chat(message))
             await message.reply(html.escape(f"📌 В легендах: {item['text']}"))
 
         @router.message(Command(commands=['mem_show']))
@@ -3035,7 +3040,7 @@ class MoltbotHandlers:
             if len(arg) < 2 or not arg[1].strip().lstrip("#").isdigit():
                 await message.reply("Какую? /mem_show <id>")
                 return
-            item, evidence, history = await self._get_memory_store().get(message.chat.id, int(arg[1].strip().lstrip("#")))
+            item, evidence, history = await self._get_memory_store().get(self._admin_chat(message), int(arg[1].strip().lstrip("#")))
             if not item:
                 await message.reply("Нет такой записи.")
                 return
@@ -3053,7 +3058,7 @@ class MoltbotHandlers:
             if len(arg) < 2 or not arg[1].strip().lstrip("#").isdigit():
                 await message.reply("Какую? /mem_forget <id>")
                 return
-            ok = await self._get_memory_store().forget(message.chat.id, int(arg[1].strip().lstrip("#")), message.from_user.id)
+            ok = await self._get_memory_store().forget(self._admin_chat(message), int(arg[1].strip().lstrip("#")), message.from_user.id)
             await message.reply("🗑 Забыто (в аудите осталось)." if ok else "Нет такой активной записи.")
 
         @router.message(Command(commands=['mem_fix']))
@@ -3065,7 +3070,7 @@ class MoltbotHandlers:
                 await message.reply("Как? /mem_fix <id> <правильный текст>")
                 return
             new_id = await self._get_memory_store().correct(
-                message.chat.id, int(parts[1].lstrip("#")), parts[2].strip(), message.from_user.id)
+                self._admin_chat(message), int(parts[1].lstrip("#")), parts[2].strip(), message.from_user.id)
             await message.reply(f"✏️ Исправлено: новая запись #{new_id}, старая помечена superseded."
                                 if new_id else "Нет такой активной записи.")
 
@@ -3080,7 +3085,7 @@ class MoltbotHandlers:
             original = memory_v2.MIN_BATCH
             memory_v2.MIN_BATCH = 1
             try:
-                stats = await self._extract_memory(message.chat.id)
+                stats = await self._extract_memory(self._admin_chat(message))
             finally:
                 memory_v2.MIN_BATCH = original
             await message.reply(

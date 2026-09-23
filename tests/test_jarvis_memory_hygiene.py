@@ -432,3 +432,9 @@ LORE = ("- Эдик Коваленко — мем-персонаж чата («�
 def test_lore_is_visible_only_when_the_scene_touches_it(text, history, expected):
     picked = _mod._select_lore(LORE, text, history)
     assert [name for name in ("Эдик", "Лисёнок") if name in picked] == expected
+
+
+def test_admin_tools_in_private_chat_target_the_main_group():
+    from types import SimpleNamespace as NS
+    assert MoltbotHandlers._admin_chat(NS(chat=NS(type="private", id=741542965))) == CHAT
+    assert MoltbotHandlers._admin_chat(NS(chat=NS(type="supergroup", id=-100777))) == -100777
