@@ -1310,7 +1310,8 @@ class MoltbotHandlers:
             return cache[trace.trace_id][1]
         try:
             author_id, _ = memory_v2.resolve_subject(sender_name)
-            mentioned = memory_v2.mentioned_user_ids(user_text)
+            # Only people the message asks about; names in quoted headers or «опиши Юре» don't count.
+            mentioned = memory_v2.asked_about(user_text)
             items = await self._get_memory_store().retrieve(
                 chat_id, user_text, author_id, mentioned, datetime.now(timezone.utc))
         except Exception as e:

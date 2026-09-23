@@ -68,7 +68,7 @@ MIGRATION_SQL = [
     "CREATE INDEX IF NOT EXISTS llm_feedback_msg_idx ON llm_feedback (chat_id, message_id)",
 ]
 
-POSITIVE_REACTIONS = {"👍", "❤", "🔥", "🥰", "👏", "😁", "🤣", "🤩", "🎉", "😍", "💯", "🏆", "👌", "🫡", "😎",
+POSITIVE_REACTIONS = {"👍", "❤", "❤‍🔥", "🔥", "🥰", "👏", "😁", "🤣", "🤩", "🎉", "😍", "💯", "🏆", "👌", "🫡", "😎",
                       "🆒", "💘", "😘", "🤗", "⚡", "🍾", "😇", "🐳"}
 NEGATIVE_REACTIONS = {"👎", "💩", "🤮", "🥱", "😐", "🤨", "😴", "🖕", "😡", "🤬"}
 

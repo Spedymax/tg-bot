@@ -123,3 +123,13 @@ def test_name_declensions_are_mentions_not_topic_words():
     assert mv.mentioned_user_ids("что там у Юры на работе, и где Бодю носит? спроси Максом") == {YURA, BOGDAN, MAX}
     assert mv.mentioned_user_ids("юрист сказал, что максимум можно") == set()
     assert "юры" not in mv.topic_words("что там у Юры на работе")
+
+
+def test_asked_about_needs_a_question_about_the_person():
+    quoted = '[Богдан. отвечает на сообщение Jarvis [11:45 23.09]: "Юра, держи"]\nНе братан слишком медленно'
+    assert mv.asked_about(quoted) == set()                          # names in the quoted header don't count
+    assert mv.asked_about("Оцени игру dragon wash и опиши юре плюсы") == set()
+    assert mv.asked_about("джарвис что там у Юры на работе?") == {YURA}
+    assert mv.asked_about("джарвис расскажи про Богдана") == {BOGDAN}
+    assert mv.asked_about("помнишь, что Макс говорил про отпуск?") == {MAX}
+    assert mv.own_text(quoted) == "Не братан слишком медленно"

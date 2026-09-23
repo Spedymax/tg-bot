@@ -123,6 +123,33 @@ def mentioned_user_ids(text: str) -> set[int]:
     return found
 
 
+_BRACKET_LINE = re.compile(r"^\s*\[.*\]\s*$", re.M)
+_ASK_WORDS = r"(?:про|о|об|у|насчёт|насчет|за|с)"
+_RECALL_VERBS = re.compile(r"\b(помнишь|знаешь|расскажи|напомни|что (?:там )?(?:у|с|по|про))\b", re.I)
+
+
+def own_text(user_text: str) -> str:
+    """The sender's own words: drops bracketed context lines (quoted message, media, links)."""
+    return _BRACKET_LINE.sub("", user_text or "").strip()
+
+
+def asked_about(user_text: str) -> set[int]:
+    """People the message actually ASKS about («что у Юры…», «расскажи про Богдана», «помнишь, Макс…»).
+    A name that merely appears («опиши Юре плюсы», a quoted header) is not a question about that person."""
+    text = own_text(user_text).lower()
+    found = set()
+    words = re.findall(r"[@\w]+", text)
+    for i, w in enumerate(words):
+        w = w.lstrip("@")
+        for uid, pattern in _NAME_FORMS.items():
+            if not pattern.match(w):
+                continue
+            prev = words[i - 1] if i else ""
+            if re.fullmatch(_ASK_WORDS, prev) or _RECALL_VERBS.search(text):
+                found.add(uid)
+    return found
+
+
 def _is_name(word: str) -> bool:
     return word in _ALIAS_TO_ID or any(p.match(word) for p in _NAME_FORMS.values())
 
@@ -460,8 +487,9 @@ class MemoryStore:
                        now: datetime) -> list[dict]:
         subjects = set(mentioned) | ({author_id} if author_id else set())
         words = topic_words(text)
-        # Prefix match on stems: the Russian stemmer maps "работе"→"работ" but "работает"→"работа".
-        tsquery = " | ".join(f"{re.sub(r'[^a-zа-яё0-9]', '', w)}:*" for w in words) or "zzzz"
+        # Prefix match on word starts: the Russian stemmer maps "работе"→"работ" but "работает"→"работа",
+        # and "репетиторствует" shares no stem with "репетитором" — the first 6 letters do.
+        tsquery = " | ".join(f"{re.sub(r'[^a-zа-яё0-9]', '', w)[:6]}:*" for w in words) or "zzzz"
         cols = _ITEM_COLS + ", fts"
         rows = await self._q(
             f"SELECT {_ITEM_COLS}, ts_rank(to_tsvector('russian', text), to_tsquery('russian', %s)) AS fts "
