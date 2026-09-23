@@ -308,7 +308,12 @@ class MoltbotHandlers:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _touch_reasoning_activity(self) -> None:
-        """Record chat activity; the auto-reset countdown for reasoning depth starts from here."""
+        """Record chat activity; the auto-reset countdown for reasoning depth starts from here.
+
+        The idle check must run BEFORE the timestamp moves: every stored message touches
+        activity first, so checking afterwards always saw ~0 s of silence and a /reasoning high
+        from 2026-09-04 was still active on 09-23 (30 s replies)."""
+        self._current_reasoning_effort()
         self._reasoning_last_activity = datetime.now(timezone.utc)
 
     def _current_reasoning_effort(self) -> str:

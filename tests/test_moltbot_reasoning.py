@@ -111,3 +111,21 @@ class TestPersistence:
         h = _handler(tmp_path)
         with pytest.raises(ValueError):
             h._set_reasoning_effort("ultra")
+
+
+class TestResetAfterSilenceWithNewMessage:
+    def test_new_message_after_long_silence_resets_before_touching(self, tmp_path):
+        h = _handler(tmp_path)
+        with patch.object(_m, 'STATE_PATH', str(tmp_path / 's.json')):
+            h._set_reasoning_effort("high")
+            h._reasoning_last_activity = datetime.now(timezone.utc) - timedelta(days=19)
+            h._touch_reasoning_activity()          # a message arrives after weeks of silence
+            assert h._current_reasoning_effort() == "minimal"
+
+    def test_message_within_window_keeps_high(self, tmp_path):
+        h = _handler(tmp_path)
+        with patch.object(_m, 'STATE_PATH', str(tmp_path / 's.json')):
+            h._set_reasoning_effort("high")
+            h._reasoning_last_activity = datetime.now(timezone.utc) - timedelta(hours=1)
+            h._touch_reasoning_activity()
+            assert h._current_reasoning_effort() == "high"
