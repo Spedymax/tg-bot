@@ -206,7 +206,9 @@ class TestAskMoltbotContext:
             assert {'role': 'user', 'content': 'Богдан: тест'} in messages
             assert 'групповой чат' in messages[0]['content']
             assert 'Память компании' in messages[0]['content']
-            assert messages[-2] == {'role': 'system', 'content': handler._POST_PROMPT}
+            assert messages[-2]['role'] == 'system'
+            assert messages[-2]['content'].startswith(handler._POST_PROMPT_BASE)
+            assert 'Текущее время' in messages[-2]['content']
 
 
 def _make_message(text=None, caption=None, from_user_id=855951767,

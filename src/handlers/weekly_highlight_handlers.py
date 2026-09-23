@@ -14,6 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from config.settings import Settings
 from services.circuit_breaker import ollama_breaker
+from services import llm_trace
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class WeeklyHighlightHandlers:
         if self._gemini:
             try:
                 prompt = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
-                response = await asyncio.to_thread(self._gemini.generate_content, prompt)
+                response = await llm_trace.call("weekly_highlight", "gemini", "gemini", lambda: asyncio.to_thread(self._gemini.generate_content, prompt))
                 result = response.text.strip()
                 if result:
                     return result

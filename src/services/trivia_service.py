@@ -8,6 +8,7 @@ from dataclasses import dataclass, asdict
 import google.generativeai as genai
 
 from services.circuit_breaker import gemini_breaker
+from services import llm_trace
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ class TriviaService:
             return []
         try:
             prompt = self._build_batch_question_prompt(count, existing_questions)
-            response = self.ai_client.generate_content(prompt)
+            response = llm_trace.call_sync("trivia", "gemini", "gemini", lambda: self.ai_client.generate_content(prompt))
             gemini_breaker.record_success()
             return self._parse_batch_ai_response(response.text)
         except Exception as e:
@@ -174,7 +175,7 @@ class TriviaService:
         try:
             prompt = self._build_question_prompt()
 
-            response = self.ai_client.generate_content(prompt)
+            response = llm_trace.call_sync("trivia", "gemini", "gemini", lambda: self.ai_client.generate_content(prompt))
             response_text = response.text
             gemini_breaker.record_success()
             return self._parse_ai_response(response_text)

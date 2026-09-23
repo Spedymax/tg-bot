@@ -142,12 +142,6 @@ class ContextBuilder:
             )
         if retrieved_memory:
             system_parts.append(retrieved_memory)
-        if clock:
-            # Dynamic and tiny: goes after the stable prefix so it never busts it.
-            system_parts.append(
-                f'[Текущее время: {clock}. Считай даты и «вчера/завтра» от него, '
-                'а не от устаревших формулировок в памяти.]'
-            )
 
         history_messages = self.history_to_messages(history)
         current = {'role': 'user', 'content': f'{sender_name}: {user_text}'}
@@ -156,6 +150,13 @@ class ContextBuilder:
         ]
         messages.extend(history_messages)
         post_parts = [post_prompt] if post_prompt else []
+        if clock:
+            # Changes every minute, so it lives next to the current turn: the system message
+            # (identity + summary) stays byte-identical all day and the provider can cache it.
+            post_parts.append(
+                f'[Текущее время: {clock}. Считай даты и «вчера/завтра» от него, '
+                'а не от устаревших формулировок в памяти.]'
+            )
         if overlay:
             post_parts.append(f'{OVERLAY_HEADER}\n{overlay}\n{OVERLAY_FOOTER}')
         if post_parts:

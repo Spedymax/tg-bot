@@ -93,7 +93,10 @@ class MediaUnderstanding:
         model = self._model_getter()
         if model is None:
             raise RuntimeError("Gemini не настроен")
-        response = await asyncio.to_thread(model.generate_content, [{"mime_type": mime, "data": data}, prompt])
+        from services import llm_trace
+        response = await llm_trace.call("media", "gemini", "gemini-3-flash-preview",
+                                        lambda: asyncio.to_thread(model.generate_content,
+                                                                  [{"mime_type": mime, "data": data}, prompt]))
         return (response.text or "").strip()
 
     async def _analyze(self, key: str, kind: str, file_id: str, mime: str, prompt: str) -> str:

@@ -95,6 +95,7 @@ class Attempt:
     request_id: str = ""
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    cached_tokens: int = 0      # prompt tokens served from the provider's prompt cache
     cost_usd: float = 0.0
 
 
@@ -151,6 +152,102 @@ class LLMTrace:
         return data
 
 
+_default_db = None
+_main_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_default_db(db) -> None:
+    """Register the bot's DB and event loop so traces from any module (and from worker
+    threads running sync Gemini calls) can be persisted without passing db around."""
+    global _default_db, _main_loop
+    _default_db = db
+    try:
+        _main_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _main_loop = None
+
+
+def _usage_from(result: Any) -> tuple[int, int, float, str, str]:
+    """(prompt_tokens, completion_tokens, cost, upstream, model) from an OpenAI-style dict or a Gemini response."""
+    if isinstance(result, dict):
+        u = result.get("usage") or {}
+        try:
+            cost = float(u.get("cost") or 0)
+        except (TypeError, ValueError):
+            cost = 0.0
+        return (int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0), cost,
+                str(result.get("provider") or ""), str(result.get("model") or ""))
+    meta = getattr(result, "usage_metadata", None)
+    if meta is not None:
+        return (int(getattr(meta, "prompt_token_count", 0) or 0),
+                int(getattr(meta, "candidates_token_count", 0) or 0), 0.0, "google", "")
+    return 0, 0, 0.0, "", ""
+
+
+def _record(attempt: "Attempt", result: Any) -> None:
+    if isinstance(result, dict):
+        attempt.cached_tokens += int(((result.get("usage") or {}).get("prompt_tokens_details") or {})
+                                     .get("cached_tokens") or 0)
+    p, c, cost, upstream, model = _usage_from(result)
+    attempt.prompt_tokens += p
+    attempt.completion_tokens += c
+    attempt.cost_usd += cost
+    attempt.upstream = upstream or attempt.upstream
+    if model:
+        attempt.model = model
+
+
+async def call(kind: str, provider: str, model: str, fn, chat_id: int | None = None):
+    """Run one LLM call (`fn` = zero-arg coroutine factory) and trace it.
+
+    Inside an active trace it becomes one more attempt; otherwise it is its own trace
+    of `kind` (summary, reminder, media, prophecy…). Re-raises the call's exception."""
+    trace = current()
+    own = trace is None
+    token = None
+    if own:
+        trace, token = begin(kind, chat_id)
+    attempt = trace.start_attempt(provider, model)
+    started = time.monotonic()
+    try:
+        result = await fn()
+        attempt.ok = True
+        _record(attempt, result)
+        if own:
+            trace.finish("ok")
+        return result
+    except Exception as e:
+        attempt.error = f"{type(e).__name__}: {str(e)[:200]}"
+        if own:
+            trace.finish(f"error:{type(e).__name__}")
+        raise
+    finally:
+        attempt.latency_ms = int((time.monotonic() - started) * 1000)
+        if own:
+            end(token)
+            persist_in_background(trace, _default_db)
+
+
+def call_sync(kind: str, provider: str, model: str, fn, chat_id: int | None = None):
+    """Same as `call` for synchronous SDK calls (Gemini generate_content), usable from worker threads."""
+    trace = LLMTrace(kind=kind, chat_id=chat_id)
+    attempt = trace.start_attempt(provider, model)
+    started = time.monotonic()
+    try:
+        result = fn()
+        attempt.ok = True
+        _record(attempt, result)
+        trace.finish("ok")
+        return result
+    except Exception as e:
+        attempt.error = f"{type(e).__name__}: {str(e)[:200]}"
+        trace.finish(f"error:{type(e).__name__}")
+        raise
+    finally:
+        attempt.latency_ms = int((time.monotonic() - started) * 1000)
+        persist_in_background(trace, _default_db)
+
+
 def current() -> LLMTrace | None:
     return _current.get()
 
@@ -191,6 +288,7 @@ def apply_response(attempt: Attempt | None, data: dict[str, Any]) -> None:
     usage = data.get("usage") or {}
     attempt.prompt_tokens += int(usage.get("prompt_tokens") or 0)
     attempt.completion_tokens += int(usage.get("completion_tokens") or 0)
+    attempt.cached_tokens += int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
     try:
         attempt.cost_usd += float(usage.get("cost") or 0)
     except (TypeError, ValueError):
@@ -256,7 +354,10 @@ async def ensure_table(db) -> None:
 
 
 def persist_in_background(trace: LLMTrace, db) -> None:
+    db = db if db is not None else _default_db
     try:
         asyncio.get_running_loop().create_task(persist(trace, db))
     except RuntimeError:
-        pass
+        # Worker thread (sync SDK call): hand the write to the bot's loop.
+        if _main_loop is not None and not _main_loop.is_closed():
+            asyncio.run_coroutine_threadsafe(persist(trace, db), _main_loop)

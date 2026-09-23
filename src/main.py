@@ -62,6 +62,8 @@ async def _main():
     # ── Core services (async database pool + Redis) ──────────────────────────
     db_manager = DatabaseManager()
     await db_manager.init_pool()
+    from services import llm_trace
+    llm_trace.set_default_db(db_manager)   # every LLM call in any module gets traced to llm_traces
     redis = Redis.from_url(Settings.REDIS_URL)
     player_service = PlayerService(db_manager, redis=redis)
     game_service = GameService(player_service)

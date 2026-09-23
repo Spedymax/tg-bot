@@ -6,6 +6,7 @@ import google.generativeai as genai
 
 from config.settings import Settings
 from services.circuit_breaker import ollama_breaker
+from services import llm_trace
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +210,7 @@ class CourtService:
             try:
                 prompt = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
                 import asyncio
-                response = await asyncio.to_thread(self._gemini.generate_content, prompt)
+                response = await llm_trace.call("court", "gemini", "gemini", lambda: asyncio.to_thread(self._gemini.generate_content, prompt))
                 result = response.text.strip()
                 if result:
                     return result

@@ -47,8 +47,8 @@ def test_duplicate_ids_rejected(tmp_path):
 def test_replay_prompt_matches_production_shape():
     messages = replay.build_messages(_scene(overlay="ТЫ ПУДЖИНИО"), identity="IDENTITY")
     assert messages[0]["role"] == "system" and messages[0]["content"].startswith("IDENTITY")
-    # frozen clock from the scene time, not "now"
-    assert "вторник, 22 сентября 2026, 21:40 по Киеву" in messages[0]["content"]
+    # frozen clock from the scene time, not "now"; next to the turn so the system prefix caches
+    assert "вторник, 22 сентября 2026, 21:40 по Киеву" in messages[-2]["content"]
     assert messages[-1] == {"role": "user", "content": "Юра: джарвис какое число"}
     assert messages[-2]["role"] == "system" and OVERLAY_HEADER in messages[-2]["content"]
     assert {"role": "assistant", "content": "здарова"} in messages

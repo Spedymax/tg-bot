@@ -540,10 +540,9 @@ class MoltbotHandlers:
             prompt = "Подробно опиши что изображено на картинке. Если есть текст — прочитай его дословно."
             if user_question:
                 prompt += f" Также ответь на вопрос: {user_question}"
-            response = self._gemini_model.generate_content([
-                {"mime_type": "image/jpeg", "data": image_bytes},
-                prompt,
-            ])
+            response = llm_trace.call_sync("media", "gemini", "gemini-3-flash-preview",
+                                           lambda: self._gemini_model.generate_content([
+                                               {"mime_type": "image/jpeg", "data": image_bytes}, prompt]))
             result = response.text
             logger.info(f"MoltBot: Gemini image analysis: {result}")
             return result
@@ -559,10 +558,9 @@ class MoltbotHandlers:
             prompt = "Это гифка (обычно мем или реакция, без звука). Опиши что на ней происходит."
             if user_question:
                 prompt += f" Также ответь на вопрос: {user_question}"
-            response = self._gemini_model.generate_content([
-                {"mime_type": "video/mp4", "data": animation_bytes},
-                prompt,
-            ])
+            response = llm_trace.call_sync("media", "gemini", "gemini-3-flash-preview",
+                                           lambda: self._gemini_model.generate_content([
+                                               {"mime_type": "video/mp4", "data": animation_bytes}, prompt]))
             result = response.text
             logger.info(f"MoltBot: Gemini animation analysis: {result}")
             return result
@@ -822,19 +820,39 @@ class MoltbotHandlers:
             raise
 
     async def _call_persona_simple(self, prompt: str, chat_id: int | None = None) -> str:
-        """Proactive/probabilistic messages: OpenRouter/Grok → direct Gemini → Together.ai."""
+        """Proactive/probabilistic messages: OpenRouter/Grok → direct Gemini → Together.ai (traced as `proactive`)."""
+        own = llm_trace.current() is None
+        token = None
+        trace = llm_trace.current()
+        if own:
+            trace, token = llm_trace.begin("proactive", chat_id)
+        reply = ""
         try:
-            return await self._call_openrouter_simple(prompt, chat_id)
+            try:
+                reply = await self._traced_attempt("openrouter", Settings.OPENROUTER_MODEL,
+                                                   lambda: self._call_openrouter_simple(prompt, chat_id))
+            except Exception as e:
+                logger.info(f"MoltBot: OpenRouter (simple) failed ({e}), falling back to Gemini")
+            if not reply:
+                try:
+                    reply = self._clean_persona_reply(await self._call_gemini_text(
+                        "Служебная задача", prompt, "проактивное участие в групповом чате", None, chat_id))
+                except Exception as e:
+                    logger.info(f"MoltBot: Gemini (simple) failed ({e}), trying Together.ai")
+            if not reply:
+                reply = await self._traced_attempt("together", Settings.TOGETHER_MODEL,
+                                                   lambda: self._call_together_simple(prompt, chat_id))
+            if own:
+                trace.finish("ok" if reply else "empty", reply)
+            return reply
         except Exception as e:
-            logger.info(f"MoltBot: OpenRouter (simple) failed ({e}), falling back to Gemini")
-        try:
-            reply = self._clean_persona_reply(await self._call_gemini_text(
-                "Служебная задача", prompt, "проактивное участие в групповом чате", None, chat_id))
-            if reply:
-                return reply
-        except Exception as e:
-            logger.info(f"MoltBot: Gemini (simple) failed ({e}), trying Together.ai")
-        return await self._call_together_simple(prompt, chat_id)
+            if own:
+                trace.finish(f"error:{type(e).__name__}")
+            raise
+        finally:
+            if own:
+                llm_trace.end(token)
+                llm_trace.persist_in_background(trace, getattr(self, "db", None))
 
     def _call_ollama_direct(self, content: str, bot=None, message=None) -> str:
         """Call Ollama directly. Routes through OllamaWakeManager for auto-wake.
@@ -1075,41 +1093,53 @@ class MoltbotHandlers:
             detail += f"; кандидатов в закреп: {len(proposed)}"
         return True, detail
 
+    async def _utility_llm(self, kind: str, prompt: str, *, system: str = "", max_tokens: int = 900,
+                           temperature: float = 0.4, chat_id: int | None = None) -> str:
+        """Non-persona helper tasks (summary, reminder parsing, danetka): OpenRouter Gemini Flash →
+        direct Gemini → Together. One trace per task, one attempt per provider. No Ollama: a failed
+        local call wakes the Windows PC for a background job."""
+        own = llm_trace.current() is None
+        token = None
+        trace = llm_trace.current()
+        if own:
+            trace, token = llm_trace.begin(kind, chat_id)
+        messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
+        text = ""
+        try:
+            if Settings.OPENROUTER_API_KEY:
+                try:
+                    data = await llm_trace.call(kind, "openrouter", MEMORY_EXTRACTOR_MODEL, lambda: self._openrouter_post(
+                        {"model": MEMORY_EXTRACTOR_MODEL, "max_tokens": max(max_tokens, 1500), "temperature": temperature,
+                         "reasoning": {"effort": "low"}, "messages": messages}, timeout=120))
+                    text = self._clean_persona_reply(data["choices"][0]["message"].get("content") or "")
+                except Exception as e:
+                    logger.warning(f"MoltBot: {kind} via OpenRouter failed: {e}")
+            if not text and getattr(self, "_gemini_model", None):
+                try:
+                    full = f"{system}\n\n{prompt}" if system else prompt
+                    response = await llm_trace.call(kind, "gemini", "gemini-3-flash-preview",
+                                                    lambda: asyncio.to_thread(self._gemini_model.generate_content, full))
+                    text = (response.text or "").strip()
+                except Exception as e:
+                    logger.warning(f"MoltBot: {kind} via Gemini failed: {e}")
+            if not text and Settings.TOGETHER_API_KEY:
+                try:
+                    data = await llm_trace.call(kind, "together", Settings.TOGETHER_MODEL, lambda: self._together_post(
+                        {"model": Settings.TOGETHER_MODEL, "max_tokens": max_tokens, "temperature": temperature,
+                         "messages": messages}, timeout=120))
+                    text = self._clean_persona_reply(data["choices"][0]["message"].get("content") or "")
+                except Exception as e:
+                    logger.warning(f"MoltBot: {kind} via Together failed: {e}")
+            if own:
+                trace.finish("ok" if text else "empty", text)
+            return text
+        finally:
+            if own:
+                llm_trace.end(token)
+                llm_trace.persist_in_background(trace, getattr(self, "db", None))
+
     async def _summarize_llm(self, system: str, prompt: str) -> str:
-        """Background summarisation: OpenRouter (Gemini Flash) → direct Gemini → Together.
-        No Ollama here: a failed local call wakes the Windows PC for a background job."""
-        if Settings.OPENROUTER_API_KEY:
-            try:
-                data = await self._openrouter_post(
-                    {"model": MEMORY_EXTRACTOR_MODEL, "max_tokens": 3000, "temperature": 0.4,
-                     "reasoning": {"effort": "low"},
-                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]},
-                    timeout=120,
-                )
-                text = self._clean_persona_reply(data["choices"][0]["message"].get("content") or "")
-                if text:
-                    return text
-            except Exception as e:
-                logger.warning(f"MoltBot: summary via OpenRouter failed: {e}")
-        if getattr(self, "_gemini_model", None):
-            try:
-                response = await asyncio.to_thread(self._gemini_model.generate_content, f"{system}\n\n{prompt}")
-                text = (response.text or "").strip()
-                if text:
-                    return text
-            except Exception as e:
-                logger.warning(f"MoltBot: summary via Gemini failed: {e}")
-        if Settings.TOGETHER_API_KEY:
-            try:
-                data = await self._together_post(
-                    {"model": Settings.TOGETHER_MODEL, "max_tokens": 900, "temperature": 0.4,
-                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]},
-                    timeout=180,
-                )
-                return self._clean_persona_reply(data["choices"][0]["message"].get("content") or "")
-            except Exception as e:
-                logger.warning(f"MoltBot: summary via Together failed: {e}")
-        return ""
+        return await self._utility_llm("summary", prompt, system=system, max_tokens=3000, temperature=0.4)
 
     _LORE_CAP = 20
     _MEMORY_CLEAR_SCOPES = {
@@ -1457,6 +1487,37 @@ class MoltbotHandlers:
         await self._store_feedback(message.chat.id, target, trace_id, message.from_user.id,
                                    "text", text, polarity)
 
+    _REPEAT_STOP = {"только", "чтобы", "когда", "потому", "сейчас", "просто", "вообще", "ладно", "очень",
+                    "тогда", "здесь", "всегда", "может", "будет", "которые", "который", "этого", "этому",
+                    "честно", "нормально", "короче", "значит", "давай", "джарвис", "братан", "просто"}
+
+    def _repetition_hint(self, history: list[str] | None, window: int = 3) -> str:
+        """If Jarvis' last replies keep reusing the same image («ботинки сними» ×3), say so.
+
+        The prompt already forbids looping on one image, but in a fast back-and-forth Grok
+        ignores it; an explicit, concrete reminder right before the turn works better."""
+        bot_replies = [m["content"] for m in self._get_context_builder().history_to_messages(history)
+                       if m["role"] == "assistant"][-window:]
+        if len(bot_replies) < 2:
+            return ""
+        first_form: dict[str, str] = {}
+        seen_in: dict[str, int] = {}
+        for reply in bot_replies:
+            stems = set()
+            for word in re.findall(r"[а-яёa-z]{5,}", reply.lower()):
+                if word in self._REPEAT_STOP or memory_v2._is_name(word):
+                    continue
+                stem = word[:5]
+                first_form.setdefault(stem, word)
+                stems.add(stem)
+            for stem in stems:
+                seen_in[stem] = seen_in.get(stem, 0) + 1
+        repeated = [first_form[s_] for s_, n in seen_in.items() if n >= 2]
+        if not repeated:
+            return ""
+        return ("(В последних репликах ты уже несколько раз использовал: " + ", ".join(repeated[:5])
+                + ". Не повторяй эти образы и слова — смени угол или ответь проще.)")
+
     def _get_context_builder(self) -> ContextBuilder:
         # Tests and a few maintenance scripts instantiate the handler via __new__.
         builder = getattr(self, '_context_builder', None)
@@ -1494,7 +1555,7 @@ class MoltbotHandlers:
             history=history,
             sender_name=sender_name,
             user_text=user_text,
-            post_prompt=self._POST_PROMPT_BASE,
+            post_prompt="\n".join(p_ for p_ in (self._POST_PROMPT_BASE, self._repetition_hint(history)) if p_),
             clock=self._clock_text(),
             overlay=self._persona_overlay(),
             retrieved_memory=memory_block if MEMORY_V2_MODE == "inject" else "",
@@ -2264,23 +2325,14 @@ class MoltbotHandlers:
             return []
 
     async def _danetka_llm(self, prompt: str) -> str:
-        """Ollama, а если винда спит — raw Together (без persona)."""
+        """Ollama, а если винда спит — служебная цепочка OpenRouter → Gemini → Together (без persona)."""
         try:
             raw = await asyncio.to_thread(self._call_ollama_direct, prompt)
             if raw.strip():
                 return raw
         except Exception as e:
             logger.warning(f"MoltBot: danetka ollama failed, falling back to Together: {e}")
-        data = await self._together_post(
-            {
-                "model": Settings.TOGETHER_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 600,
-                "temperature": 0.8,
-            },
-            timeout=120,
-        )
-        return data["choices"][0]["message"]["content"]
+        return await self._utility_llm("danetka", prompt, max_tokens=800, temperature=0.8)
 
     async def _generate_danetka(self) -> dict | None:
         used = await self._get_used_situations()
@@ -2404,16 +2456,8 @@ class MoltbotHandlers:
             '- Если дату определить невозможно, верни {"error": "причина"}'
         )
         try:
-            data = await self._together_post(
-                {
-                    "model": Settings.TOGETHER_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 200,
-                    "temperature": 0.1,
-                },
-                timeout=60,
-            )
-            raw = data["choices"][0]["message"]["content"]
+            # Was Together-only: broken since Qwen3.7-Max started requiring data sharing.
+            raw = await self._utility_llm("reminder", prompt, max_tokens=300, temperature=0.1)
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             return json.loads(match.group()) if match else None
         except Exception as e:
@@ -2899,7 +2943,9 @@ class MoltbotHandlers:
             data = data if isinstance(data, dict) else json.loads(data)
             route = " → ".join(
                 f"{a['provider']}:{a['model'].split('/')[-1]} {'✓' if a['ok'] else '✗ ' + (a.get('error') or '')[:60]} "
-                f"{a['latency_ms']}мс ${a['cost_usd']:.4f}" for a in data.get("attempts", []))
+                f"{a['latency_ms']}мс ${a['cost_usd']:.4f}"
+                + (f" кэш {a.get('cached_tokens', 0)}/{a['prompt_tokens']} ток." if a.get('prompt_tokens') else "")
+                for a in data.get("attempts", []))
             sections = ", ".join(f"{k} {v}" for k, v in (data.get("sections") or {}).items() if v)
             tools = "; ".join(f"{t['name']}({t['reason']})" for t in data.get("tools", [])) or "—"
             mem_ids = data.get("memory_ids") or []
@@ -2961,6 +3007,11 @@ class MoltbotHandlers:
                 "AND created_at > NOW() - %s * INTERVAL '1 day'), "
                 "(SELECT updated_at FROM memory_extract_state WHERE chat_id = %s)",
                 (chat_id, chat_id, days, chat_id)) or [(0, 0, None)]
+            cache = await self.db.execute_query(
+                "SELECT COALESCE(SUM((a->>'cached_tokens')::int), 0), COALESCE(SUM((a->>'prompt_tokens')::int), 0) "
+                "FROM llm_traces t, jsonb_array_elements(t.data->'attempts') a "
+                "WHERE t.chat_id = %s AND t.kind = 'persona' AND t.created_at > NOW() - %s * INTERVAL '1 day' "
+                "AND a ? 'cached_tokens'", (chat_id, days)) or [(0, 0)]
             n, fallback, searched, with_mem, avg_chars, with_fb = persona[0]
             lines = [f"📊 AI за {days} дн."]
             for kind, count, cost, p50, p90, errors in sorted(by_kind):
@@ -2970,6 +3021,9 @@ class MoltbotHandlers:
                 lines.append(f"Ответы Джарвиса: {n}; фоллбэк {fallback} ({fallback * 100 // n}%), поиск {searched}, "
                              f"с памятью v2 {with_mem}, средняя длина {int(avg_chars or 0)}, с реакцией людей {with_fb} "
                              f"({with_fb * 100 // n}%)")
+            cached, prompt_total = cache[0]
+            if prompt_total:
+                lines.append(f"Кэш промпта: {cached * 100 // prompt_total}% входных токенов ({cached}/{prompt_total})")
             r_yes, r_no = reactions[0]
             if r_yes or r_no:
                 lines.append(f"Реакции бота: поставил {r_yes}, промолчал {r_no}")

@@ -58,8 +58,9 @@ def test_builder_puts_clock_in_system_and_frames_overlay():
         post_prompt="POST", clock="вторник, 22 сентября 2026", overlay="ТЫ ПУДЖИНИО",
     )
     messages = snapshot.as_messages()
-    assert "вторник, 22 сентября 2026" in messages[0]["content"]
+    assert "вторник, 22 сентября 2026" not in messages[0]["content"]   # system prefix stays cacheable
     post = messages[-2]["content"]
+    assert "вторник, 22 сентября 2026" in post
     assert post.startswith("POST")
     assert OVERLAY_HEADER in post and "ТЫ ПУДЖИНИО" in post
     assert post.index("ТЫ ПУДЖИНИО") < post.index("не отрицай")
@@ -438,3 +439,52 @@ def test_admin_tools_in_private_chat_target_the_main_group():
     from types import SimpleNamespace as NS
     assert MoltbotHandlers._admin_chat(NS(chat=NS(type="private", id=741542965))) == CHAT
     assert MoltbotHandlers._admin_chat(NS(chat=NS(type="supergroup", id=-100777))) == -100777
+
+
+# ── group 1: repetition guard, full tracing, cache accounting ────────────────
+
+def test_repetition_hint_catches_looping_image():
+    h = _handler()
+    hist = ["[11:45] Jarvis: Ставлю чайник, только ботинки пусть снимет.",
+            "[11:45] Богдан.: он бьёт лоу кик",
+            "[11:45] Jarvis: Чайник не вскипел, а удар прилетел: ботинки сними, гость.",
+            "[11:46] Богдан.: ты уже умер"]
+    hint = h._repetition_hint(hist)
+    assert "чайник" in hint and "ботинки" in hint
+    assert h._repetition_hint(["[10:00] Jarvis: Привет, как дела?", "[10:01] Юра: норм",
+                               "[10:02] Jarvis: Отлично, рад слышать!"]) == ""
+
+
+@pytest.mark.asyncio
+async def test_utility_llm_falls_back_and_is_traced_as_one_task(monkeypatch):
+    from unittest.mock import MagicMock
+    monkeypatch.setattr(_mod.Settings, "OPENROUTER_API_KEY", "x", raising=False)
+    persisted = []
+    monkeypatch.setattr(llm_trace, "persist_in_background", lambda trace, db: persisted.append(trace))
+    h = _handler()
+    h._openrouter_post = AsyncMock(side_effect=RuntimeError("402"))
+    h._gemini_model = MagicMock()
+    h._gemini_model.generate_content = MagicMock(return_value=MagicMock(text='{"text": "врач", "remind_at": "2026-09-24 12:00"}',
+                                                                         usage_metadata=None))
+    raw = await h._utility_llm("reminder", "напомни завтра про врача", max_tokens=300)
+    assert "врач" in raw
+    (trace,) = persisted
+    assert trace.kind == "reminder" and trace.outcome == "ok"
+    assert [(a.provider, a.ok) for a in trace.attempts] == [("openrouter", False), ("gemini", True)]
+
+
+def test_call_sync_records_gemini_usage(monkeypatch):
+    from types import SimpleNamespace as NS
+    persisted = []
+    monkeypatch.setattr(llm_trace, "persist_in_background", lambda trace, db: persisted.append(trace))
+    resp = NS(text="ok", usage_metadata=NS(prompt_token_count=120, candidates_token_count=30))
+    assert llm_trace.call_sync("trivia", "gemini", "gemini", lambda: resp) is resp
+    (trace,) = persisted
+    assert trace.kind == "trivia" and trace.attempts[0].prompt_tokens == 120 and trace.attempts[0].ok
+
+
+def test_cached_tokens_are_counted():
+    attempt = llm_trace.Attempt(provider="openrouter", model="grok")
+    llm_trace.apply_response(attempt, {"usage": {"prompt_tokens": 5468, "completion_tokens": 40,
+                                                 "prompt_tokens_details": {"cached_tokens": 5376}}})
+    assert attempt.cached_tokens == 5376
