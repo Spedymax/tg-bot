@@ -599,6 +599,15 @@ class MoltbotHandlers:
         except Exception as e:
             logger.warning(f"MoltBot: failed to store bot reply: {e}")
 
+    async def _record_own_reaction(self, chat_id: int, emoji: str, target: str, text: str) -> None:
+        try:
+            await self.db.execute_query(
+                "INSERT INTO messages (chat_id, user_id, message_text, timestamp, name) "
+                "VALUES (%s, 0, %s, CURRENT_TIMESTAMP, %s)",
+                (chat_id, f"Джарвис поставил реакцию {emoji} на сообщение {target}: «{text[:80]}»", "Реакция Джарвиса"))
+        except Exception as e:
+            logger.warning(f"MoltBot: failed to record own reaction: {e}")
+
     async def _get_recent_group_messages(self, chat_id: int, limit: int = 50,
                                          exclude_message_id: int | None = None) -> list[str]:
         """Fetch last `limit` messages from the group chat history in DB."""
@@ -1676,6 +1685,10 @@ class MoltbotHandlers:
         """POST to OpenRouter (non-streaming) with retry on 5xx/429 and transient errors."""
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {"Authorization": f"Bearer {Settings.OPENROUTER_API_KEY}"}
+        if payload.get("session_id"):
+            # xAI keeps prompt cache per server; this header pins a conversation to one server.
+            # Probe 2026-09-25 (25 s between turns): with it 3/3 follow-up turns hit ~99% cache, without 2/3.
+            headers["x-grok-conv-id"] = str(payload["session_id"])
         delays = [0, 1.5, 3.0]
         last_exc: Exception | None = None
         async with httpx.AsyncClient() as client:
@@ -2321,6 +2334,9 @@ class MoltbotHandlers:
                 )
                 self._last_reaction_time[chat_id] = now
                 self._last_used_emoji[chat_id] = (recent + [emoji])[-self._REACTION_RECENT_EMOJI:]
+                # Reactions weren't in history, so Jarvis denied them («смайликов я не кидал», 24.09).
+                # Stored under its own author: visible in history, but not an assistant line he could imitate.
+                await self._record_own_reaction(chat_id, emoji, self._resolve_sender_name(message.from_user), text)
                 day = now.astimezone(ZoneInfo("Europe/Kyiv")).date()
                 prev_day, count = self._reaction_day_counts.get(chat_id, (day, 0))
                 self._reaction_day_counts[chat_id] = (day, (count if prev_day == day else 0) + 1)

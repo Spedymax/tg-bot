@@ -489,3 +489,35 @@ def test_cached_tokens_are_counted():
     llm_trace.apply_response(attempt, {"usage": {"prompt_tokens": 5468, "completion_tokens": 40,
                                                  "prompt_tokens_details": {"cached_tokens": 5376}}})
     assert attempt.cached_tokens == 5376
+
+
+@pytest.mark.asyncio
+async def test_own_reaction_is_recorded_under_its_own_author():
+    db = AsyncMock()
+    h = _handler(db)
+    await h._record_own_reaction(CHAT, "💯", "Юра", "я наконец апнул титана")
+    sql, params = db.execute_query.await_args.args
+    assert params[2] == "Реакция Джарвиса" and "💯" in params[1] and "Юра" in params[1]
+    # not an assistant line → Jarvis can't mimic the format, and feedback/memory ignore it
+    msgs = ContextBuilder(MoltbotHandlers._BOT_NAMES).history_to_messages([f"[13:10 24.09] Реакция Джарвиса: {params[1]}"])
+    assert msgs[0]["role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_openrouter_post_sends_grok_conversation_header(monkeypatch):
+    import httpx as _httpx
+    captured = {}
+
+    class FakeClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, headers=None, json=None, timeout=None):
+            captured.update(headers)
+            return _httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]},
+                                   request=_httpx.Request("POST", url))
+
+    monkeypatch.setattr(_mod.httpx, "AsyncClient", lambda *a, **k: FakeClient())
+    monkeypatch.setattr(_mod.Settings, "OPENROUTER_API_KEY", "x", raising=False)
+    h = _handler()
+    await h._openrouter_post({"model": "m", "messages": [], "session_id": "sess-1"}, 10)
+    assert captured["x-grok-conv-id"] == "sess-1"
