@@ -100,7 +100,9 @@ class OutgoingMessageLogger(BaseRequestMiddleware):
         return response
 
     def _record(self, method, response, author: str) -> None:
-        result = getattr(response, "result", None)
+        # aiogram's make_request returns the method result itself (a Message for send/edit),
+        # not a Response wrapper; keep .result as a fallback for other session implementations.
+        result = response if hasattr(response, "chat") else getattr(response, "result", None)
         chat = getattr(result, "chat", None)
         message_id = getattr(result, "message_id", None)
         if chat is None or message_id is None or chat.type not in ("group", "supergroup"):

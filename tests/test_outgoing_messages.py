@@ -26,7 +26,8 @@ def _module(name: str):
 
 
 def _resp(message_id=100, chat_type="supergroup"):
-    return NS(result=NS(chat=NS(id=-1001294162183, type=chat_type), message_id=message_id))
+    """What aiogram's make_request really returns: the Message itself (not a Response wrapper)."""
+    return NS(chat=NS(id=-1001294162183, type=chat_type), message_id=message_id)
 
 
 async def _drain():
@@ -72,3 +73,37 @@ async def test_private_chats_and_db_errors_never_break_sending():
                                             _resp(301, chat_type="private"))
     await _drain()
     db2.execute_query.assert_not_awaited()
+
+
+def test_real_aiogram_session_returns_message_not_response():
+    """Guard against the 2026-09-23 bug: the middleware expected Response.result and recorded nothing."""
+    import inspect
+    from aiogram.client.session.aiohttp import AiohttpSession
+    src = inspect.getsource(AiohttpSession.make_request)
+    assert "return cast(TelegramType, response.result)" in src
+
+
+@pytest.mark.asyncio
+async def test_through_real_aiogram_bot_and_session_chain(monkeypatch):
+    """End-to-end through aiogram: Bot.send_message → session middlewares → our logger."""
+    import datetime as dt
+    from aiogram import Bot
+    from aiogram.client.session.aiohttp import AiohttpSession
+    from aiogram.types import Chat, Message
+
+    async def fake_make_request(self, bot, method, timeout=None):
+        return Message(message_id=161027, date=dt.datetime.now(dt.timezone.utc),
+                       chat=Chat(id=-1001294162183, type="supergroup"), text=method.text)
+
+    monkeypatch.setattr(AiohttpSession, "make_request", fake_make_request)
+    db = AsyncMock()
+    bot = Bot(token="42:TEST")
+    bot.session.middleware(OutgoingMessageLogger(db))
+    mod = types.ModuleType("handlers.trivia_handlers")
+    exec("async def post(bot):\n    return await bot.send_message(-1001294162183, 'Какое растение…?')\n", mod.__dict__)
+    msg = await mod.post(bot)
+    await _drain()
+    assert msg.message_id == 161027
+    (args,) = [c.args for c in db.execute_query.await_args_list]
+    assert args[1][1] == "Какое растение…?" and args[1][2] == "Викторина" and args[1][3] == 161027
+    await bot.session.close()
