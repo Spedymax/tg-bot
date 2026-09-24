@@ -86,6 +86,9 @@ def test_real_aiogram_session_returns_message_not_response():
 @pytest.mark.asyncio
 async def test_through_real_aiogram_bot_and_session_chain(monkeypatch):
     """End-to-end through aiogram: Bot.send_message → session middlewares → our logger."""
+    import aiogram.types as _types
+    if "/mock/" in (getattr(_types, "__file__", "") or "/mock/"):
+        pytest.skip("aiogram replaced by the legacy *_fixed.py test stubs in this session")
     import datetime as dt
     from aiogram import Bot
     from aiogram.client.session.aiohttp import AiohttpSession
