@@ -124,7 +124,8 @@ def mentioned_user_ids(text: str) -> set[int]:
 
 
 _BRACKET_LINE = re.compile(r"^\s*\[.*\]\s*$", re.M)
-_ASK_WORDS = r"(?:про|о|об|у|насчёт|насчет|за|с)"
+# «с Юркой», «за Юру» are company/toasts, not questions; «что с Юрой» is covered by _RECALL_VERBS.
+_ASK_WORDS = r"(?:про|о|об|у|насчёт|насчет)"
 _RECALL_VERBS = re.compile(r"\b(помнишь|знаешь|расскажи|напомни|что (?:там )?(?:у|с|по|про))\b", re.I)
 
 
@@ -275,6 +276,24 @@ def decide(c: Candidate, batch: dict[int, dict], existing: dict[int, dict], now:
     if kind == "lore_candidate":
         d.reason = "lore candidate — never active until 3 mentions/2 people/2 days or manual pin"
     return d
+
+
+# Framing verbs of attributed claims («Макс говорит, что…») are not topics.
+_FRAMING_PREFIXES = ("говор", "утвер", "сказа", "счита")
+PREFIX_LEN = 5
+
+
+def fts_queries(text: str) -> tuple[str, str]:
+    """(russian exact-stem query, simple prefix query) for the topic words of `text`.
+    Exact stems catch «выбираю»~«выбирает»; a 5-letter simple prefix catches «работает»~«работу»
+    (stems работа/работ). A prefix run through the Russian stemmer is shortened further —
+    «максимум» became «макс:*» and «стал:*» matched «сталкивается» — so prefixes go through `simple`,
+    and words shorter than the prefix only match exactly."""
+    words = [re.sub(r"[^a-zа-яё0-9]", "", w) for w in topic_words(text)]
+    words = [w for w in words if w and not w.startswith(_FRAMING_PREFIXES)]
+    exact = " | ".join(words) or "zzzz"
+    prefix = " | ".join(f"{w[:PREFIX_LEN]}:*" for w in words if len(w) >= PREFIX_LEN) or "zzzz"
+    return exact, prefix
 
 
 def _similar(a: str, b: str) -> bool:
@@ -486,18 +505,16 @@ class MemoryStore:
     async def retrieve(self, chat_id: int, text: str, author_id: int | None, mentioned: set[int],
                        now: datetime) -> list[dict]:
         subjects = set(mentioned) | ({author_id} if author_id else set())
-        words = topic_words(text)
-        # Prefix match on word starts: the Russian stemmer maps "работе"→"работ" but "работает"→"работа",
-        # and "репетиторствует" shares no stem with "репетитором" — the first 6 letters do.
-        tsquery = " | ".join(f"{re.sub(r'[^a-zа-яё0-9]', '', w)[:6]}:*" for w in words) or "zzzz"
+        exact, prefix = fts_queries(text)
         cols = _ITEM_COLS + ", fts"
         rows = await self._q(
-            f"SELECT {_ITEM_COLS}, ts_rank(to_tsvector('russian', text), to_tsquery('russian', %s)) AS fts "
-            "FROM memory_items WHERE chat_id = %s AND status = 'active' "
-            "AND (expires_at IS NULL OR expires_at > NOW()) "
-            "AND (subject_user_id = ANY(%s) OR to_tsvector('russian', text) @@ to_tsquery('russian', %s)) "
+            f"SELECT {_ITEM_COLS}, GREATEST(ts_rank(v, to_tsquery('russian', %s)), "
+            "ts_rank(v, to_tsquery('simple', %s))) AS fts "
+            "FROM (SELECT *, to_tsvector('russian', text) AS v FROM memory_items "
+            "      WHERE chat_id = %s AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW())) m "
+            "WHERE subject_user_id = ANY(%s) OR v @@ to_tsquery('russian', %s) OR v @@ to_tsquery('simple', %s) "
             "LIMIT 60",
-            (tsquery, chat_id, list(subjects) or [0], tsquery))
+            (exact, prefix, chat_id, list(subjects) or [0], exact, prefix))
         return rank([_row(r, cols) for r in rows], author_id, mentioned, now)
 
     async def mark_used(self, ids: list[int]) -> None:

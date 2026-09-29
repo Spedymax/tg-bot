@@ -133,3 +133,16 @@ def test_asked_about_needs_a_question_about_the_person():
     assert mv.asked_about("джарвис расскажи про Богдана") == {BOGDAN}
     assert mv.asked_about("помнишь, что Макс говорил про отпуск?") == {MAX}
     assert mv.own_text(quoted) == "Не братан слишком медленно"
+    # company and toasts are not questions (prod 25.09/27.09 pulled every Yura/Bogdan memory)
+    assert mv.asked_about("Насыпало с Юркой🥹 Богдану сил, крепись") == set()
+    assert mv.asked_about("когда в гуманоидное тело и на октагон с Богданом?") == set()
+    assert mv.asked_about("что с Юрой вчера было?") == {YURA}
+
+
+def test_fts_queries_do_not_overmatch_short_stems():
+    exact, prefix = mv.fts_queries("1000 максимум, чё он активный такой стал, говори за себя")
+    assert "макс:*" not in prefix and "стал:*" not in prefix       # prefix is 5 letters, via `simple`
+    assert "говор" not in exact and "говор" not in prefix           # framing verb of attributed claims
+    exact, prefix = mv.fts_queries("как у Богдана с работой, репетиторствует ещё?")
+    assert "работ:*" in prefix and "репет:*" in prefix
+    assert mv.fts_queries("да") == ("zzzz", "zzzz")
