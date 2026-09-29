@@ -521,3 +521,11 @@ async def test_openrouter_post_sends_grok_conversation_header(monkeypatch):
     h = _handler()
     await h._openrouter_post({"model": "m", "messages": [], "session_id": "sess-1"}, 10)
     assert captured["x-grok-conv-id"] == "sess-1"
+
+
+def test_nightly_summary_runs_at_0430_kyiv():
+    utc = _mod.ZoneInfo("UTC")
+    # 29.09 is EEST (UTC+3): 04:30 Kyiv = 01:30 UTC
+    assert MoltbotHandlers._seconds_until_nightly_summary(datetime(2026, 9, 29, 1, 0, tzinfo=utc)) == 30 * 60
+    assert MoltbotHandlers._seconds_until_nightly_summary(datetime(2026, 9, 29, 1, 30, tzinfo=utc)) == 24 * 3600
+    assert MoltbotHandlers._seconds_until_nightly_summary(datetime(2026, 9, 29, 12, 0, tzinfo=utc)) == 13.5 * 3600

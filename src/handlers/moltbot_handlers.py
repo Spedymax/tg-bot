@@ -211,7 +211,10 @@ SPIKE_COOLDOWN_HOURS = 2
 SPIKE_DELAY_MIN, SPIKE_DELAY_MAX = 5 * 60, 20 * 60  # seconds
 
 # Smart summary config
-SUMMARY_UPDATE_HOURS = 24     # update chat-summary.md every N hours
+# chat-summary.md sits in the system prompt, so a daytime rebuild breaks the xAI prompt cache for the rest
+# of the day. It is rebuilt at night; the per-message timer is only a safety net for a missed nightly run.
+SUMMARY_NIGHTLY_AT = (4, 30)  # Europe/Kyiv
+SUMMARY_UPDATE_HOURS = 26     # safety net: rebuild on the next message if the summary is older than this
 SUMMARY_FETCH_HOURS = 48      # fetch messages from last N hours for summary
 SUMMARY_MAX_MESSAGES = 800    # newest human messages considered per rebuild
 SUMMARY_CHAR_BUDGET = 60_000  # keeps the summarizer input bounded in a busy chat
@@ -257,6 +260,7 @@ class MoltbotHandlers:
         if MEMORY_V2_MODE != "off":
             asyncio.ensure_future(self._memory_schema())
         asyncio.ensure_future(self._reminder_loop())
+        asyncio.ensure_future(self._summary_nightly_loop())
         self._register()
 
     # ── Persistence ──────────────────────────────────────────────────────────
@@ -1229,15 +1233,31 @@ class MoltbotHandlers:
             logger.error(f"MoltBot: lore proposal failed: {e}")
             return []
 
+    @staticmethod
+    def _seconds_until_nightly_summary(now: datetime) -> float:
+        kyiv = now.astimezone(ZoneInfo("Europe/Kyiv"))
+        target = kyiv.replace(hour=SUMMARY_NIGHTLY_AT[0], minute=SUMMARY_NIGHTLY_AT[1], second=0, microsecond=0)
+        if target <= kyiv:
+            target += timedelta(days=1)
+        return (target - kyiv).total_seconds()
+
+    async def _summary_nightly_loop(self):
+        while True:
+            await asyncio.sleep(self._seconds_until_nightly_summary(datetime.now(timezone.utc)))
+            for chat_id in CHAT_KEYS:
+                self._last_summary_update[chat_id] = datetime.now(timezone.utc)
+                ok, detail = await self._update_summary(chat_id)
+                logger.info(f"MoltBot: nightly summary for chat {chat_id}: {'ok' if ok else 'skipped'} ({detail})")
+
     def _maybe_update_summary(self, chat_id: int):
-        """Trigger summary update if enough time has passed (every SUMMARY_UPDATE_HOURS)."""
+        """Safety net: rebuild if the nightly run was missed (summary older than SUMMARY_UPDATE_HOURS)."""
         now = datetime.now(timezone.utc)
         last_update = self._last_summary_update.get(chat_id)
         if last_update and (now - last_update) < timedelta(hours=SUMMARY_UPDATE_HOURS):
             return
         self._last_summary_update[chat_id] = now
         asyncio.create_task(self._update_summary(chat_id))
-        logger.info(f"MoltBot: triggered background summary update for chat {chat_id} (24h timer)")
+        logger.info(f"MoltBot: triggered background summary update for chat {chat_id} (missed nightly run)")
 
     # ── Topic detection ───────────────────────────────────────────────────────
 
