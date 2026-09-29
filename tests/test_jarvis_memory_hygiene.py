@@ -529,3 +529,55 @@ def test_nightly_summary_runs_at_0430_kyiv():
     assert MoltbotHandlers._seconds_until_nightly_summary(datetime(2026, 9, 29, 1, 0, tzinfo=utc)) == 30 * 60
     assert MoltbotHandlers._seconds_until_nightly_summary(datetime(2026, 9, 29, 1, 30, tzinfo=utc)) == 24 * 3600
     assert MoltbotHandlers._seconds_until_nightly_summary(datetime(2026, 9, 29, 12, 0, tzinfo=utc)) == 13.5 * 3600
+
+
+# ── reaction instead of a text reply (reply-to-bot) ──────────────────────────
+
+def _text_msg(text, **media):
+    from unittest.mock import MagicMock
+    m = MagicMock()
+    m.text, m.caption = text, None
+    for attr in ("photo", "animation", "voice", "audio", "video_note", "sticker"):
+        setattr(m, attr, media.get(attr))
+    return m
+
+
+def test_react_option_only_for_short_plain_replies_without_question():
+    allowed = MoltbotHandlers._react_option_allowed
+    assert allowed(_text_msg("ПХАХХАХА"))
+    assert allowed(_text_msg("по факту кста"))
+    assert not allowed(_text_msg("а чем ему зоологи помогут?"))
+    assert not allowed(_text_msg("Братан, распиши подробно, почему ты считаешь, что Пудж нас переиграет"))
+    assert not allowed(_text_msg("глянь https://example.com"))
+    assert not allowed(_text_msg("", sticker=object()))
+    assert not allowed(_text_msg("ахах", voice=object()))
+
+
+def test_reaction_marker_parsing():
+    h = _react_handler()
+    assert h._reaction_from_reply("[реакция: 🤣]") == "🤣"
+    assert h._reaction_from_reply("  [Реакция:❤️] ") == "❤"
+    assert h._reaction_from_reply("[реакция: 🚀]") == "👍"                 # not a Telegram reaction
+    assert h._reaction_from_reply("Ну вот, разобрались. [реакция: 🤣]") is None
+    assert h._reaction_from_reply("Ну вот, разобрались.") is None
+    assert h._reaction_from_reply(None) is None
+
+
+@pytest.mark.asyncio
+async def test_reaction_reply_sets_reaction_and_records_it():
+    from unittest.mock import MagicMock
+    h = _react_handler()
+    h.bot = MagicMock()
+    h.bot.set_message_reaction = AsyncMock()
+    h._record_own_reaction = AsyncMock()
+    h._resolve_sender_name = lambda user: "Макс"
+    message = _text_msg("ПХАХХАХА")
+    message.chat.id, message.message_id = CHAT, 77
+    assert await h._send_reaction_reply(message, "🤣")
+    assert h.bot.set_message_reaction.await_args.kwargs["reaction"][0].emoji == "🤣"
+    h._record_own_reaction.assert_awaited_once_with(CHAT, "🤣", "Макс", "ПХАХХАХА")
+
+    h.bot.set_message_reaction = AsyncMock(side_effect=RuntimeError("REACTION_INVALID"))
+    h._record_own_reaction.reset_mock()
+    assert not await h._send_reaction_reply(message, "🤣")
+    h._record_own_reaction.assert_not_awaited()

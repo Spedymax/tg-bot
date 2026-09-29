@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import html
 import json
 import logging
@@ -221,6 +222,20 @@ SUMMARY_CHAR_BUDGET = 60_000  # keeps the summarizer input bounded in a busy cha
 HISTORY_MESSAGE_LIMIT = 100
 # Cheap classifier for "react with an emoji or stay silent" on ambient messages.
 REACTION_MODEL = os.getenv("JARVIS_REACTION_MODEL", "z-ai/glm-5.3-flash")
+LINK_SUMMARY_MODEL = os.getenv("JARVIS_LINK_SUMMARY_MODEL", "gemini-2.5-flash-lite")
+LINK_SUMMARY_TIMEOUT = 8   # s; on timeout the persona gets the truncated raw page instead
+
+# Short reply to Jarvis without a question: the persona may answer with a reaction instead of text.
+# Decided by the persona itself (no extra classifier call → no added latency); gate is deterministic.
+REACT_REPLY_MAX_CHARS = 40
+REACT_REPLY_HINT = (
+    "(Это короткая реплика на твоё сообщение. Если текстом тут реально нечего добавить — смех, «ок», согласие, "
+    "эмоция — ответь ровно «[реакция: 🤣]» (любая стандартная реакция Telegram: 👍 🔥 🤣 😁 🤡 🗿 🫡 💯 😎 🤝 😭 👀 🤷) "
+    "и больше ничего. Просьба, вопрос, наезд, повод для шутки — отвечай текстом как обычно.)"
+)
+_REACT_OPTION: contextvars.ContextVar[bool] = contextvars.ContextVar("jarvis_react_option", default=False)
+_REACT_MARKER = re.compile(r"^\s*\[\s*реакция\s*:\s*([^\]\s]+)\s*\]\s*$", re.I)
+
 # Memory v2: off | shadow (extract + retrieve + log, prompt untouched) | inject
 MEMORY_V2_MODE = os.getenv("JARVIS_MEMORY_V2", "shadow").strip().lower()
 MEMORY_EXTRACTOR_MODEL = os.getenv("JARVIS_MEMORY_MODEL", "google/gemini-3.5-flash")
@@ -528,12 +543,22 @@ class MoltbotHandlers:
         if not urls:
             return user_text
         try:
-            block = await links_block("\n".join(urls))
+            block = await links_block("\n".join(urls), summarizer=self._summarize_page)
         except Exception as e:
             logger.warning(f"MoltBot: link reading failed: {e}")
             return user_text
         logger.info(f"MoltBot: read {len(urls)} link(s) for msg {message.message_id}")
         return f"{user_text}\n\n{block}" if user_text else block
+
+    async def _summarize_page(self, prompt: str) -> str:
+        """Compress a long shared page (free Gemini key; link_reader falls back to raw text on error)."""
+        if not getattr(self, "_gemini_model", None):
+            raise RuntimeError("Gemini не настроен")
+        model = genai.GenerativeModel(LINK_SUMMARY_MODEL)   # lite: ~2.5 s on a 20K-char page vs ~10 s
+        response = await llm_trace.call("link_summary", "gemini", LINK_SUMMARY_MODEL,
+                                        lambda: asyncio.wait_for(asyncio.to_thread(model.generate_content, prompt),
+                                                                 LINK_SUMMARY_TIMEOUT))
+        return response.text or ""
 
     def _analyze_image_with_gemini(self, image_bytes: bytes, user_question: str) -> str:
         """Send image to Gemini and get a description / answer to the question."""
@@ -1618,7 +1643,8 @@ class MoltbotHandlers:
             history=history,
             sender_name=sender_name,
             user_text=user_text,
-            post_prompt="\n".join(p_ for p_ in (self._POST_PROMPT_BASE, self._repetition_hint(history)) if p_),
+            post_prompt="\n".join(p_ for p_ in (self._POST_PROMPT_BASE, self._repetition_hint(history),
+                                                 REACT_REPLY_HINT if _REACT_OPTION.get() else "") if p_),
             clock=self._clock_text(),
             overlay=self._persona_overlay(),
             retrieved_memory=memory_block if MEMORY_V2_MODE == "inject" else "",
@@ -2088,7 +2114,8 @@ class MoltbotHandlers:
             reply = await self._ask_moltbot_routed_untraced(
                 sender_name, user_text, chat_context, history, chat_id
             )
-            trace.finish("ok" if reply and reply.strip() else "empty", reply)
+            emoji = self._reaction_from_reply(reply)
+            trace.finish(f"react:{emoji}" if emoji else "ok" if reply and reply.strip() else "empty", reply)
             await self._mark_memory_used(trace, reply)
             return reply
         except _AIRefusalError:
@@ -2278,6 +2305,36 @@ class MoltbotHandlers:
         "Не бери эти (недавно ставил): {recent}\n"
         'Верни ТОЛЬКО JSON: {{"action": "ignore" | "react", "emoji": "…", "why": "3-6 слов"}}'
     )
+
+    @staticmethod
+    def _react_option_allowed(message) -> bool:
+        """A short plain-text reply to Jarvis with no question and no media."""
+        text = (message.text or "").strip()
+        if not text or message.caption or message.photo or message.animation or message.voice \
+                or message.audio or message.video_note or message.sticker:
+            return False
+        return len(text) <= REACT_REPLY_MAX_CHARS and "?" not in text and "http" not in text
+
+    def _reaction_from_reply(self, reply: str | None) -> str | None:
+        """`[реакция: 🤣]` → 🤣 (unknown emoji → 👍); anything else → None (a normal text reply)."""
+        match = _REACT_MARKER.match(reply or "")
+        if not match:
+            return None
+        emoji = match.group(1).replace("\ufe0f", "")
+        return emoji if emoji in self._REACTION_EMOJIS else "👍"
+
+    async def _send_reaction_reply(self, message, emoji: str) -> bool:
+        try:
+            await self.bot.set_message_reaction(
+                chat_id=message.chat.id, message_id=message.message_id,
+                reaction=[ReactionTypeEmoji(emoji=emoji)])
+        except Exception as e:
+            logger.warning(f"MoltBot: reaction reply failed ({emoji}): {e}")
+            return False
+        logger.info(f"MoltBot: reply-to-bot answered with a reaction {emoji}")
+        await self._record_own_reaction(message.chat.id, emoji, self._resolve_sender_name(message.from_user),
+                                        message.text or "")
+        return True
 
     def _reaction_gate(self, chat_id: int, text: str, now: datetime) -> str | None:
         """Cheap checks before any model call. Returns the reason to skip, or None."""
@@ -2712,7 +2769,10 @@ class MoltbotHandlers:
                     reply = await self._ask_moltbot_routed(
                         sender_name, user_text, chat_context, history, message.chat.id
                     )
-                if reply and reply.strip():
+                emoji = self._reaction_from_reply(reply)  # never leak the marker as text
+                if emoji:
+                    await self._send_reaction_reply(message, emoji)
+                elif reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
                     await llm_trace.link_reply(self.db, llm_trace.last_finished(), getattr(sent, "message_id", None))
                     await self._store_bot_reply(
@@ -3309,12 +3369,16 @@ class MoltbotHandlers:
                     message.message_id,
                 )
 
+            react_token = _REACT_OPTION.set(self._react_option_allowed(message))
             try:
                 async with ChatActionSender.typing(bot=self.bot, chat_id=message.chat.id):
                     reply = await self._ask_moltbot_routed(
                         sender_name, user_text, chat_context, history, message.chat.id
                     )
-                if reply and reply.strip():
+                emoji = self._reaction_from_reply(reply)
+                if emoji:
+                    await self._send_reaction_reply(message, emoji)
+                elif reply and reply.strip():
                     sent = await self._send_long_reply(message, reply)
                     await llm_trace.link_reply(self.db, llm_trace.last_finished(), getattr(sent, "message_id", None))
                     await self._store_bot_reply(
@@ -3327,6 +3391,8 @@ class MoltbotHandlers:
             except Exception as e:
                 logger.error(f"MoltBot API error (reply): {e}")
                 await message.reply("Не могу связаться с AI. Попробуй позже.")
+            finally:
+                _REACT_OPTION.reset(react_token)
 
         @router.message(StateFilter(None), F.func(lambda m: (
             m.chat.type in ('group', 'supergroup')

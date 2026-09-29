@@ -145,3 +145,34 @@ async def test_photo_description_is_cached_per_file():
     media.bot.get_file.assert_awaited_with("big")          # largest size is analysed
     await media.fragment(msg)
     assert model.generate_content.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_long_page_is_summarized_short_page_is_not(monkeypatch):
+    lr._cache.clear()
+    long_page = lr.LinkContent(url="https://ex.com/a", ok=True, title="Статья", text="слово " * 2000)
+    short_page = lr.LinkContent(url="https://ex.com/b", ok=True, title="Заметка", text="коротко")
+    pages = {"https://ex.com/a": long_page, "https://ex.com/b": short_page}
+
+    async def fake_get(client, url):
+        return url, "text/html", "<html></html>"
+    monkeypatch.setattr(lr, "_get", fake_get)
+    monkeypatch.setattr(lr, "parse_html", lambda url, html: pages[url])
+    summarizer = AsyncMock(return_value="- главное: слово повторяется")
+
+    block = await lr.links_block("https://ex.com/a https://ex.com/b", summarizer=summarizer)
+
+    summarizer.assert_awaited_once()                                  # only the long page
+    assert "недоверенные данные" in summarizer.await_args.args[0]
+    assert "Кратко (сжато из 12000 символов страницы): - главное" in block
+    assert "слово слово" not in block                                 # raw text is not sent alongside
+    assert "Текст: коротко" in block
+    await lr.read_url("https://ex.com/a", summarizer=summarizer)      # cached page keeps its summary
+    summarizer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_summary_falls_back_to_truncated_text():
+    page = lr.LinkContent(url="https://ex.com/c", ok=True, text="x" * 9000)
+    await lr._summarize(page, AsyncMock(side_effect=RuntimeError("quota")))
+    assert page.summary == "" and f"Текст: {'x' * lr.TEXT_LIMIT}\n" in page.for_prompt()
