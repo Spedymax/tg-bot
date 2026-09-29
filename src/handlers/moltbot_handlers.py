@@ -1471,7 +1471,7 @@ class MoltbotHandlers:
     async def _extract_memory(self, chat_id: int) -> dict:
         store = self._get_memory_store()
         now = datetime.now(timezone.utc)
-        stats = {"messages": 0, "insert": 0, "confirm": 0, "supersede": 0, "reject": 0}
+        stats = {"messages": 0, "insert": 0, "confirm": 0, "supersede": 0, "reject": 0, "close": 0}
         trace, token = llm_trace.begin("memory_extract", chat_id)
         try:
             rows = await store.pending_batch(chat_id, now)
@@ -1494,7 +1494,8 @@ class MoltbotHandlers:
             llm_trace.apply_response(trace.attempts[-1] if trace.attempts else None, data)
             raw = data["choices"][0]["message"].get("content") or ""
             match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
-            candidates = memory_v2.parse_candidates(json.loads(match.group(0)) if match else {})
+            parsed = json.loads(match.group(0)) if match else {}
+            candidates = memory_v2.parse_candidates(parsed)
             batch = {r[0]: {"user_id": r[4], "name": KNOWN_MEMBERS.get(r[4], r[1]), "is_bot": r[4] == 0}
                      for r in rows}
             created_by = f"{memory_v2.EXTRACTOR_VERSION}/{memory_v2.POLICY_VERSION}/{MEMORY_EXTRACTOR_MODEL}"
@@ -1502,6 +1503,9 @@ class MoltbotHandlers:
                 decision = memory_v2.decide(cand, batch, existing, now)
                 await store.apply(chat_id, decision, created_by)
                 stats[decision.action] += 1
+            for item_id in memory_v2.parse_closes(parsed, existing):
+                if await store.close(chat_id, item_id, [r[0] for r in rows]):
+                    stats["close"] += 1
             await store.advance_cursor(chat_id, rows[-1][0])
             trace.finish("ok", json.dumps(stats))
             logger.info(f"MoltBot: memory v2 extraction for chat {chat_id}: {stats}")

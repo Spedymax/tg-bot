@@ -146,3 +146,47 @@ def test_fts_queries_do_not_overmatch_short_stems():
     exact, prefix = mv.fts_queries("как у Богдана с работой, репетиторствует ещё?")
     assert "работ:*" in prefix and "репет:*" in prefix
     assert mv.fts_queries("да") == ("zzzz", "zzzz")
+
+
+# ── open loops ───────────────────────────────────────────────────────────────
+
+def _loop(i, subject=None, age_days=2, used_hours=None, authors=()):
+    return {"id": i, "kind": "open_loop", "text": f"петля {i}", "subject_user_id": subject, "confidence": 0.7,
+            "source_author_ids": list(authors), "first_seen_at": NOW - timedelta(days=age_days),
+            "last_seen_at": NOW - timedelta(days=age_days),
+            "last_used_at": NOW - timedelta(hours=used_hours) if used_hours is not None else None}
+
+
+def test_parse_closes_only_touches_active_open_loops():
+    existing = {7: {"kind": "open_loop"}, 8: {"kind": "profile_fact"}}
+    assert mv.parse_closes({"closes": [7, "8", "x", 99, 7]}, existing) == [7]
+    assert mv.parse_closes({"memories": []}, existing) == []
+    assert mv.parse_closes([], existing) == []
+
+
+def test_hanging_loop_is_rare_and_about_people_in_the_scene():
+    offered = {}
+    assert mv.hanging_loop([_loop(1, subject=YURA)], MAX, set(), NOW, offered) is None     # not Max's loop
+    assert mv.hanging_loop([_loop(1, subject=YURA, authors=[MAX])], MAX, set(), NOW, offered)["id"] == 1
+    assert mv.hanging_loop([_loop(1, subject=YURA)], MAX, {YURA}, NOW, offered)["id"] == 1  # asked about Yura
+    assert mv.hanging_loop([_loop(2)], BOGDAN, set(), NOW, offered)["nudge"]                 # group plan
+    assert mv.hanging_loop([_loop(3, age_days=0.2)], MAX, set(), NOW, offered) is None       # being made now
+    assert mv.hanging_loop([_loop(4, used_hours=20)], MAX, set(), NOW, offered) is None      # Jarvis just used it
+    offered[5] = NOW - timedelta(hours=3)
+    assert mv.hanging_loop([_loop(5)], MAX, set(), NOW, offered) is None                     # offered recently
+    newer = {**_loop(6), "last_seen_at": NOW - timedelta(hours=30)}
+    assert mv.hanging_loop([_loop(5, age_days=5), newer], MAX, set(), NOW, {})["id"] == 6
+
+
+def test_nudged_loop_is_framed_as_optional():
+    block = mv.format_block([{**_loop(1), "nudge": True}])
+    assert "(незакрытое" in block and "не обязательно" in block
+    assert "не обязательно" not in mv.format_block([_loop(1)])
+
+
+def test_extractor_prompt_asks_for_loops_and_closes():
+    prompt = mv.EXTRACT_PROMPT.format(existing=mv.format_existing({7: {"kind": "open_loop", "subject_name": None,
+                                                                       "text": "в субботу играют в доту"}}),
+                                      messages="[1] Юра: сыграли, я опять слил")
+    assert "7: [open_loop] — — в субботу играют в доту" in prompt
+    assert '"closes": []' in prompt and "open_loop — то, у чего должен быть итог" in prompt
