@@ -16,9 +16,12 @@ def _no_real_llm_keys(monkeypatch):
     A test that needs a key sets a fake one explicitly (monkeypatch.setattr(..., "x"))."""
     import os
     import sys
-    src = os.path.join(os.path.dirname(__file__), "..", "src")
-    if src not in sys.path:
-        sys.path.insert(0, src)
+    src = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "src"))
+    # src/ must win over the repo root: pytest puts the root first (tests/ is a package), and the root's
+    # legacy config.py (scripts/songs.py) would shadow the src/config package for every later test.
+    sys.path[:] = [src] + [p for p in sys.path if os.path.normpath(p or ".") != src]
+    if not hasattr(sys.modules.get("config"), "__path__"):
+        sys.modules.pop("config", None)
     try:
         from config.settings import Settings
     except Exception:

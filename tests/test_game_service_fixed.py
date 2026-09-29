@@ -54,11 +54,19 @@ mock_modules = {
     'google.generativeai': create_mock_module('google.generativeai'),
 }
 
-for name, module in mock_modules.items():
-    sys.modules[name] = module
+_restore_modules = None
 
-# Mock dotenv.load_dotenv
-sys.modules['dotenv'].load_dotenv = Mock()
+
+def setUpModule():
+    """Stubs only while this module's tests run (see tests/_legacy_stubs.py)."""
+    global _restore_modules
+    from tests._legacy_stubs import install
+    _restore_modules = install(mock_modules)
+    sys.modules['dotenv'].load_dotenv = Mock()
+
+
+def tearDownModule():
+    _restore_modules()
 
 
 class TestGameServiceFixed(unittest.TestCase):

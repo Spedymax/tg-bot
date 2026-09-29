@@ -99,16 +99,22 @@ mock_modules = {
     'aiogram.types': create_mock_module('aiogram.types'),
 }
 
-for name, module in mock_modules.items():
-    sys.modules[name] = module
+_restore_modules = None
 
-# Mock dotenv.load_dotenv
-sys.modules['dotenv'].load_dotenv = Mock()
 
-# Mock pytz.timezone to return a mock timezone object
-mock_tz = MagicMock()
-sys.modules['pytz'].timezone = Mock(return_value=mock_tz)
-sys.modules['pytz'].UTC = MagicMock()
+def setUpModule():
+    """Stubs only while this module's tests run (see tests/_legacy_stubs.py)."""
+    global _restore_modules
+    from tests._legacy_stubs import install
+    _restore_modules = install(mock_modules)
+    sys.modules['dotenv'].load_dotenv = Mock()
+    mock_tz = MagicMock()
+    sys.modules['pytz'].timezone = Mock(return_value=mock_tz)
+    sys.modules['pytz'].UTC = MagicMock()
+
+
+def tearDownModule():
+    _restore_modules()
 
 
 class TestQuizSchedulerFixed(unittest.TestCase):
