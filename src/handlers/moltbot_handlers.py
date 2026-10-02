@@ -1383,6 +1383,14 @@ class MoltbotHandlers:
         except Exception:
             return ""
 
+    @staticmethod
+    def _vow_overlay(chat_id: int | None) -> str:
+        """An active vow (e.g. emoji-only week) — the persona writes in it natively; the outgoing
+        enforcer (middleware/vow_enforcer.py) catches whatever slips through."""
+        from services.vow_service import get_vow_service
+        vows = get_vow_service()
+        return vows.persona_overlay(chat_id) if vows else ""
+
     @property
     def _POST_PROMPT(self) -> str:
         """Post-prompt as the model sees it, overlay framing aside (kept for scripts)."""
@@ -1650,7 +1658,7 @@ class MoltbotHandlers:
             post_prompt="\n".join(p_ for p_ in (self._POST_PROMPT_BASE, self._repetition_hint(history),
                                                  REACT_REPLY_HINT if _REACT_OPTION.get() else "") if p_),
             clock=self._clock_text(),
-            overlay=self._persona_overlay(),
+            overlay="\n\n".join(p_ for p_ in (self._persona_overlay(), self._vow_overlay(chat_id)) if p_),
             retrieved_memory=memory_block if MEMORY_V2_MODE == "inject" else "",
         )
         trace = llm_trace.current()
@@ -2905,6 +2913,41 @@ class MoltbotHandlers:
                 "⚙️ Краткосрочный контекст этого чата сброшен: сообщения до этого момента "
                 "я больше не вижу. Долгая память и закреп не тронуты — это /memory_clear."
             )
+
+        @router.message(Command(commands=['vow_emoji', 'vow_off', 'vow']))
+        async def handle_vow(message: Message):
+            """/vow_emoji [days=7] [note] — everything the bot writes in the group becomes emoji; /vow_off; /vow."""
+            if message.from_user.id not in Settings.ADMIN_IDS:
+                await message.reply("У вас нет доступа.")
+                return
+            from services.vow_service import EMOJI_ONLY, get_vow_service
+            vows = get_vow_service()
+            if vows is None:
+                await message.reply("Сервис обетов не запущен.")
+                return
+            chat_id = self._admin_chat(message)
+            command, _, args = (message.text or "").partition(" ")
+            command = command.split("@")[0].lstrip("/")
+            if command == "vow_emoji":
+                parts = args.split(maxsplit=1)
+                days = float(parts[0]) if parts and re.fullmatch(r"\d+(\.\d+)?", parts[0]) else 7.0
+                note = (parts[1] if len(parts) > 1 else "") if parts and re.fullmatch(r"\d+(\.\d+)?", parts[0]) \
+                    else args.strip()
+                ends = datetime.now(timezone.utc) + timedelta(days=days)
+                await vows.start(chat_id, EMOJI_ONLY, note or "все сообщения бота — только эмодзи", ends,
+                                 message.from_user.id)
+            elif command == "vow_off":
+                await vows.cancel(chat_id)
+            vow = vows.active(chat_id)
+            if vow:
+                until = vow["ends_at"].astimezone(ZoneInfo("Europe/Kyiv")).strftime("%d.%m %H:%M")
+                status = f"обет {vow['kind']} до {until} (Киев): {vow['note']}"
+            else:
+                status = "обетов нет"
+            if message.chat.type == "private":
+                await message.reply(status)
+            else:  # in the group the reply itself goes through the vow
+                await message.reply(f"📜 {status}")
 
         @router.message(Command(commands=['reasoning', 'ризонинг', 'думай']))
         async def handle_reasoning(message: Message):

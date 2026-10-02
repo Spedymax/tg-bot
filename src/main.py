@@ -80,6 +80,13 @@ async def _main():
     )
     # Every message the bot sends/edits lands in `messages` with its real author
     # (quiz, Wordle, boss…), so Jarvis sees game posts in history and reply chains.
+    # Vows (e.g. the emoji-only week) are enforced on the way out; registered first = outermost,
+    # so the logger below records what the chat actually saw.
+    from middleware.vow_enforcer import VowEnforcer
+    from services.vow_service import get_vow_service
+    vows = get_vow_service(db_manager, lambda: getattr(moltbot_h, "_gemini_model", None))
+    bot.session.middleware(VowEnforcer(vows))
+    asyncio.create_task(vows.run_refresh_loop())
     from middleware.outgoing_messages import OutgoingMessageLogger
     bot.session.middleware(OutgoingMessageLogger(db_manager))
     storage = RedisStorage(redis=redis)
@@ -201,6 +208,7 @@ async def _main():
         BotCommand(command="event_del",       description="Удалить ивент по номеру"),
         BotCommand(command="context_reset",   description="Сбросить краткосрочный контекст чата"),
         BotCommand(command="reasoning",       description="Глубина раздумий: minimal/low/medium/high (сброс на minimal через 3ч тишины)"),
+        BotCommand(command="vow",             description="Обет бота: /vow_emoji [дни] [текст] — всё в чат только эмодзи, /vow_off"),
         BotCommand(command="memory",          description="Показать память чата (адм)"),
         BotCommand(command="memory_refresh",  description="Пересобрать память чата (адм)"),
         BotCommand(command="memory_clear",    description="Стереть память: rolling | lore | all (адм)"),
