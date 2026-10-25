@@ -12,7 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from config.settings import Settings
-from services.circuit_breaker import ollama_breaker
+from services.circuit_breaker import ollama_breaker, openrouter_breaker
 from handlers.moltbot_handlers import CHAT_LORE_PATH
 from services import llm_trace
 
@@ -326,7 +326,7 @@ class DailyProphecyHandlers:
     # ── LLM ─────────────────────────────────────────────────────────────────
 
     async def _call_llm(self, system_prompt: str | None, user_prompt: str) -> str:
-        """Gemini first, Ollama fallback — same shape as CourtService._call_llm."""
+        """Gemini first, then OpenRouter, Ollama last (it lives on a desktop PC that is often off)."""
         import asyncio
         if self._gemini:
             try:
@@ -336,15 +336,31 @@ class DailyProphecyHandlers:
                 if result:
                     return result
             except Exception as e:
-                logger.warning(f"DailyProphecy: Gemini error, falling back to Ollama: {e}")
+                # finish_reason 8 = PROHIBITED_CONTENT: a hard block that safety_settings can't lift
+                logger.warning(f"DailyProphecy: Gemini error, falling back to OpenRouter: {e}")
 
-        if not ollama_breaker.allow_request():
-            logger.warning("DailyProphecy: Ollama circuit open, skipping LLM call")
-            return ""
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
+
+        if Settings.OPENROUTER_API_KEY and openrouter_breaker.allow_request():
+            try:
+                data = await llm_trace.call(
+                    "prophecy", "openrouter", Settings.OPENROUTER_MODEL,
+                    lambda: self._openrouter_post(messages),
+                )
+                openrouter_breaker.record_success()
+                result = (data["choices"][0]["message"].get("content") or "").strip()
+                if result:
+                    return result
+            except Exception as e:
+                openrouter_breaker.record_failure()
+                logger.warning(f"DailyProphecy: OpenRouter error, falling back to Ollama: {e}")
+
+        if not ollama_breaker.allow_request():
+            logger.warning("DailyProphecy: Ollama circuit open, skipping LLM call")
+            return ""
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.post(
@@ -360,6 +376,19 @@ class DailyProphecyHandlers:
             ollama_breaker.record_failure()
             logger.error(f"DailyProphecy: Ollama error: {e}")
             return ""
+
+    @staticmethod
+    async def _openrouter_post(messages: list[dict]) -> dict:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {Settings.OPENROUTER_API_KEY}"},
+                json={"model": Settings.OPENROUTER_MODEL, "messages": messages,
+                      "max_tokens": 1500, "temperature": 0.9},
+                timeout=120,
+            )
+        r.raise_for_status()
+        return r.json()
 
     @staticmethod
     def _match_name_prefix(clean_line: str, name: str) -> str | None:
