@@ -648,7 +648,7 @@ class MoltbotHandlers:
                     FROM messages
                     WHERE chat_id = %s
                       AND timestamp >= %s
-                      AND (%s IS NULL OR message_id IS DISTINCT FROM %s)
+                      AND (%s::bigint IS NULL OR message_id IS DISTINCT FROM %s)
                     ORDER BY timestamp DESC
                     LIMIT %s
                 """
@@ -660,7 +660,7 @@ class MoltbotHandlers:
                     SELECT name, message_text, timestamp
                     FROM messages
                     WHERE chat_id = %s
-                      AND (%s IS NULL OR message_id IS DISTINCT FROM %s)
+                      AND (%s::bigint IS NULL OR message_id IS DISTINCT FROM %s)
                     ORDER BY timestamp DESC
                     LIMIT %s
                 """
